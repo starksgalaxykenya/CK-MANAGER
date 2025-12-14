@@ -129,9 +129,10 @@ function handleDocumentGenerator() {
             <button onclick="renderInvoiceForm()" class="bg-primary-blue hover:bg-blue-900 text-white p-3 rounded-lg transition duration-150">Invoice/Proforma</button>
             <button onclick="renderReceiptForm()" class="bg-secondary-red hover:bg-red-700 text-white p-3 rounded-lg transition duration-150">Payment Receipt</button>
             <button onclick="renderAgreementForm()" class="bg-gray-700 hover:bg-gray-900 text-white p-3 rounded-lg transition duration-150">Car Sales Agreement</button>
+            <button onclick="renderBankManagement()" class="bg-green-600 hover:bg-green-700 text-white p-3 rounded-lg transition duration-150">BANKS</button>
         </div>
         <div id="document-form-area">
-            <p class="text-gray-600">Select a document type to begin.</p>
+            <p class="text-gray-600">Select a document type or manage bank accounts.</p>
         </div>
     `;
 }
@@ -406,6 +407,134 @@ function generateReceiptPDF(data) {
     doc.text(`Ksh ${data.totalPaid.toFixed(2)}`, 190, y, null, null, "right");
     
     doc.save(`Receipt_${data.customerName.replace(/ /g, '_')}_${data.id.substring(0, 5)}.pdf`);
+}
+
+// =================================================================
+//                 7. BANK MANAGEMENT MODULE (NEW)
+// =================================================================
+
+/**
+ * Renders the interface for adding and managing bank accounts.
+ */
+function renderBankManagement() {
+    const formArea = document.getElementById('document-form-area');
+    formArea.innerHTML = `
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div class="md:col-span-1 p-6 border border-green-300 rounded-xl bg-green-50 shadow-md">
+                <h3 class="text-xl font-semibold mb-4 text-green-700">Add New Bank Account</h3>
+                <form id="add-bank-form" onsubmit="event.preventDefault(); addBankDetails()">
+                    <input type="text" id="bankName" required placeholder="Bank Name (e.g., KCB Bank)" class="mt-2 block w-full p-2 border rounded-md">
+                    <input type="text" id="accountName" required placeholder="Account Name" value="WANBITE INVESTMENTS CO. LTD" class="mt-2 block w-full p-2 border rounded-md">
+                    <input type="text" id="accountNumber" required placeholder="Account Number" class="mt-2 block w-full p-2 border rounded-md">
+                    <input type="text" id="swiftCode" required placeholder="SWIFT/BIC Code" class="mt-2 block w-full p-2 border rounded-md">
+                    <select id="currency" required class="mt-2 block w-full p-2 border rounded-md">
+                        <option value="" disabled selected>Select Currency</option>
+                        <option value="USD">USD</option>
+                        <option value="KES">KES</option>
+                    </select>
+                    <button type="submit" class="mt-4 w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 rounded-md transition duration-150">
+                        Save Bank Account
+                    </button>
+                </form>
+            </div>
+
+            <div class="md:col-span-2 p-6 border border-gray-300 rounded-xl bg-white shadow-md">
+                <h3 class="text-xl font-semibold mb-4 text-primary-blue">Saved Bank Accounts</h3>
+                <div id="saved-banks-list" class="space-y-3">
+                    <p class="text-center text-gray-500">Loading banks...</p>
+                </div>
+            </div>
+        </div>
+    `;
+    fetchAndDisplayBankDetails();
+}
+
+/**
+ * Saves new bank details to the 'bankDetails' Firestore collection.
+ */
+async function addBankDetails() {
+    const bankName = document.getElementById('bankName').value;
+    const accountName = document.getElementById('accountName').value;
+    const accountNumber = document.getElementById('accountNumber').value;
+    const swiftCode = document.getElementById('swiftCode').value;
+    const currency = document.getElementById('currency').value;
+
+    const newBank = {
+        name: bankName,
+        accountName,
+        accountNumber,
+        swiftCode,
+        currency,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    };
+
+    try {
+        await db.collection("bankDetails").add(newBank);
+        alert(`Bank account for ${bankName} saved successfully!`);
+        document.getElementById('add-bank-form').reset();
+        fetchAndDisplayBankDetails(); // Refresh the list
+    } catch (error) {
+        console.error("Error saving bank details:", error);
+        alert("Failed to save bank details: " + error.message);
+    }
+}
+
+/**
+ * Fetches and displays all saved bank details in the list.
+ */
+async function fetchAndDisplayBankDetails() {
+    const listElement = document.getElementById('saved-banks-list');
+    if (!listElement) return;
+
+    listElement.innerHTML = `<p class="text-center text-gray-500">Fetching data...</p>`;
+    let html = ``;
+
+    try {
+        const snapshot = await db.collection("bankDetails").orderBy("createdAt", "desc").get();
+        if (snapshot.empty) {
+            listElement.innerHTML = `<p class="text-center text-gray-500">No bank accounts have been configured yet.</p>`;
+            return;
+        }
+
+        html = `<ul class="divide-y divide-gray-200">`;
+        snapshot.forEach(doc => {
+            const data = doc.data();
+            html += `
+                <li class="p-4 flex flex-col">
+                    <div class="flex justify-between items-center">
+                        <strong class="text-lg text-primary-blue">${data.name} (${data.currency})</strong>
+                        <button onclick="deleteBank('${doc.id}')" class="text-red-500 hover:text-red-700 text-sm">Delete</button>
+                    </div>
+                    <p class="text-sm text-gray-700">Account: ${data.accountName}</p>
+                    <p class="text-sm text-gray-600">No: ${data.accountNumber} | SWIFT: ${data.swiftCode}</p>
+                </li>
+            `;
+        });
+        html += `</ul>`;
+        listElement.innerHTML = html;
+
+    } catch (error) {
+        console.error("Error fetching banks:", error);
+        listElement.innerHTML = `<p class="text-red-500">Error loading bank accounts.</p>`;
+    }
+}
+
+/**
+ * Deletes a bank document from Firestore.
+ * @param {string} bankId - The Firestore document ID of the bank.
+ */
+async function deleteBank(bankId) {
+    if (!confirm("Are you sure you want to delete this bank account?")) {
+        return;
+    }
+    try {
+        await db.collection("bankDetails").doc(bankId).delete();
+        alert("Bank account deleted successfully!");
+        fetchAndDisplayBankDetails(); // Refresh the list
+    } catch (error) {
+        console.error("Error deleting bank:", error);
+        alert("Failed to delete bank account.");
+    }
 }
 
 
