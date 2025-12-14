@@ -70,17 +70,6 @@ function renderAuthForm() {
     `;
 }
 
-async function handleLogin() {
-    const email = document.getElementById('email').value;
-    const password = document.getElementById('password').value;
-    try {
-        await auth.signInWithEmailAndPassword(email, password);
-    } catch (error) {
-        console.error("Login failed:", error.message);
-        alert("Login Failed: " + error.message);
-    }
-}
-
 function handleLogout() {
     auth.signOut();
 }
@@ -93,9 +82,9 @@ function renderDashboard() {
     appContent.innerHTML = `
         <h2 class="text-4xl font-extrabold mb-8 text-primary-blue">CDMS Dashboard</h2>
         <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
-            ${createDashboardCard('塘 Document Generator', 'Invoices, Receipts, Agreements', 'bg-green-100 border-green-400', 'handleDocumentGenerator')}
-            ${createDashboardCard('圓 Fleet Management', 'Car Tracking, Clearing, ETA', 'bg-yellow-100 border-yellow-400', 'handleFleetManagement')}
-            ${createDashboardCard('統 HR & Requisitions', 'Leave Applications, Requisition Forms', 'bg-red-100 border-red-400', 'handleHRManagement')}
+            ${createDashboardCard('Document Generator', 'Invoices, Receipts, Agreements', 'bg-green-100 border-green-400', 'handleDocumentGenerator')}
+            ${createDashboardCard('Fleet Management', 'Car Tracking, Clearing, ETA', 'bg-yellow-100 border-yellow-400', 'handleFleetManagement')}
+            ${createDashboardCard('HR & Requisitions', 'Leave Applications, Requisition Forms', 'bg-red-100 border-red-400', 'handleHRManagement')}
         </div>
     `;
     
@@ -108,6 +97,18 @@ function renderDashboard() {
     `;
     mainNav.classList.remove('hidden');
 }
+
+async function handleLogin() {
+    const email = document.getElementById('email').value;
+    const password = document.getElementById('password').value;
+    try {
+        await auth.signInWithEmailAndPassword(email, password);
+    } catch (error) {
+        console.error("Login failed:", error.message);
+        alert("Login Failed: " + error.message);
+    }
+}
+
 
 function createDashboardCard(title, subtitle, colorClass, handler) {
     return `
@@ -137,17 +138,10 @@ function handleDocumentGenerator() {
         </div>
     `;
 }
-function renderAgreementForm() { 
-    document.getElementById('document-form-area').innerHTML = `<p class="text-lg p-6 bg-yellow-50 rounded-lg">Sales Agreement Form Area. This will follow the Invoice/Receipt pattern.</p>`; 
-}
+// -----------------------------------------------------------------
+// NOTE: renderAgreementForm() is fully defined in Section 10 now
+// -----------------------------------------------------------------
 
-// =================================================================
-//                 5. RECEIPT/PAYMENT LOGIC 
-// =================================================================
-
-// =================================================================
-//                 5. RECEIPT/PAYMENT LOGIC (COMPREHENSIVELY REVISED)
-// =================================================================
 
 // =================================================================
 //                 5. RECEIPT/PAYMENT LOGIC (COMPREHENSIVELY REVISED)
@@ -579,10 +573,6 @@ function generateReceiptPDF(data) {
 
     doc.save(`Receipt_${data.receiptId}.pdf`);
       }
-
-// --- Keep the rest of the script.js after this point ---
-// ... (The rest of the script including section 6, 7, 8, and the stubs remain below)
-// ...
 
 // =================================================================
 //                 7. BANK MANAGEMENT MODULE (NEW)
@@ -1357,7 +1347,700 @@ function reDownloadInvoice(data) {
 
 
 // =================================================================
-//                 7. STUBS FOR OTHER MODULES
+//                 9. CAR SALES AGREEMENT BANK HELPER (FROM bankDetails)
+// =================================================================
+
+/**
+ * Helper to fetch raw bank details from Firestore (for Agreement PDF generation).
+ * Uses the 'bankDetails' collection.
+ */
+async function _getBankDetailsData() {
+    try {
+        const snapshot = await db.collection("bankDetails").get();
+        const banks = [];
+        snapshot.forEach(doc => {
+            banks.push({ id: doc.id, ...doc.data() });
+        });
+        return banks;
+    } catch (error) {
+        console.error("Error fetching bank details:", error);
+        return [];
+    }
+}
+
+/**
+ * Populates the bank account dropdown list in the agreement form.
+ */
+async function populateBankDropdown(dropdownId) {
+    const dropdown = document.getElementById(dropdownId);
+    if (!dropdown) return;
+    
+    const banks = await _getBankDetailsData();
+    dropdown.innerHTML = '<option value="" disabled selected>Select Bank Account for Payment</option>';
+    
+    if (banks.length === 0) {
+        dropdown.innerHTML += '<option value="" disabled>No bank accounts configured in bankDetails collection.</option>';
+        return;
+    }
+
+    banks.forEach(bank => {
+        dropdown.innerHTML += `<option value="${bank.id}" data-currency="${bank.currency}">
+            ${bank.name} (${bank.accountNumber}) - ${bank.currency}
+        </option>`;
+    });
+}
+
+
+// =================================================================
+//                 10. CAR SALES AGREEMENT LOGIC
+// =================================================================
+
+let agreementPaymentCounter = 0; // Global counter for unique payment row IDs
+
+/**
+ * Renders the Car Sales Agreement form and history area. (Replaces renderAgreementForm stub in Section 4)
+ */
+function renderAgreementForm() {
+    const formArea = document.getElementById('document-form-area');
+    formArea.innerHTML = `
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div class="p-6 border border-primary-blue rounded-xl bg-white shadow-md">
+                <h3 class="text-xl font-semibold mb-4 text-primary-blue">New Car Sales Agreement</h3>
+                <form id="agreement-form" onsubmit="event.preventDefault(); saveAgreement()">
+                    
+                    <fieldset class="border p-4 rounded-lg mb-4">
+                        <legend class="text-base font-semibold text-primary-blue px-2">Agreement Details</legend>
+                        <p class="text-sm italic mb-3">This Car Sales Agreement is made on the **<span id="agreement-date">${new Date().toLocaleDateString('en-US')}</span>** between:</p>
+                        
+                        <h4 class="font-bold text-sm mt-2 text-secondary-red">SELLER: WanBite Investments Company Limited</h4>
+                        <div class="grid grid-cols-2 gap-3 mt-1 mb-4">
+                            <input type="text" id="sellerAddress" value="Ngong Road, Kilimani, Nairobi" required placeholder="Seller Address" class="p-2 border rounded-md text-sm">
+                            <input type="text" id="sellerPhone" value="0713147136" required placeholder="Seller Phone" class="p-2 border rounded-md text-sm">
+                        </div>
+
+                        <h4 class="font-bold text-sm mt-2 text-primary-blue">BUYER:</h4>
+                        <div class="grid grid-cols-2 gap-3 mt-1">
+                            <input type="text" id="buyerName" required placeholder="Buyer Name" class="p-2 border rounded-md">
+                            <input type="text" id="buyerPhone" required placeholder="Buyer Phone" class="p-2 border rounded-md">
+                            <input type="text" id="buyerAddress" required placeholder="Buyer Address" class="p-2 border rounded-md col-span-2">
+                        </div>
+                    </fieldset>
+
+                    <fieldset class="border p-4 rounded-lg mb-4">
+                        <legend class="text-base font-semibold text-primary-blue px-2">Vehicle Details</legend>
+                        <div class="grid grid-cols-2 gap-3">
+                            <input type="text" id="carMakeModel" required placeholder="Make and Model (e.g., Toyota Vitz)" class="p-2 border rounded-md">
+                            <input type="number" id="carYear" required placeholder="Year of Manufacture" class="p-2 border rounded-md">
+                            <input type="text" id="carColor" required placeholder="Color" class="p-2 border rounded-md">
+                            <input type="text" id="carVIN" required placeholder="VIN Number" class="p-2 border rounded-md">
+                        </div>
+                        <select id="carFuelType" required class="block w-full p-2 border rounded-md mt-3">
+                            <option value="" disabled selected>Select Fuel Type</option>
+                            <option value="Petrol">Petrol</option>
+                            <option value="Diesel">Diesel</option>
+                            <option value="Petrol Hybrid">Petrol Hybrid</option>
+                            <option value="Diesel Hybrid">Diesel Hybrid</option>
+                            <option value="Electric">Electric</option>
+                        </select>
+                    </fieldset>
+
+                    <fieldset class="border p-4 rounded-lg mb-4">
+                        <legend class="text-base font-semibold text-secondary-red px-2">Sales Terms & Payment Plan</legend>
+                        
+                        <select id="paymentBankId" required class="block w-full p-2 border rounded-md mb-3"></select>
+                        <script>populateBankDropdown('paymentBankId');</script>
+
+                        <div class="space-y-2">
+                            <div class="grid grid-cols-4 gap-2 text-xs font-bold text-gray-600 border-b pb-1">
+                                <span class="col-span-2">Description / Notes</span>
+                                <span>Amount (USD/KSH)</span>
+                                <span>Date Due</span>
+                            </div>
+                            <div id="payment-schedule-rows">
+                                <div class="grid grid-cols-4 gap-2 payment-row" data-id="1">
+                                    <input type="text" required placeholder="e.g. Deposit" class="p-2 border rounded-md col-span-2 text-sm">
+                                    <input type="number" step="0.01" required placeholder="Amount" oninput="calculatePaymentTotal()" class="payment-amount p-2 border rounded-md text-sm">
+                                    <input type="date" required class="payment-date p-2 border rounded-md text-sm">
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="flex justify-between items-center mt-3 pt-3 border-t">
+                            <div class="space-x-2">
+                                <button type="button" onclick="addPaymentRow()" class="text-sm bg-gray-200 hover:bg-gray-300 px-3 py-1 rounded">Add Payment</button>
+                                <button type="button" onclick="deletePaymentRow()" class="text-sm bg-red-100 hover:bg-red-200 text-red-600 px-3 py-1 rounded">Delete Last</button>
+                            </div>
+                            <div class="font-bold text-lg text-primary-blue">
+                                TOTAL: <span id="payment-total">0.00</span>
+                            </div>
+                        </div>
+                    </fieldset>
+
+                    <fieldset class="border p-4 rounded-lg mb-6">
+                        <legend class="text-base font-semibold text-primary-blue px-2">Signatories</legend>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div><input type="text" id="sellerWitness" required placeholder="Seller Witness Name" class="block w-full p-2 border rounded-md text-sm"></div>
+                            <div><input type="text" id="buyerWitness" required placeholder="Buyer Witness Name" class="block w-full p-2 border rounded-md text-sm"></div>
+                        </div>
+                    </fieldset>
+
+                    <button type="submit" class="w-full bg-primary-blue hover:bg-blue-700 text-white font-bold py-3 rounded-lg transition duration-150">
+                        Generate & Save Sales Agreement PDF
+                    </button>
+                </form>
+            </div>
+
+            <div class="p-6 border border-gray-300 rounded-xl bg-white shadow-md">
+                <h3 class="text-xl font-semibold mb-4 text-primary-blue">Recent Sales Agreements</h3>
+                <div id="recent-agreements">
+                    <p class="text-center text-gray-500">Loading agreements...</p>
+                </div>
+            </div>
+        </div>
+    `;
+    // Initialize with a single row if needed, but the HTML already has one.
+    calculatePaymentTotal(); 
+    fetchAgreements();
+}
+
+/**
+ * Adds a new payment row to the schedule table.
+ */
+function addPaymentRow() {
+    agreementPaymentCounter++;
+    const container = document.getElementById('payment-schedule-rows');
+    const newRow = document.createElement('div');
+    newRow.className = 'grid grid-cols-4 gap-2 payment-row';
+    newRow.dataset.id = agreementPaymentCounter;
+    newRow.innerHTML = `
+        <input type="text" required placeholder="e.g. Balance" class="p-2 border rounded-md col-span-2 text-sm">
+        <input type="number" step="0.01" required placeholder="Amount" oninput="calculatePaymentTotal()" class="payment-amount p-2 border rounded-md text-sm">
+        <input type="date" required class="payment-date p-2 border rounded-md text-sm">
+        <button type="button" onclick="deletePaymentRow(${agreementPaymentCounter})" class="text-red-500 hover:text-red-700 text-sm">X</button>
+    `;
+    container.appendChild(newRow);
+}
+
+/**
+ * Deletes a specific or the last payment row from the schedule table.
+ */
+function deletePaymentRow(idToDelete) {
+    const container = document.getElementById('payment-schedule-rows');
+    const rows = container.querySelectorAll('.payment-row');
+    
+    if (rows.length === 1) {
+        alert("The agreement must have at least one payment row.");
+        return;
+    }
+
+    let rowToRemove;
+    if (idToDelete) {
+        rowToRemove = container.querySelector(`.payment-row[data-id="${idToDelete}"]`);
+    } else {
+        rowToRemove = rows[rows.length - 1];
+    }
+
+    if (rowToRemove) {
+        rowToRemove.remove();
+        calculatePaymentTotal();
+    }
+}
+
+/**
+ * Calculates the total of all amounts in the payment schedule.
+ */
+function calculatePaymentTotal() {
+    const amounts = document.querySelectorAll('.payment-amount');
+    let total = 0;
+    amounts.forEach(input => {
+        const value = parseFloat(input.value);
+        if (!isNaN(value)) {
+            total += value;
+        }
+    });
+    document.getElementById('payment-total').textContent = total.toLocaleString('en-US', { minimumFractionDigits: 2 });
+}
+
+/**
+ * Collects data and saves the Car Sales Agreement to Firestore.
+ */
+async function saveAgreement() {
+    const form = document.getElementById('agreement-form');
+    if (!form.checkValidity()) {
+        form.reportValidity();
+        return;
+    }
+
+    // 1. Collect Payment Schedule
+    const paymentRows = document.querySelectorAll('#payment-schedule-rows .payment-row');
+    const paymentSchedule = [];
+    let totalAmount = 0;
+    const selectedBank = document.getElementById('paymentBankId');
+    const currency = selectedBank.options[selectedBank.selectedIndex].dataset.currency;
+
+    paymentRows.forEach(row => {
+        const inputs = row.querySelectorAll('input');
+        const amount = parseFloat(inputs[1].value);
+        
+        paymentSchedule.push({
+            description: inputs[0].value,
+            amount: amount,
+            dateDue: inputs[2].value
+        });
+        totalAmount += amount;
+    });
+
+    if (totalAmount === 0) {
+        alert("Total payment amount cannot be zero.");
+        return;
+    }
+    
+    // 2. Build Agreement Data
+    const agreementData = {
+        agreementDate: new Date().toLocaleDateString('en-US'),
+        seller: {
+            name: "WanBite Investments Company Limited",
+            address: document.getElementById('sellerAddress').value,
+            phone: document.getElementById('sellerPhone').value
+        },
+        buyer: {
+            name: document.getElementById('buyerName').value,
+            address: document.getElementById('buyerAddress').value,
+            phone: document.getElementById('buyerPhone').value
+        },
+        vehicle: {
+            makeModel: document.getElementById('carMakeModel').value,
+            year: document.getElementById('carYear').value,
+            color: document.getElementById('carColor').value,
+            vin: document.getElementById('carVIN').value,
+            fuelType: document.getElementById('carFuelType').value,
+        },
+        salesTerms: {
+            price: totalAmount,
+            currency: currency,
+            bankId: selectedBank.value,
+            paymentSchedule: paymentSchedule,
+        },
+        signatures: {
+            sellerWitness: document.getElementById('sellerWitness').value,
+            buyerWitness: document.getElementById('buyerWitness').value,
+            // Signatures and Dates will be added manually on the printed copy
+        },
+        createdBy: currentUser.email,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    };
+
+    try {
+        const docRef = await db.collection("sales_agreements").add(agreementData);
+        alert(`Sales Agreement for ${agreementData.buyer.name} saved successfully!`);
+        
+        // Fetch bank details for PDF generation
+        const banks = await _getBankDetailsData();
+        const selectedBankDetails = banks.find(b => b.id === agreementData.salesTerms.bankId);
+
+        agreementData.firestoreId = docRef.id;
+        agreementData.bankDetails = selectedBankDetails;
+
+        generateAgreementPDF(agreementData);
+        
+        form.reset();
+        calculatePaymentTotal();
+        fetchAgreements(); // Refresh history
+    } catch (error) {
+        console.error("Error saving sales agreement:", error);
+        alert("Failed to save sales agreement: " + error.message);
+    }
+}
+
+/**
+ * Fetches and displays recent sales agreements.
+ */
+async function fetchAgreements() {
+    const agreementList = document.getElementById('recent-agreements');
+    let html = ``;
+    try {
+        const snapshot = await db.collection("sales_agreements").orderBy("createdAt", "desc").limit(10).get();
+        if (snapshot.empty) {
+            agreementList.innerHTML = `<p class="text-gray-500">No recent agreements found.</p>`;
+            return;
+        }
+        
+        html = `<ul class="space-y-3">`;
+        snapshot.forEach(doc => {
+            const data = doc.data();
+            const agreementDataJson = JSON.stringify({
+                ...data, 
+                firestoreId: doc.id,
+                createdAt: data.createdAt ? data.createdAt.toDate().toISOString() : new Date().toISOString()
+            });
+
+            html += `<li class="p-3 border rounded-lg bg-gray-50 flex flex-col sm:flex-row justify-between items-start sm:items-center">
+                        <div>
+                            <strong class="text-gray-800">${data.buyer.name}</strong><br>
+                            <span class="text-sm text-gray-600">${data.vehicle.makeModel} | Price: ${data.salesTerms.currency} ${data.salesTerms.price.toFixed(2)}</span>
+                        </div>
+                        <div class="mt-2 sm:mt-0 space-x-2">
+                            <button onclick='openPaymentUpdateModal(${agreementDataJson})' 
+                                    class="bg-yellow-500 hover:bg-yellow-600 text-white text-xs py-1 px-3 rounded-full transition duration-150">
+                                Edit Payment
+                            </button>
+                            <button onclick='reDownloadAgreement(${agreementDataJson})' 
+                                    class="bg-secondary-red hover:bg-red-600 text-white text-xs py-1 px-3 rounded-full transition duration-150">
+                                Re-Download PDF
+                            </button>
+                        </div>
+                    </li>`;
+        });
+        html += `</ul>`;
+        agreementList.innerHTML = html;
+    } catch (error) {
+        console.error("Error fetching agreements:", error);
+        agreementList.innerHTML = `<p class="text-red-500">Error loading agreements. Check console for details.</p>`;
+    }
+}
+
+/**
+ * Re-downloads the PDF for a selected agreement document from history.
+ * @param {object} data - The agreement data object retrieved from Firestore.
+ */
+async function reDownloadAgreement(data) {
+    // Re-fetch bank details which are not saved directly in the agreement data
+    const banks = await _getBankDetailsData();
+    const selectedBankDetails = banks.find(b => b.id === data.salesTerms.bankId);
+    
+    data.bankDetails = selectedBankDetails || { name: 'Bank Not Found', accountNumber: 'N/A', swiftCode: 'N/A', currency: data.salesTerms.currency };
+    generateAgreementPDF(data);
+}
+
+/**
+ * Generates and downloads the single-page Car Sales Agreement PDF.
+ */
+async function generateAgreementPDF(data) {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF('p', 'mm', 'a4'); 
+
+    const primaryColor = '#183263'; // WanBite Blue
+    const secondaryColor = '#D96359'; // Red
+    
+    const pageW = doc.internal.pageSize.getWidth();
+    let y = 10; 
+    const margin = 10;
+    const lineSpacing = 6;
+    const textIndent = 5;
+
+    // --- HELPER FUNCTION ---
+    const drawText = (text, x, y, size, style = 'normal', color = primaryColor, align = 'left') => {
+        doc.setFontSize(size);
+        doc.setFont("helvetica", style);
+        doc.setTextColor(color);
+        doc.text(text, x, y, { align: align });
+    };
+
+    // =================================================================
+    // HEADER SECTION
+    // =================================================================
+    doc.setFillColor(primaryColor);
+    doc.rect(0, 0, pageW, 15, 'F');
+    drawText('WanBite Investments Co. Ltd.', pageW / 2, 8, 18, 'bold', '#FFFFFF', 'center');
+    drawText('carskenya.co.ke', pageW / 2, 13, 10, 'normal', '#FFFFFF', 'center');
+    y = 25;
+
+    // TITLE
+    doc.setTextColor(primaryColor);
+    doc.setFontSize(18);
+    doc.setFont("helvetica", "bold");
+    doc.text("CAR SALES AGREEMENT", pageW / 2, y, null, null, "center");
+    y += 10;
+
+    // =================================================================
+    // PARTIES DETAILS
+    // =================================================================
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(primaryColor);
+    doc.text(`This Car Sales Agreement is made on the ${data.agreementDate}, between;`, margin, y);
+    y += lineSpacing;
+
+    // Seller Info
+    doc.setFont("helvetica", "bold");
+    doc.text("THE SELLER:", margin, y);
+    doc.text(data.seller.name, margin + 25, y);
+    doc.setFont("helvetica", "normal");
+    doc.text(`Address: ${data.seller.address}`, margin + textIndent, y + lineSpacing);
+    doc.text(`Phone: ${data.seller.phone}`, margin + textIndent, y + lineSpacing * 2);
+    y += lineSpacing * 3;
+
+    // Buyer Info
+    doc.setFont("helvetica", "bold");
+    doc.text("THE BUYER:", margin, y);
+    doc.text(data.buyer.name, margin + 25, y);
+    doc.setFont("helvetica", "normal");
+    doc.text(`Address: ${data.buyer.address}`, margin + textIndent, y + lineSpacing);
+    doc.text(`Phone: ${data.buyer.phone}`, margin + textIndent, y + lineSpacing * 2);
+    y += lineSpacing * 3 + 2;
+
+
+    // =================================================================
+    // VEHICLE DETAILS
+    // =================================================================
+    doc.setFillColor(240, 240, 240); 
+    doc.rect(margin, y, pageW - 20, 32, 'F');
+    
+    drawText('VEHICLE DETAILS', margin + 3, y + 4, 12, 'bold', primaryColor);
+    y += 8;
+    
+    doc.setFontSize(10);
+    doc.setTextColor(0);
+    
+    doc.text(`Make and Model: ${data.vehicle.makeModel}`, margin + 3, y + lineSpacing);
+    doc.text(`Year of Manufacture: ${data.vehicle.year}`, pageW / 2 + 5, y + lineSpacing);
+
+    doc.text(`Color: ${data.vehicle.color}`, margin + 3, y + lineSpacing * 2);
+    doc.text(`Fuel Type: ${data.vehicle.fuelType}`, pageW / 2 + 5, y + lineSpacing * 2);
+
+    doc.text(`VIN Number: ${data.vehicle.vin}`, margin + 3, y + lineSpacing * 3);
+    y += 32;
+
+
+    // =================================================================
+    // SALES TERMS & PAYMENT
+    // =================================================================
+    drawText('SALES TERMS & PAYMENT PLAN', margin, y, 12, 'bold', primaryColor);
+    y += lineSpacing;
+
+    // Price Clause
+    doc.setFontSize(10);
+    doc.setTextColor(0);
+    doc.text("The Purchase Price of ", margin, y);
+    doc.setTextColor(secondaryColor);
+    doc.setFont("helvetica", "bold");
+    const totalText = `${data.salesTerms.currency} ${data.salesTerms.price.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+    doc.text(totalText, margin + doc.getStringUnitWidth("The Purchase Price of ") * doc.getFontSize() / doc.internal.scaleFactor, y);
+    doc.setTextColor(0);
+    doc.setFont("helvetica", "normal");
+    const trailingText = ` is to be paid to the bank account below:`;
+    doc.text(trailingText, margin + doc.getStringUnitWidth("The Purchase Price of " + totalText) * doc.getFontSize() / doc.internal.scaleFactor, y);
+    y += lineSpacing;
+
+    // Bank Details Box
+    doc.setFillColor(255, 245, 230); 
+    doc.rect(margin, y, pageW - 20, 20, 'F');
+    doc.setDrawColor(secondaryColor);
+    doc.setLineWidth(0.5);
+    doc.rect(margin, y, pageW - 20, 20);
+
+    doc.setFontSize(9);
+    doc.setTextColor(primaryColor);
+    doc.text(`Bank Name: ${data.bankDetails ? data.bankDetails.name : 'N/A'}`, margin + 3, y + 4);
+    doc.text(`Account Name: ${data.bankDetails ? data.bankDetails.accountName : 'N/A'}`, margin + 90, y + 4);
+    doc.text(`Account No: ${data.bankDetails ? data.bankDetails.accountNumber : 'N/A'}`, margin + 3, y + 9);
+    doc.text(`SWIFT/BIC: ${data.bankDetails ? data.bankDetails.swiftCode : 'N/A'}`, margin + 90, y + 9);
+    doc.text(`Currency: ${data.salesTerms.currency}`, margin + 3, y + 14);
+    y += 22;
+
+
+    // Payment Schedule Table
+    doc.setDrawColor(primaryColor);
+    doc.setLineWidth(0.2);
+    // Header
+    doc.setFillColor(primaryColor);
+    doc.rect(margin, y, pageW - 20, 6, 'F');
+    drawText('Description / Notes', margin + 3, y + 4, 9, 'bold', '#FFFFFF');
+    drawText(`Amount (${data.salesTerms.currency})`, margin + 120, y + 4, 9, 'bold', '#FFFFFF');
+    drawText('Date Due', margin + 170, y + 4, 9, 'bold', '#FFFFFF');
+    y += 6;
+
+    // Rows
+    let totalPaid = 0;
+    data.salesTerms.paymentSchedule.forEach((payment, index) => {
+        doc.setFillColor(index % 2 === 0 ? 255 : 248);
+        doc.rect(margin, y, pageW - 20, 5, 'F');
+        doc.setTextColor(0);
+        drawText(payment.description, margin + 3, y + 3.5, 9);
+        drawText(payment.amount.toLocaleString('en-US', { minimumFractionDigits: 2 }), margin + 120, y + 3.5, 9);
+        doc.text(payment.dateDue, margin + 170, y + 3.5, { align: 'left' }); // Use left align for date field
+        y += 5;
+        totalPaid += payment.amount;
+    });
+
+    // Total Row
+    y += 2;
+    drawText('TOTAL PURCHASE PRICE:', margin + 100, y + 3, 10, 'bold', primaryColor);
+    drawText(`${data.salesTerms.currency} ${totalPaid.toLocaleString('en-US', { minimumFractionDigits: 2 })}`, pageW - margin - 3, y + 3, 10, 'bold', secondaryColor, 'right');
+    y += 8;
+
+    // =================================================================
+    // WARRANTIES & TRANSFER
+    // =================================================================
+    drawText('WARRANTIES AND REPRESENTATION', margin, y, 12, 'bold', primaryColor);
+    y += lineSpacing;
+
+    doc.setFontSize(10);
+    doc.setTextColor(0);
+    doc.text('• The Seller confirms that the vehicle is free from any encumbrance or third-party claims.', margin + textIndent, y);
+    doc.text('• The Buyer confirms that they have inspected and accepted the vehicle is in its current condition.', margin + textIndent, y + lineSpacing);
+    doc.text('• The sale is as-is, and the Seller does not provide any warranty unless otherwise agreed in writing.', margin + textIndent, y + lineSpacing * 2);
+    y += lineSpacing * 3 + 2;
+    
+    drawText('OWNERSHIP TRANSFER', margin, y, 12, 'bold', primaryColor);
+    y += lineSpacing;
+
+    doc.setFontSize(10);
+    doc.setTextColor(0);
+    doc.text('• The Seller agrees collection of the physical number plates and the logbook after purchase of the vehicle.', margin + textIndent, y);
+    y += lineSpacing + 6;
+
+    // =================================================================
+    // SIGNATURES
+    // =================================================================
+    drawText('AGREED AND ACCEPTED', margin, y, 12, 'bold', primaryColor);
+    y += lineSpacing;
+
+    const sigY = y + 10;
+    const sigDateY = sigY + 5;
+    const sigNameY = sigY + 10;
+    
+    // Buyer
+    doc.line(margin, sigY, margin + 70, sigY);
+    drawText('Buyer Signature', margin + 35, sigY + 2, 8, 'normal', 0, 'center');
+    doc.line(margin, sigDateY + 1, margin + 70, sigDateY + 1);
+    drawText('Date', margin + 35, sigDateY + 3, 8, 'normal', 0, 'center');
+    drawText(`Buyer Name: ${data.buyer.name}`, margin, sigNameY + 3, 10, 'bold', primaryColor);
+    drawText(`Witness: ${data.signatures.buyerWitness}`, margin, sigNameY + 7, 10, 'normal', 0);
+    
+    // Seller
+    const sellerX = pageW - margin - 70;
+    doc.line(sellerX, sigY, pageW - margin, sigY);
+    drawText('Seller Signature', sellerX + 35, sigY + 2, 8, 'normal', 0, 'center');
+    doc.line(sellerX, sigDateY + 1, pageW - margin, sigDateY + 1);
+    drawText('Date', sellerX + 35, sigDateY + 3, 8, 'normal', 0, 'center');
+    drawText(`Seller Name: ${data.seller.name}`, sellerX, sigNameY + 3, 10, 'bold', primaryColor);
+    drawText(`Witness: ${data.signatures.sellerWitness}`, sellerX, sigNameY + 7, 10, 'normal', 0);
+    
+    y = sigNameY + 15;
+
+
+    // --- Global Footer ---
+    doc.setFillColor(primaryColor);
+    doc.rect(0, doc.internal.pageSize.getHeight() - 10, pageW, 10, 'F');
+    
+    doc.setTextColor(255);
+    doc.setFontSize(9);
+    const footerText = `Location: Ngong Road, Kilimani, Nairobi. | Email: sales@carskenya.co.ke | Phone: 0713147136`;
+    doc.text(footerText, pageW / 2, doc.internal.pageSize.getHeight() - 4, null, null, "center");
+
+    doc.save(`Sales_Agreement_${data.buyer.name.replace(/\s/g, '_')}.pdf`);
+}
+
+// --- Payment Update Modal Logic ---
+
+/**
+ * Opens a modal to allow the user to add a new payment installment to an existing agreement.
+ */
+async function openPaymentUpdateModal(agreementData) {
+    const banks = await _getBankDetailsData();
+    const bankDetails = banks.find(b => b.id === agreementData.salesTerms.bankId) || { name: 'N/A', currency: 'N/A' };
+
+    let paymentListHtml = agreementData.salesTerms.paymentSchedule.map(p => 
+        `<li class="text-sm border-b py-1">
+            ${p.description}: <strong>${agreementData.salesTerms.currency} ${p.amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}</strong> (Due: ${p.dateDue})
+        </li>`
+    ).join('');
+
+    // Total price calculation
+    const currentTotal = agreementData.salesTerms.paymentSchedule.reduce((sum, p) => sum + p.amount, 0);
+
+    const modalHtml = `
+        <div id="payment-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+            <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+                <h3 class="text-lg font-semibold text-primary-blue mb-4">Add Payment to Agreement</h3>
+                
+                <p class="text-sm mb-3">
+                    <strong>Buyer:</strong> ${agreementData.buyer.name}<br>
+                    <strong>Vehicle:</strong> ${agreementData.vehicle.makeModel}<br>
+                    <strong>Current Total:</strong> <span class="text-secondary-red font-bold">${agreementData.salesTerms.currency} ${currentTotal.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
+                </p>
+
+                <div class="mb-4">
+                    <h4 class="font-semibold text-sm">Existing Payments:</h4>
+                    <ul class="list-disc pl-5">${paymentListHtml}</ul>
+                </div>
+
+                <form id="add-payment-form">
+                    <input type="text" id="newPaymentDescription" required placeholder="Description (e.g., Final Payment)" class="block w-full p-2 border rounded-md mb-2 text-sm">
+                    <input type="number" step="0.01" id="newPaymentAmount" required placeholder="Amount (${agreementData.salesTerms.currency})" class="block w-full p-2 border rounded-md mb-2 text-sm">
+                    <input type="date" id="newPaymentDate" required class="block w-full p-2 border rounded-md mb-4 text-sm">
+                    
+                    <div class="flex justify-end space-x-2">
+                        <button type="button" onclick="document.getElementById('payment-modal').remove()" class="px-4 py-2 bg-gray-200 text-gray-800 text-sm rounded-md">Cancel</button>
+                        <button type="submit" class="px-4 py-2 bg-primary-blue text-white text-sm rounded-md">Add & Update Agreement</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    `;
+
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+    
+    // Attach event listener for form submission
+    document.getElementById('add-payment-form').addEventListener('submit', (e) => {
+        e.preventDefault();
+        addPaymentToAgreement(agreementData);
+    });
+}
+
+/**
+ * Updates the Firestore document with the new payment and regenerates the PDF.
+ * @param {object} agreementData - The existing agreement data.
+ */
+async function addPaymentToAgreement(agreementData) {
+    const description = document.getElementById('newPaymentDescription').value;
+    const amount = parseFloat(document.getElementById('newPaymentAmount').value);
+    const date = document.getElementById('newPaymentDate').value;
+    
+    if (isNaN(amount) || amount <= 0) {
+        alert("Please enter a valid amount.");
+        return;
+    }
+    
+    const newPayment = { description, amount, dateDue: date };
+    
+    // Update the payment schedule locally
+    const updatedSchedule = [...agreementData.salesTerms.paymentSchedule, newPayment];
+    
+    // Recalculate total price
+    const newTotal = updatedSchedule.reduce((sum, p) => sum + p.amount, 0);
+
+    // Prepare data for Firestore update
+    const updateData = {
+        'salesTerms.paymentSchedule': updatedSchedule,
+        'salesTerms.price': newTotal // Update the total price
+    };
+    
+    try {
+        // *** This collection name is correct: "sales_agreements" ***
+        await db.collection("sales_agreements").doc(agreementData.firestoreId).update(updateData);
+        alert("Payment added and agreement updated successfully!");
+        
+        // Close modal
+        document.getElementById('payment-modal').remove();
+        
+        // Update the agreementData object and regenerate PDF
+        agreementData.salesTerms.paymentSchedule = updatedSchedule;
+        agreementData.salesTerms.price = newTotal;
+
+        await reDownloadAgreement(agreementData); // Regenerate and download PDF
+        fetchAgreements(); // Refresh history list
+        
+    } catch (error) {
+        console.error("Error updating agreement:", error);
+        alert("Failed to update agreement: " + error.message);
+    }
+}
+
+
+// =================================================================
+//                 11. STUBS FOR OTHER MODULES
 // =================================================================
 
 function handleFleetManagement() {
