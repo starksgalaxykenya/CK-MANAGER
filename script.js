@@ -1993,18 +1993,322 @@ async function addPaymentToAgreement(docId) {
 
 
 // =================================================================
-//                 11. STUBS FOR OTHER MODULES
+//                 11. FLEET MANAGEMENT MODULE (NEW)
 // =================================================================
 
+// Fleet Status Definitions
+const FLEET_STATUSES = [
+    { id: "ship_to_mombasa", name: "On Ship to Mombasa", color: "bg-blue-100", border: "border-blue-400", button: "bg-blue-600 hover:bg-blue-700" },
+    { id: "clearing_mombasa", name: "In Mombasa being cleared", color: "bg-yellow-100", border: "border-yellow-400", button: "bg-yellow-600 hover:bg-yellow-700" },
+    { id: "taken_to_carrier", name: "In Mombasa taken to the carrier", color: "bg-orange-100", border: "border-orange-400", button: "bg-orange-600 hover:bg-orange-700" },
+    { id: "transit_to_nairobi", name: "In transit from Mombasa to Nairobi", color: "bg-purple-100", border: "border-purple-400", button: "bg-purple-600 hover:bg-purple-700" },
+    { id: "in_nairobi", name: "In Nairobi and picked from carrier", color: "bg-green-100", border: "border-green-400", button: "bg-green-600 hover:bg-green-700" },
+    { id: "delivered_client", name: "Delivered to the client", color: "bg-teal-100", border: "border-teal-400", button: "bg-teal-600 hover:bg-teal-700" }
+];
+
+/**
+ * Helper to get status details by status name.
+ */
+function getStatusInfo(statusName) {
+    return FLEET_STATUSES.find(s => s.name === statusName) || { id: "unknown", name: statusName, color: "bg-gray-100", border: "border-gray-400", button: "bg-gray-600 hover:bg-gray-700" };
+}
+
+/**
+ * Renders the main Fleet Management UI.
+ */
 function handleFleetManagement() {
+    // Generate columns for the dashboard
+    const statusColumnsHtml = FLEET_STATUSES.map(status => `
+        <div class="flex flex-col h-full bg-gray-50 p-4 rounded-xl shadow-inner">
+            <h3 class="text-lg font-bold mb-4 text-center p-2 rounded-lg ${getStatusInfo(status.name).color} border ${getStatusInfo(status.name).border}">
+                ${status.name}
+            </h3>
+            <div id="fleet-column-${status.id}" class="space-y-4 flex-grow overflow-y-auto min-h-[100px]">
+                <p class="text-center text-gray-500 text-sm">Loading cars...</p>
+            </div>
+        </div>
+    `).join('');
+
     appContent.innerHTML = `
-        <h2 class="text-3xl font-bold mb-6 text-primary-blue">Fleet Management Module</h2>
-        <div class="p-6 bg-yellow-50 rounded-xl border border-yellow-300">
-            <p class="text-gray-800 font-semibold">Implementation Note:</p>
-            <p>This module requires a 'cars' collection in Firestore. The UI would display a table fetched from Firestore, allowing status updates (Ship to Mombasa, Clearing, In Transit, etc.) which would update the 'currentStatus' and add an entry to the 'statusHistory' array in the car document.</p>
+        <h2 class="text-3xl font-bold mb-6 text-primary-blue flex justify-between items-center">
+            Fleet Tracking Dashboard
+            <button onclick="showAddCarModal()" class="bg-green-600 hover:bg-green-700 text-white p-3 rounded-lg transition duration-150 text-sm">
+                + Add New Car
+            </button>
+        </h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 min-h-[70vh]" id="fleet-dashboard">
+            ${statusColumnsHtml}
+        </div>
+    `;
+
+    // Start real-time listener for cars
+    renderFleetDashboard();
+}
+
+/**
+ * Sets up a real-time listener to fetch and render cars from Firestore.
+ */
+function renderFleetDashboard() {
+    db.collection("cars").orderBy("eta", "asc").onSnapshot(snapshot => {
+        // Clear all columns
+        FLEET_STATUSES.forEach(status => {
+            const column = document.getElementById(`fleet-column-${status.id}`);
+            if (column) column.innerHTML = '';
+        });
+
+        if (snapshot.empty) {
+            FLEET_STATUSES.forEach(status => {
+                const column = document.getElementById(`fleet-column-${status.id}`);
+                if (column) column.innerHTML = `<p class="text-center text-gray-500 text-sm">No cars in this stage.</p>`;
+            });
+            return;
+        }
+
+        // Populate columns
+        const carCounts = {};
+        snapshot.forEach(doc => {
+            const car = { id: doc.id, ...doc.data() };
+            const statusInfo = getStatusInfo(car.currentStatus);
+            const column = document.getElementById(`fleet-column-${statusInfo.id}`);
+            if (column) {
+                // Remove the "No cars" placeholder if present
+                if (column.innerHTML.includes("No cars in this stage")) column.innerHTML = '';
+                
+                column.innerHTML += renderCarCard(car);
+                carCounts[statusInfo.id] = (carCounts[statusInfo.id] || 0) + 1;
+            }
+        });
+
+        // Ensure empty columns have a message
+        FLEET_STATUSES.forEach(status => {
+            if (!carCounts[status.id]) {
+                const column = document.getElementById(`fleet-column-${status.id}`);
+                if (column) column.innerHTML = `<p class="text-center text-gray-500 text-sm">No cars in this stage.</p>`;
+            }
+        });
+    }, error => {
+        console.error("Error fetching fleet cars:", error);
+        appContent.innerHTML = `<p class="text-red-500 text-center mt-10">Error loading fleet data. Check console.</p>`;
+    });
+}
+
+/**
+ * Generates the HTML for a single car card.
+ */
+function renderCarCard(car) {
+    const statusInfo = getStatusInfo(car.currentStatus);
+    const latestComment = car.statusHistory.length > 0 ? car.statusHistory[car.statusHistory.length - 1].comment : 'No recent comment.';
+
+    const statusOptionsHtml = FLEET_STATUSES
+        .filter(s => s.name !== car.currentStatus)
+        .map(s => `<option value="${s.name}">${s.name}</option>`).join('');
+    
+    // Status log HTML
+    const logHtml = car.statusHistory.slice(-3).reverse().map(log => {
+        const date = log.date.toDate ? log.date.toDate().toLocaleDateString() : 'N/A';
+        return `<p class="text-xs text-gray-600 border-l pl-2 mt-1">
+                    <strong class="text-primary-blue">${log.status}</strong> (${date}): ${log.comment}
+                </p>`;
+    }).join('');
+
+
+    return `
+        <div class="car-card p-4 border-2 ${statusInfo.border} ${statusInfo.color} rounded-lg shadow-md hover:shadow-lg transition duration-200">
+            <div class="flex justify-between items-start mb-2">
+                <h4 class="text-lg font-bold text-gray-800">${car.makeModel}</h4>
+                <button onclick="deleteFleetCar('${car.id}', '${car.makeModel}')" class="text-red-500 hover:text-red-700 text-sm ml-2">
+                    &times; Delete
+                </button>
+            </div>
+            
+            <p class="text-sm text-gray-700 mb-1">
+                <strong>Sales Person:</strong> ${car.salesPerson}
+            </p>
+            <p class="text-sm text-gray-700 mb-2">
+                <strong>ETA:</strong> <span class="font-semibold text-secondary-red">${car.eta}</span>
+            </p>
+
+            <div class="border-t border-gray-300 pt-2">
+                <p class="text-xs font-semibold text-primary-blue">Status Log (Latest 3):</p>
+                ${logHtml}
+            </div>
+            
+            <button onclick="showUpdateStatusModal('${car.id}', '${car.makeModel}', '${car.currentStatus}', '${latestComment}')" 
+                    class="mt-3 w-full text-white font-bold py-1 px-2 rounded text-sm transition duration-150 ${statusInfo.button}">
+                Update Status
+            </button>
         </div>
     `;
 }
+
+/**
+ * Shows the modal for adding a new car entry.
+ */
+function showAddCarModal() {
+    const initialStatus = FLEET_STATUSES[0].name;
+    const modalHtml = `
+        <div id="fleet-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+            <div class="relative top-10 mx-auto p-5 border w-[500px] shadow-lg rounded-md bg-white">
+                <h3 class="text-xl font-semibold text-primary-blue mb-4">Add New Fleet Car</h3>
+                <form id="add-car-form" onsubmit="event.preventDefault(); addFleetCar()">
+                    <input type="text" id="carMakeModel" required placeholder="Make and Model (e.g., Toyota Vitz)" class="mt-2 block w-full p-2 border rounded-md">
+                    <input type="text" id="carVIN" required placeholder="VIN Number" class="mt-2 block w-full p-2 border rounded-md">
+                    <input type="date" id="carETA" required class="mt-2 block w-full p-2 border rounded-md">
+                    <input type="text" id="salesPerson" required placeholder="Sales Person Responsible" class="mt-2 block w-full p-2 border rounded-md">
+                    
+                    <h4 class="font-semibold text-sm mt-4 mb-2 text-primary-blue">Initial Status: ${initialStatus}</h4>
+                    <textarea id="initialComment" required placeholder="Initial Comment (e.g., Purchased from Auction, Vessel name)" rows="2" class="mt-1 block w-full p-2 border rounded-md"></textarea>
+
+                    <div class="flex justify-end space-x-3 mt-4">
+                        <button type="button" onclick="document.getElementById('fleet-modal').remove()" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-md transition duration-150">
+                            Cancel
+                        </button>
+                        <button type="submit" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-md transition duration-150">
+                            Add Car to Fleet
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    `;
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+}
+
+/**
+ * Saves a new car entry to the 'cars' collection.
+ */
+async function addFleetCar() {
+    const form = document.getElementById('add-car-form');
+    if (!form.checkValidity()) {
+        form.reportValidity();
+        return;
+    }
+
+    const makeModel = document.getElementById('carMakeModel').value;
+    const vin = document.getElementById('carVIN').value;
+    const eta = document.getElementById('carETA').value;
+    const salesPerson = document.getElementById('salesPerson').value;
+    const initialComment = document.getElementById('initialComment').value;
+    const initialStatus = FLEET_STATUSES[0].name; // Always start at the first status
+
+    const newCar = {
+        makeModel,
+        vin,
+        eta,
+        salesPerson,
+        currentStatus: initialStatus,
+        statusHistory: [{
+            status: initialStatus,
+            date: firebase.firestore.FieldValue.serverTimestamp(),
+            comment: initialComment
+        }],
+        createdBy: currentUser.email,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    };
+
+    try {
+        await db.collection("cars").add(newCar);
+        document.getElementById('fleet-modal').remove();
+        alert(`Car ${makeModel} added to fleet successfully!`);
+    } catch (error) {
+        console.error("Error adding car:", error);
+        alert("Failed to add car: " + error.message);
+    }
+}
+
+/**
+ * Shows the modal for updating a car's status.
+ */
+function showUpdateStatusModal(carId, makeModel, currentStatus, latestComment) {
+    const statusOptionsHtml = FLEET_STATUSES
+        .map(s => `<option value="${s.name}" ${s.name === currentStatus ? 'selected disabled' : ''}>${s.name}</option>`).join('');
+
+    const modalHtml = `
+        <div id="fleet-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+            <div class="relative top-10 mx-auto p-5 border w-[500px] shadow-lg rounded-md bg-white">
+                <h3 class="text-xl font-semibold text-primary-blue mb-4">Update Status for: ${makeModel}</h3>
+                <p class="text-sm mb-3">
+                    <strong>Current Status:</strong> <span class="text-secondary-red font-bold">${currentStatus}</span>
+                </p>
+                <form id="update-status-form" onsubmit="event.preventDefault(); updateCarStatus('${carId}')">
+                    
+                    <label for="newStatus" class="block text-sm font-medium text-gray-700 mt-2">New Status:</label>
+                    <select id="newStatus" required class="mt-1 block w-full p-2 border rounded-md">
+                        ${statusOptionsHtml}
+                    </select>
+                    
+                    <label for="newComment" class="block text-sm font-medium text-gray-700 mt-4">Logistics Comment/Note:</label>
+                    <textarea id="newComment" required placeholder="e.g., Clearance complete, loaded onto truck 'KCA 123Z'" rows="3" class="mt-1 block w-full p-2 border rounded-md">${latestComment}</textarea>
+
+                    <div class="flex justify-end space-x-3 mt-4">
+                        <button type="button" onclick="document.getElementById('fleet-modal').remove()" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-md transition duration-150">
+                            Cancel
+                        </button>
+                        <button type="submit" class="bg-primary-blue hover:bg-blue-900 text-white font-bold py-2 px-4 rounded-md transition duration-150">
+                            Update & Log
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    `;
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+}
+
+/**
+ * Updates the car's status and adds a new entry to the status history log.
+ */
+async function updateCarStatus(carId) {
+    const form = document.getElementById('update-status-form');
+    if (!form.checkValidity()) {
+        form.reportValidity();
+        return;
+    }
+
+    const newStatus = document.getElementById('newStatus').value;
+    const newComment = document.getElementById('newComment').value;
+
+    const newLogEntry = {
+        status: newStatus,
+        date: firebase.firestore.FieldValue.serverTimestamp(),
+        comment: newComment
+    };
+
+    try {
+        await db.collection("cars").doc(carId).update({
+            currentStatus: newStatus,
+            statusHistory: firebase.firestore.FieldValue.arrayUnion(newLogEntry)
+        });
+
+        document.getElementById('fleet-modal').remove();
+        alert(`Status updated to: ${newStatus}`);
+    } catch (error) {
+        console.error("Error updating car status:", error);
+        alert("Failed to update car status: " + error.message);
+    }
+}
+
+/**
+ * Deletes a car from the fleet tracking system.
+ */
+async function deleteFleetCar(carId, makeModel) {
+    if (!confirm(`Are you sure you want to permanently delete the tracking for ${makeModel}? This action cannot be undone.`)) {
+        return;
+    }
+
+    try {
+        await db.collection("cars").doc(carId).delete();
+        alert(`${makeModel} tracking successfully deleted.`);
+    } catch (error) {
+        console.error("Error deleting car:", error);
+        alert("Failed to delete car: " + error.message);
+    }
+}
+
+
+// =================================================================
+//                 12. STUBS FOR OTHER MODULES
+// =================================================================
 
 function handleHRManagement() {
     appContent.innerHTML = `
