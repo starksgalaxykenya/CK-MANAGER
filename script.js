@@ -1498,6 +1498,11 @@ function renderAgreementForm() {
             </div>
         </div>
     `;
+  // Call the function to populate the dropdown
+    populateBankDropdown('agreementBankDetailsSelect'); // <<< CORRECTION 2: ADD THIS CALL
+    calculatePaymentTotal();
+    fetchAgreements();
+}
     // Initialize with a single row if needed, but the HTML already has one.
     calculatePaymentTotal(); 
     fetchAgreements();
@@ -1564,6 +1569,9 @@ function calculatePaymentTotal() {
 /**
  * Collects data and saves the Car Sales Agreement to Firestore.
  */
+/**
+ * Handles form submission and saves the sales agreement to Firestore.
+ */
 async function saveAgreement() {
     const form = document.getElementById('agreement-form');
     if (!form.checkValidity()) {
@@ -1571,29 +1579,24 @@ async function saveAgreement() {
         return;
     }
 
-    // 1. Collect Payment Schedule
-    const paymentRows = document.querySelectorAll('#payment-schedule-rows .payment-row');
-    const paymentSchedule = [];
-    let totalAmount = 0;
-    const selectedBank = document.getElementById('paymentBankId');
-    const currency = selectedBank.options[selectedBank.selectedIndex].dataset.currency;
+    // --- CORRECTION 3: READ THE DATE INPUT VALUE ---
+    const agreementDate = document.getElementById('agreementDateInput').value;
 
-    paymentRows.forEach(row => {
-        const inputs = row.querySelectorAll('input');
-        const amount = parseFloat(inputs[1].value);
-        
-        paymentSchedule.push({
-            description: inputs[0].value,
-            amount: amount,
-            dateDue: inputs[2].value
-        });
-        totalAmount += amount;
-    });
+    // 1. Collect Buyer Details
+    const buyerName = document.getElementById('buyerName').value;
+    const buyerPhone = document.getElementById('buyerPhone').value;
+    // ... (rest of variable declarations) ...
+    // ...
 
-    if (totalAmount === 0) {
-        alert("Total payment amount cannot be zero.");
-        return;
-    }
+    // 4. Construct Agreement Data Object
+    const agreementData = {
+        // --- Use the date from the input ---
+        agreementDate: agreementDate,
+        buyer: {
+            name: buyerName,
+            phone: buyerPhone,
+            address: document.getElementById('buyerAddress').value
+        },
     
     // 2. Build Agreement Data
     const agreementData = {
