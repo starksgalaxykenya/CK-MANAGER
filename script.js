@@ -149,6 +149,10 @@ function renderAgreementForm() {
 //                 5. RECEIPT/PAYMENT LOGIC (COMPREHENSIVELY REVISED)
 // =================================================================
 
+// =================================================================
+//                 5. RECEIPT/PAYMENT LOGIC (COMPREHENSIVELY REVISED)
+// =================================================================
+
 /**
  * Helper function to convert a number to words (for KES amounts).
  * This is a simplified function and may not handle extremely large numbers perfectly.
@@ -412,7 +416,7 @@ function reDownloadReceipt(data) {
 }
 
 /**
- * Generates and downloads a custom PDF for the comprehensive receipt.
+ * Generates and downloads a custom PDF for the comprehensive receipt. (SPACING ADJUSTED)
  */
 function generateReceiptPDF(data) {
     const { jsPDF } = window.jspdf;
@@ -425,7 +429,8 @@ function generateReceiptPDF(data) {
     let y = 10; 
     const margin = 10;
     const boxW = pageW - (2 * margin);
-    const lineHeight = 6;
+    // Increased base line height for better spacing
+    const lineHeight = 7; 
 
     // --- HELPER FUNCTION ---
     const drawText = (text, x, y, size, style = 'normal', color = primaryColor, align = 'left') => {
@@ -453,7 +458,7 @@ function generateReceiptPDF(data) {
     doc.setFontSize(24);
     doc.setFont("helvetica", "bold");
     doc.text("OFFICIAL RECEIPT", pageW / 2, y, null, null, "center");
-    y += 10;
+    y += 12; // Increased space after title
     
     // Receipt Metadata Box (ID and Date)
     doc.setDrawColor(primaryColor);
@@ -465,7 +470,7 @@ function generateReceiptPDF(data) {
     
     drawText('DATE:', pageW - margin - 3, y + 5, 10, 'bold', secondaryColor, 'right');
     drawText(data.receiptDate, pageW - margin - 3, y + 11, 14, 'bold', primaryColor, 'right');
-    y += 18;
+    y += 20; // Increased space below the box
 
     // =================================================================
     // MAIN BODY
@@ -477,7 +482,7 @@ function generateReceiptPDF(data) {
     doc.setDrawColor(0);
     doc.line(margin + 35, y, pageW - margin, y);
     drawText(data.receivedFrom, margin + 35, y - 0.5, 12, 'bold', 0);
-    y += lineHeight;
+    y += lineHeight + 2; // Increased space
 
     // The Sum of Money (Words)
     drawText('THE SUM OF:', margin, y + 3, 10, 'bold');
@@ -492,35 +497,35 @@ function generateReceiptPDF(data) {
     // Use splitTextToSize to wrap the words nicely within the box
     const wrappedWords = doc.splitTextToSize(data.amountWords, boxW - 37);
     doc.text(wrappedWords, margin + 36, y + 4);
-    y += lineHeight * 2.5 + 4;
+    y += lineHeight * 2.5 + 5; // Increased space below the box
 
     // Being Paid For
     drawText('BEING PAID FOR:', margin, y, 10, 'bold', primaryColor);
     doc.line(margin + 35, y, pageW - margin, y);
     drawText(data.beingPaidFor, margin + 35, y - 0.5, 12, 'bold', 0);
-    y += lineHeight + 5;
+    y += lineHeight + 4; // Increased space
 
     // Payment References Section
     doc.setTextColor(primaryColor);
     drawText('PAYMENT DETAILS:', margin, y, 10, 'bold');
-    y += 3;
+    y += 4; // Increased space after title
 
     doc.setFontSize(10);
     doc.setTextColor(0);
 
     // Row 1: Cheque and RTGS/TT
     doc.rect(margin, y, boxW * 0.45, lineHeight); // Cheque Box
-    doc.text(`Cheque No: ${data.paymentDetails.chequeNo || 'N/A'}`, margin + 2, y + 4);
+    doc.text(`Cheque No: ${data.paymentDetails.chequeNo || 'N/A'}`, margin + 2, y + 4.5);
     doc.rect(margin + boxW * 0.55, y, boxW * 0.45, lineHeight); // RTGS/TT Box
-    doc.text(`RTGS/TT No: ${data.paymentDetails.rtgsTtNo || 'N/A'}`, margin + boxW * 0.55 + 2, y + 4);
-    y += lineHeight + 1;
+    doc.text(`RTGS/TT No: ${data.paymentDetails.rtgsTtNo || 'N/A'}`, margin + boxW * 0.55 + 2, y + 4.5);
+    y += lineHeight + 2; // Increased space
 
     // Row 2: Bank Used and Receipt Type
     doc.rect(margin, y, boxW * 0.45, lineHeight); // Bank Used Box
-    doc.text(`Bank Used: ${data.paymentDetails.bankUsed || 'N/A'}`, margin + 2, y + 4);
+    doc.text(`Bank Used: ${data.paymentDetails.bankUsed || 'N/A'}`, margin + 2, y + 4.5);
     doc.rect(margin + boxW * 0.55, y, boxW * 0.45, lineHeight); // Receipt Type Box
-    doc.text(`Receipt Type: ${data.receiptType}`, margin + boxW * 0.55 + 2, y + 4);
-    y += lineHeight + 5;
+    doc.text(`Receipt Type: ${data.receiptType}`, margin + boxW * 0.55 + 2, y + 4.5);
+    y += lineHeight + 6; // Increased space
 
     // =================================================================
     // AMOUNT FIGURE (BIG BOX)
@@ -549,7 +554,7 @@ function generateReceiptPDF(data) {
     drawText(`Balance Remaining: ${balanceText}`, margin, amountBoxY + 10, 10);
     drawText(`Due On/Before: ${data.balanceDetails.balanceDueDate || 'N/A'}`, margin, amountBoxY + 14, 10);
     
-    y = amountBoxY + amountBoxH + 5;
+    y = amountBoxY + amountBoxH + 7; // Increased space after the box
 
     // =================================================================
     // FOOTER/SIGNATURES
@@ -573,8 +578,7 @@ function generateReceiptPDF(data) {
     doc.text(footerText, pageW / 2, doc.internal.pageSize.getHeight() - 4, null, null, "center");
 
     doc.save(`Receipt_${data.receiptId}.pdf`);
-}
-
+      }
 
 // --- Keep the rest of the script.js after this point ---
 // ... (The rest of the script including section 6, 7, 8, and the stubs remain below)
