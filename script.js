@@ -750,7 +750,7 @@ async function populateBankDropdown(dropdownId) {
     }
 
     banks.forEach(data => {
-        // UPDATED LINE: Include branch name in the displayed option text
+        // Include the ID for easy lookup, but store the whole object as JSON string in the value
         const detailsJson = JSON.stringify(data);
         options += `<option value='${detailsJson}'>${data.name} - ${data.branch || 'No Branch'} (${data.currency})</option>`;
     });
@@ -888,7 +888,16 @@ async function saveInvoice(onlySave) {
     const priceUSD = parseFloat(document.getElementById('price').value);
     const goodsDescription = document.getElementById('goodsDescription').value;
     
-    const bankDetails = JSON.parse(document.getElementById('bankDetailsSelect').value);
+    // Bank Details are stored as JSON string in the value, so we parse it
+    let bankDetails;
+    try {
+        bankDetails = JSON.parse(document.getElementById('bankDetailsSelect').value);
+    } catch (e) {
+        alert("Error reading selected bank details. Please re-select the bank account.");
+        console.error("Error parsing bank details:", e);
+        return;
+    }
+    
     const buyerNameConfirmation = document.getElementById('buyerNameConfirmation').value;
 
     // 2. Calculate Pricing
@@ -926,7 +935,7 @@ async function saveInvoice(onlySave) {
             balanceUSD,
             depositKSH: depositKSH.toFixed(2),
         },
-        bankDetails,
+        bankDetails, // Save the full object for easy reference
         buyerNameConfirmation,
         createdBy: currentUser.email,
         createdAt: firebase.firestore.FieldValue.serverTimestamp(),
@@ -1000,16 +1009,10 @@ function generateInvoicePDF(data) {
             if (index === 0) {
                 // If the first line, draw it right after the prefix
                 currentX = textX; 
+            } else {
+                currentX = margin + termIndent;
             }
-            
-            // Check for USD price pattern in the line
-            const regex = /(USD\s[0-9,.]+|KSH\s[0-9,.]+)/g;
-            let match;
-            let lastIndex = 0;
-            
-            doc.setTextColor(primaryColor); // Default color
-            doc.setFont("helvetica", "normal");
-            
+
             // Calculate where the text should start on the first line after the prefix
             if (index === 0) {
                 const prefixWidth = doc.getStringUnitWidth(prefix) * doc.getFontSize() / doc.internal.scaleFactor;
@@ -1018,28 +1021,9 @@ function generateInvoicePDF(data) {
                 currentX = margin + termIndent;
             }
 
-            while ((match = regex.exec(line)) !== null) {
-                // Draw text before the price
-                let preText = line.substring(lastIndex, match.index);
-                doc.text(preText, currentX, currentY);
-                currentX += doc.getStringUnitWidth(preText) * doc.getFontSize() / doc.internal.scaleFactor;
-                
-                // Draw the price in bold red
-                let priceText = match[0];
-                doc.setTextColor(secondaryColor);
-                doc.setFont("helvetica", "bold");
-                doc.text(priceText, currentX, currentY);
-                currentX += doc.getStringUnitWidth(priceText) * doc.getFontSize() / doc.internal.scaleFactor;
-                
-                // Reset font and color
-                doc.setTextColor(primaryColor);
-                doc.setFont("helvetica", "normal");
-                lastIndex = match.index + priceText.length;
-            }
-
-            // Draw remaining text after the last price (or the whole line if no price was found)
-            let postText = line.substring(lastIndex);
-            doc.text(postText, currentX, currentY);
+            doc.setTextColor(primaryColor);
+            doc.setFont("helvetica", "normal");
+            doc.text(line, currentX, currentY);
 
             currentY += lineSpacing;
         });
@@ -1230,13 +1214,13 @@ function generateInvoicePDF(data) {
     const bank = data.bankDetails;
     const branchText = bank.branch ? `(Branch: ${bank.branch})` : '';
 
-    doc.text(`Bank Name: ${bank.name} ${branchText}`, margin + 5, currentY_bank);
+    doc.text(`Bank Name: ${bank.name || 'N/A'} ${branchText}`, margin + 5, currentY_bank);
     currentY_bank += 4;
-    doc.text(`Account Name: ${bank.accountName}`, margin + 5, currentY_bank);
+    doc.text(`Account Name: ${bank.accountName || 'N/A'}`, margin + 5, currentY_bank);
     currentY_bank += 4;
-    doc.text(`Account Number: ${bank.accountNumber}`, margin + 5, currentY_bank);
+    doc.text(`Account Number: ${bank.accountNumber || 'N/A'}`, margin + 5, currentY_bank);
     currentY_bank += 4;
-    doc.text(`SWIFT/BIC Code: ${bank.swiftCode} | Currency: ${bank.currency}`, margin + 5, currentY_bank);
+    doc.text(`SWIFT/BIC Code: ${bank.swiftCode || 'N/A'} | Currency: ${bank.currency || 'N/A'}`, margin + 5, currentY_bank);
 
     drawText('**NOTE: Buyer Should bear the cost of Bank Charge when remitting T/T', margin, y + 40 - 5, 9, 'bold', secondaryColor);
     y += 45;
@@ -1351,11 +1335,7 @@ function reDownloadInvoice(data) {
 //                 9. CAR SALES AGREEMENT BANK HELPER (FROM bankDetails)
 // =================================================================
 
-/**
- * Helper to fetch raw bank details from Firestore (for Agreement PDF generation).
- * Uses the 'bankDetails' collection.
- * (The original _getBankDetailsData function is reused from Section 6)
- */
+// (The _getBankDetailsData function is reused from Section 6)
 
 // =================================================================
 //                 10. CAR SALES AGREEMENT MODULE (CORRECTED)
@@ -1536,7 +1516,7 @@ async function saveAgreement() {
         return;
     }
 
-    // --- CORRECTION 3: READ THE DATE INPUT VALUE ---
+    // --- CORRECTION 1: READ THE DATE INPUT VALUE ---
     const agreementDate = document.getElementById('agreementDateInput').value; // Get YYYY-MM-DD format
 
     // 1. Collect Buyer Details
@@ -1564,9 +1544,22 @@ async function saveAgreement() {
     });
 
     // 4. Collect other details
-    const selectedBank = document.getElementById('agreementBankDetailsSelect');
+    const selectedBankValue = document.getElementById('agreementBankDetailsSelect').value;
     const currency = document.getElementById('currencySelect').value;
-    
+
+    // --- CORRECTION 2: Parse the full bank details from the dropdown value ---
+    let bankDetails = {};
+    let bankId = '';
+
+    try {
+        bankDetails = JSON.parse(selectedBankValue);
+        bankId = bankDetails.id;
+    } catch (e) {
+        console.error("Error parsing bank details from dropdown:", e);
+        alert("Please select a valid bank account.");
+        return;
+    }
+
     // 5. Construct Agreement Data Object
     const agreementData = {
         // --- Use the date from the input ---
@@ -1590,7 +1583,7 @@ async function saveAgreement() {
         salesTerms: {
             price: totalAmount,
             currency: currency,
-            bankId: selectedBank.value,
+            bankId: bankId, // <<< Correctly save only the ID
             paymentSchedule: paymentSchedule,
         },
         signatures: {
@@ -1606,12 +1599,9 @@ async function saveAgreement() {
         const docRef = await db.collection("sales_agreements").add(agreementData);
         alert(`Sales Agreement for ${agreementData.buyer.name} saved successfully!`);
 
-        // Fetch bank details for PDF generation
-        const banks = await _getBankDetailsData();
-        const selectedBankDetails = banks.find(b => b.id === agreementData.salesTerms.bankId);
-        
+        // Use the parsed bank details object for immediate PDF generation
         agreementData.firestoreId = docRef.id;
-        agreementData.bankDetails = selectedBankDetails;
+        agreementData.bankDetails = bankDetails; // <<< Attach full details for PDF
         generateAgreementPDF(agreementData);
 
         form.reset();
@@ -1675,11 +1665,34 @@ async function fetchAgreements() {
  * @param {object} data - The agreement data object retrieved from Firestore.
  */
 async function reDownloadAgreement(data) {
-    // Need to re-fetch bank details as they are not saved in the agreement document itself, only the ID.
-    if (!data.bankDetails && data.salesTerms && data.salesTerms.bankId) {
-        const banks = await _getBankDetailsData();
-        data.bankDetails = banks.find(b => b.id === data.salesTerms.bankId);
+    // 1. Check if bankDetails are already present
+    if (data.bankDetails && data.bankDetails.name) {
+        return generateAgreementPDF(data);
     }
+
+    let bankDetails = null;
+    const bankIdValue = data.salesTerms?.bankId;
+
+    if (bankIdValue) {
+        // Check if the value is a stringified JSON object (to support old, bugged data)
+        if (bankIdValue.startsWith('{') && bankIdValue.endsWith('}')) {
+            try {
+                // If it's the bugged full JSON string, parse it
+                bankDetails = JSON.parse(bankIdValue);
+            } catch (e) {
+                console.warn("Could not parse old bankId JSON string. Falling back to ID fetch.");
+            }
+        }
+        
+        // If bankDetails is still null, assume it's the correct new format (just the ID) or the fallback failed
+        if (!bankDetails) {
+            const banks = await _getBankDetailsData();
+            bankDetails = banks.find(b => b.id === bankIdValue);
+        }
+    }
+    
+    // Attach the fetched/parsed details to the data object
+    data.bankDetails = bankDetails || {}; 
     generateAgreementPDF(data);
 }
 
@@ -1800,11 +1813,16 @@ function generateAgreementPDF(data) {
     doc.rect(margin, y, pageW - 20, 20);
     doc.setFontSize(9);
     doc.setTextColor(primaryColor);
-    doc.text(`Bank Name: ${data.bankDetails ? data.bankDetails.name : 'N/A'}`, margin + 3, y + 4);
-    doc.text(`Account Name: ${data.bankDetails ? data.bankDetails.accountName : 'N/A'}`, margin + 90, y + 4);
-    doc.text(`Account No: ${data.bankDetails ? data.bankDetails.accountNumber : 'N/A'}`, margin + 3, y + 9);
-    doc.text(`SWIFT/BIC: ${data.bankDetails ? data.bankDetails.swiftCode : 'N/A'}`, margin + 90, y + 9);
-    doc.text(`Branch: ${data.bankDetails ? data.bankDetails.branch : 'N/A'} | Currency: ${data.salesTerms.currency}`, margin + 3, y + 14);
+    
+    // Safely access bank details (will show 'N/A' if object is missing or empty)
+    const bank = data.bankDetails || {};
+    const branchText = bank.branch ? `(Branch: ${bank.branch})` : '';
+
+    doc.text(`Bank Name: ${bank.name || 'N/A'} ${branchText}`, margin + 3, y + 4);
+    doc.text(`Account Name: ${bank.accountName || 'N/A'}`, margin + 90, y + 4);
+    doc.text(`Account No: ${bank.accountNumber || 'N/A'}`, margin + 3, y + 9);
+    doc.text(`SWIFT/BIC: ${bank.swiftCode || 'N/A'}`, margin + 90, y + 9);
+    doc.text(`Branch: ${bank.branch || 'N/A'} | Currency: ${data.salesTerms.currency}`, margin + 3, y + 14);
     y += 25;
 
     // Payment Schedule Table
