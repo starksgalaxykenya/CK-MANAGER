@@ -145,30 +145,103 @@ function renderAgreementForm() {
 //                 5. RECEIPT/PAYMENT LOGIC 
 // =================================================================
 
+// =================================================================
+//                 5. RECEIPT/PAYMENT LOGIC (COMPREHENSIVELY REVISED)
+// =================================================================
+
+/**
+ * Helper function to convert a number to words (for KES amounts).
+ * This is a simplified function and may not handle extremely large numbers perfectly.
+ */
+function numberToWords(n) {
+    if (typeof n !== 'number' || isNaN(n)) return '';
+
+    const whole = Math.floor(n);
+    const decimal = Math.round((n - whole) * 100);
+
+    const a = ['', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen'];
+    const b = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
+    
+    const numToWords = (num) => {
+        if (num < 20) return a[num];
+        if (num < 100) return b[Math.floor(num / 10)] + (num % 10 === 0 ? '' : ' ' + a[num % 10]);
+        if (num < 1000) return a[Math.floor(num / 100)] + ' hundred' + (num % 100 === 0 ? '' : ' and ' + numToWords(num % 100));
+        if (num < 1000000) return numToWords(Math.floor(num / 1000)) + ' thousand' + (num % 1000 === 0 ? '' : ' ' + numToWords(num % 1000));
+        if (num < 1000000000) return numToWords(Math.floor(num / 1000000)) + ' million' + (num % 1000000 === 0 ? '' : ' ' + numToWords(num % 1000000));
+        return numToWords(Math.floor(num / 1000000000)) + ' billion' + (num % 1000000000 === 0 ? '' : ' ' + numToWords(num % 1000000000));
+    };
+
+    let result = numToWords(whole).replace(/\s\s+/g, ' ').trim();
+
+    if (decimal > 0) {
+        result += ` and ${numToWords(decimal)} cents`;
+    }
+
+    return result.charAt(0).toUpperCase() + result.slice(1) + ' only.';
+}
+
+
+/**
+ * Renders the new comprehensive Receipt form.
+ */
 function renderReceiptForm() {
     const formArea = document.getElementById('document-form-area');
     formArea.innerHTML = `
         <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div class="p-6 border border-blue-200 rounded-xl bg-white shadow-md">
-                <h3 class="text-xl font-semibold mb-4 text-primary-blue">New Receipt</h3>
+            <div class="p-6 border border-secondary-red rounded-xl bg-white shadow-md">
+                <h3 class="text-xl font-semibold mb-4 text-secondary-red">New Payment Receipt</h3>
                 <form id="receipt-form" onsubmit="event.preventDefault(); saveReceipt()">
-                    <input type="text" id="customerName" required placeholder="Customer Name" class="mt-2 block w-full p-2 border rounded-md">
-                    <input type="text" id="invoiceRef" required placeholder="Invoice/Car Ref No." class="mt-2 block w-full p-2 border rounded-md">
-                    <input type="number" id="amountPaid" step="0.01" required placeholder="Amount Paid (Ksh)" class="mt-2 block w-full p-2 border rounded-md">
-                    <select id="paymentMethod" required class="mt-2 block w-full p-2 border rounded-md">
-                        <option value="" disabled selected>Select Payment Method</option>
-                        <option value="Cash">Cash</option>
-                        <option value="Bank Transfer">Bank Transfer</option>
-                        <option value="MPesa">M-Pesa</option>
-                    </select>
-                    <button type="submit" class="mt-4 w-full bg-green-500 hover:bg-green-700 text-white font-bold py-2 rounded-md transition duration-150">
+                    
+                    <div class="grid grid-cols-2 gap-3 mb-4">
+                        <select id="receiptType" required class="block w-full p-2 border rounded-md">
+                            <option value="" disabled selected>Select Receipt Type</option>
+                            <option value="Auction Imports">Auction Imports</option>
+                            <option value="BeForward">BeForward</option>
+                            <option value="Local Sales">Local Sales</option>
+                            <option value="Other">Other</option>
+                        </select>
+                        <input type="text" id="receivedFrom" required placeholder="Received From (Customer Name)" class="block w-full p-2 border rounded-md">
+                    </div>
+
+                    <fieldset class="border p-4 rounded-lg mb-4">
+                        <legend class="text-base font-semibold text-primary-blue px-2">Amount Received</legend>
+                        <div class="grid grid-cols-3 gap-3">
+                            <select id="currency" required class="p-2 border rounded-md">
+                                <option value="KSH">KSH</option>
+                                <option value="USD">USD</option>
+                            </select>
+                            <input type="number" id="amountReceived" step="0.01" required placeholder="Amount Figure" class="p-2 border rounded-md col-span-2" oninput="updateAmountInWords()">
+                        </div>
+                        <div class="mt-2">
+                            <label for="amountWords" class="block text-sm font-medium text-gray-700">Amount in Words:</label>
+                            <textarea id="amountWords" rows="2" readonly class="mt-1 block w-full p-2 border rounded-md bg-gray-100 text-gray-800"></textarea>
+                        </div>
+                    </fieldset>
+
+                    <input type="text" id="beingPaidFor" required placeholder="Being Paid For (e.g., Toyota Vitz 2018 Deposit)" class="mb-4 block w-full p-2 border rounded-md">
+
+                    <fieldset class="border p-4 rounded-lg mb-4">
+                        <legend class="text-base font-semibold text-primary-blue px-2">Payment References</legend>
+                        <div class="grid grid-cols-3 gap-3">
+                            <input type="text" id="chequeNo" placeholder="Cheque No. (Optional)" class="p-2 border rounded-md">
+                            <input type="text" id="rtgsTtNo" placeholder="RTGS/TT No. (Optional)" class="p-2 border rounded-md">
+                            <input type="text" id="bankUsed" placeholder="Bank Used (e.g., KCB, NCBA)" class="p-2 border rounded-md">
+                        </div>
+                    </fieldset>
+
+                    <div class="grid grid-cols-2 gap-3 mb-6">
+                        <input type="number" id="balanceRemaining" step="0.01" placeholder="Balance Remaining (Optional)" class="block w-full p-2 border rounded-md">
+                        <input type="date" id="balanceDueDate" placeholder="To be paid on or before" class="block w-full p-2 border rounded-md">
+                    </div>
+
+                    <button type="submit" class="w-full bg-secondary-red hover:bg-red-700 text-white font-bold py-3 rounded-lg transition duration-150">
                         Generate & Save Receipt
                     </button>
                 </form>
             </div>
 
-            <div class="p-6 border border-blue-200 rounded-xl bg-white shadow-md">
-                <h3 class="text-xl font-semibold mb-4 text-primary-blue">Existing Payments (Add More)</h3>
+            <div class="p-6 border border-gray-300 rounded-xl bg-white shadow-md">
+                <h3 class="text-xl font-semibold mb-4 text-primary-blue">Recent Receipts</h3>
                 <div id="recent-receipts">
                     <p class="text-center text-gray-500">Loading payments...</p>
                 </div>
@@ -178,76 +251,141 @@ function renderReceiptForm() {
     fetchReceipts();
 }
 
-async function saveReceipt() {
-    const customerName = document.getElementById('customerName').value;
-    const invoiceRef = document.getElementById('invoiceRef').value;
-    const amountPaid = parseFloat(document.getElementById('amountPaid').value);
-    const paymentMethod = document.getElementById('paymentMethod').value;
-    
-    if (isNaN(amountPaid) || amountPaid <= 0) {
-        alert("Please enter a valid amount.");
+/**
+ * Updates the amount in words field dynamically.
+ */
+function updateAmountInWords() {
+    const amountField = document.getElementById('amountReceived');
+    const currencyField = document.getElementById('currency');
+    const wordsField = document.getElementById('amountWords');
+    const amount = parseFloat(amountField.value);
+    const currency = currencyField.value;
+
+    if (isNaN(amount) || amount <= 0) {
+        wordsField.value = '';
         return;
     }
 
+    let words = numberToWords(amount);
+    
+    if (currency === 'USD') {
+        words = words.replace('only', 'US Dollars only.');
+    } else { // KSH
+        words = words.replace('only', 'Kenya Shillings only.');
+    }
+
+    wordsField.value = words;
+}
+
+/**
+ * Generates a custom receipt ID based on date, type, and name.
+ */
+function generateReceiptId(type, name) {
+    const datePart = new Date().toISOString().slice(0, 10).replace(/-/g, ''); // YYYYMMDD
+    const typePart = type.split(' ')[0].toUpperCase().substring(0, 3);
+    const namePart = name.split(' ')[0].toUpperCase().substring(0, 3);
+    return `RCPT-${datePart}-${typePart}-${namePart}`;
+}
+
+/**
+ * Saves the new receipt details to Firestore.
+ */
+async function saveReceipt() {
+    const form = document.getElementById('receipt-form');
+    if (!form.checkValidity()) {
+        form.reportValidity();
+        return;
+    }
+    
+    const receiptType = document.getElementById('receiptType').value;
+    const receivedFrom = document.getElementById('receivedFrom').value;
+    const currency = document.getElementById('currency').value;
+    const amountReceived = parseFloat(document.getElementById('amountReceived').value);
+    const amountWords = document.getElementById('amountWords').value;
+    const beingPaidFor = document.getElementById('beingPaidFor').value;
+    const chequeNo = document.getElementById('chequeNo').value;
+    const rtgsTtNo = document.getElementById('rtgsTtNo').value;
+    const bankUsed = document.getElementById('bankUsed').value;
+    const balanceRemaining = parseFloat(document.getElementById('balanceRemaining').value) || 0;
+    const balanceDueDate = document.getElementById('balanceDueDate').value;
+
+    if (isNaN(amountReceived) || amountReceived <= 0) {
+        alert("Please enter a valid amount received.");
+        return;
+    }
+
+    const receiptId = generateReceiptId(receiptType, receivedFrom);
+    const receiptDate = new Date().toLocaleDateString('en-US');
+
+    const receiptData = {
+        receiptId,
+        receiptType,
+        receivedFrom,
+        currency,
+        amountReceived,
+        amountWords,
+        beingPaidFor,
+        paymentDetails: {
+            chequeNo,
+            rtgsTtNo,
+            bankUsed
+        },
+        balanceDetails: {
+            balanceRemaining,
+            balanceDueDate
+        },
+        receiptDate,
+        createdBy: currentUser.email,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    };
+
     try {
-        const receiptDate = new Date();
-        const newPayment = { 
-            amount: amountPaid, 
-            method: paymentMethod, 
-            date: receiptDate 
-        };
-
-        const newReceiptRef = await db.collection("receipts").add({
-            customerName,
-            invoiceRef,
-            payments: [newPayment],
-            totalPaid: amountPaid,
-            createdBy: currentUser.email,
-            createdAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
-
-        const receiptData = {
-            id: newReceiptRef.id,
-            customerName,
-            invoiceRef,
-            payments: [{ ...newPayment, date: receiptDate.toLocaleDateString() }], // Format date for PDF
-            totalPaid: amountPaid
-        };
-
+        const docRef = await db.collection("receipts").add(receiptData);
+        alert(`Receipt ${receiptId} saved successfully!`);
+        
+        receiptData.firestoreId = docRef.id;
         generateReceiptPDF(receiptData);
-        alert(`Receipt ${newReceiptRef.id.substring(0, 8).toUpperCase()} saved and PDF generated!`);
-        renderReceiptForm(); // Refresh view
+        
+        document.getElementById('receipt-form').reset();
+        document.getElementById('amountWords').value = '';
+        fetchReceipts(); // Refresh history
     } catch (error) {
         console.error("Error saving receipt:", error);
         alert("Failed to save receipt: " + error.message);
     }
 }
 
+/**
+ * Fetches and displays recent receipts.
+ */
 async function fetchReceipts() {
     const receiptList = document.getElementById('recent-receipts');
     let html = ``;
     try {
         const snapshot = await db.collection("receipts").orderBy("createdAt", "desc").limit(10).get();
         if (snapshot.empty) {
-            receiptList.innerHTML = `<p class="text-gray-500">No recent payments found.</p>`;
+            receiptList.innerHTML = `<p class="text-gray-500">No recent receipts found.</p>`;
             return;
         }
         
         html = `<ul class="space-y-3">`;
         snapshot.forEach(doc => {
             const data = doc.data();
+            const receiptDataJson = JSON.stringify({
+                ...data, 
+                firestoreId: doc.id,
+                // Ensure Timestamp is handled for JSON stringify
+                createdAt: data.createdAt ? data.createdAt.toDate().toISOString() : new Date().toISOString()
+            });
+
             html += `<li class="p-3 border rounded-lg bg-gray-50 flex flex-col sm:flex-row justify-between items-start sm:items-center">
                         <div>
-                            <strong class="text-gray-800">${data.customerName}</strong><br>
-                            <span class="text-sm text-gray-600">Ref: ${data.invoiceRef} | Paid: Ksh ${data.totalPaid.toFixed(2)}</span>
+                            <strong class="text-gray-800">${data.receiptId}</strong><br>
+                            <span class="text-sm text-gray-600">From: ${data.receivedFrom} | Amount: ${data.currency} ${data.amountReceived.toFixed(2)}</span>
                         </div>
                         <div class="mt-2 sm:mt-0 space-x-2">
-                            <button onclick="renderAddPayment('${doc.id}', '${data.customerName}', '${data.invoiceRef}')" 
-                                    class="bg-yellow-500 hover:bg-yellow-600 text-white text-xs py-1 px-3 rounded-full transition duration-150">
-                                + Add Payment
-                            </button>
-                            <button onclick="fetchAndRegeneratePDF('${doc.id}')" 
-                                    class="bg-blue-500 hover:bg-blue-600 text-white text-xs py-1 px-3 rounded-full transition duration-150">
+                            <button onclick='reDownloadReceipt(${receiptDataJson})' 
+                                    class="bg-secondary-red hover:bg-red-600 text-white text-xs py-1 px-3 rounded-full transition duration-150">
                                 Re-Download PDF
                             </button>
                         </div>
@@ -261,154 +399,186 @@ async function fetchReceipts() {
     }
 }
 
-async function fetchAndRegeneratePDF(receiptId) {
-    try {
-        const doc = await db.collection("receipts").doc(receiptId).get();
-        if (!doc.exists) {
-            alert("Receipt not found!");
-            return;
-        }
-        const data = doc.data();
-        
-        const pdfData = {
-            id: doc.id,
-            customerName: data.customerName,
-            invoiceRef: data.invoiceRef,
-            payments: data.payments.map(p => ({
-                amount: p.amount,
-                method: p.method,
-                // Convert Firebase Timestamp to a readable string
-                date: p.date.toDate ? p.date.toDate().toLocaleDateString() : new Date(p.date).toLocaleDateString()
-            })),
-            totalPaid: data.totalPaid
-        };
-        generateReceiptPDF(pdfData);
-    } catch (error) {
-        console.error("Error regenerating PDF:", error);
-        alert("Failed to fetch receipt data for PDF.");
+/**
+ * Re-downloads the PDF for a selected receipt document from history.
+ * @param {object} data - The receipt data object retrieved from Firestore.
+ */
+function reDownloadReceipt(data) {
+    // Ensure data.receiptDate is set (should be from the save logic)
+    if (!data.receiptDate) {
+         data.receiptDate = new Date().toLocaleDateString('en-US'); // Fallback
     }
-}
-
-
-function renderAddPayment(receiptId, customerName, invoiceRef) {
-    const formArea = document.getElementById('document-form-area');
-    formArea.innerHTML = `
-        <div class="mt-8 p-6 border border-yellow-300 rounded-xl bg-yellow-50 shadow-lg max-w-lg mx-auto">
-            <h3 class="text-xl font-semibold mb-4 text-yellow-800">Add Payment for ${customerName} (Ref: ${invoiceRef})</h3>
-            <form onsubmit="event.preventDefault(); addAdditionalPayment('${receiptId}')">
-                <input type="number" id="addAmount" step="0.01" required placeholder="Additional Amount (Ksh)" class="mt-2 block w-full p-2 border rounded-md">
-                <select id="addMethod" required class="mt-2 block w-full p-2 border rounded-md">
-                    <option value="" disabled selected>Select Payment Method</option>
-                    <option value="Cash">Cash</option>
-                    <option value="Bank Transfer">Bank Transfer</option>
-                    <option value="MPesa">M-Pesa</option>
-                </select>
-                <div class="flex space-x-3 mt-4">
-                    <button type="submit" class="flex-1 bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-2 rounded-md">
-                        Confirm Payment
-                    </button>
-                    <button type="button" onclick="renderReceiptForm()" class="flex-1 bg-gray-500 hover:bg-gray-700 text-white font-bold py-2 rounded-md">
-                        Cancel
-                    </button>
-                </div>
-            </form>
-        </div>
-    `;
-}
-
-async function addAdditionalPayment(receiptId) {
-    const additionalAmount = parseFloat(document.getElementById('addAmount').value);
-    const additionalMethod = document.getElementById('addMethod').value;
-
-    if (isNaN(additionalAmount) || additionalAmount <= 0) {
-        alert("Please enter a valid amount.");
-        return;
-    }
-
-    const newPayment = {
-        amount: additionalAmount,
-        method: additionalMethod,
-        date: new Date()
-    };
-
-    try {
-        const receiptRef = db.collection("receipts").doc(receiptId);
-        
-        await receiptRef.update({
-            payments: firebase.firestore.FieldValue.arrayUnion(newPayment),
-            totalPaid: firebase.firestore.FieldValue.increment(additionalAmount)
-        });
-
-        alert("Additional payment successfully added and receipt updated!");
-        
-        fetchAndRegeneratePDF(receiptId);
-        renderReceiptForm();
-    } catch (error) {
-        console.error("Error adding additional payment:", error);
-        alert("Failed to add payment: " + error.message);
-    }
+    generateReceiptPDF(data);
 }
 
 /**
- * Generates and downloads a PDF for a given receipt data object.
+ * Generates and downloads a custom PDF for the comprehensive receipt.
  */
 function generateReceiptPDF(data) {
     const { jsPDF } = window.jspdf;
-    const doc = new jsPDF();
-    const companyName = "CAR DEALS KENYA LTD.";
-    const companyAddress = "P.O. Box 12345, Nairobi, Kenya";
-    const companyPhone = "+254 7XX XXX XXX";
-    let y = 20; 
+    const doc = new jsPDF('p', 'mm', 'a4'); 
 
-    // Header logic (similar to invoice but simpler for receipt)
-    doc.setFontSize(22);
-    doc.setFont("helvetica", "bold");
-    doc.text(companyName, 105, y, null, null, "center");
-    y += 15;
-    doc.setFontSize(18);
-    doc.text("OFFICIAL PAYMENT RECEIPT", 105, y, null, null, "center");
-    y += 10;
-
-    // Metadata
-    doc.setFontSize(12);
-    doc.text(`Receipt No: ${data.id.substring(0, 8).toUpperCase()}`, 20, y);
-    doc.text(`Date Printed: ${new Date().toLocaleDateString()}`, 190, y, null, null, "right");
-    y += 7;
-    doc.text(`Customer: ${data.customerName}`, 20, y);
-    y += 7;
-    doc.text(`Car/Invoice Ref: ${data.invoiceRef}`, 20, y);
-    y += 10;
-
-    // Payments Table Header
-    doc.setFillColor(200, 220, 255); 
-    doc.rect(20, y, 170, 8, "F");
-    doc.setFont("helvetica", "bold");
-    doc.text("Payment Date", 25, y + 6);
-    doc.text("Method", 95, y + 6);
-    doc.text("Amount (Ksh)", 185, y + 6, null, null, "right");
-    y += 8;
-
-    // Payments Table Rows
-    doc.setFontSize(11);
-    doc.setFont("helvetica", "normal");
-    data.payments.forEach(payment => {
-        doc.text(payment.date, 25, y + 6);
-        doc.text(payment.method, 95, y + 6);
-        doc.text(payment.amount.toFixed(2), 185, y + 6, null, null, "right");
-        y += 8;
-    });
-
-    // Total Paid
-    doc.setDrawColor(0);
-    doc.line(20, y, 190, y);
-    y += 5;
-    doc.setFontSize(14);
-    doc.setFont("helvetica", "bold");
-    doc.text("TOTAL AMOUNT PAID:", 100, y);
-    doc.text(`Ksh ${data.totalPaid.toFixed(2)}`, 190, y, null, null, "right");
+    const primaryColor = '#183263'; // WanBite Blue
+    const secondaryColor = '#D96359'; // Red
     
-    doc.save(`Receipt_${data.customerName.replace(/ /g, '_')}_${data.id.substring(0, 5)}.pdf`);
+    const pageW = doc.internal.pageSize.getWidth();
+    let y = 10; 
+    const margin = 10;
+    const boxW = pageW - (2 * margin);
+    const lineHeight = 6;
+
+    // --- HELPER FUNCTION ---
+    const drawText = (text, x, y, size, style = 'normal', color = primaryColor, align = 'left') => {
+        doc.setFontSize(size);
+        doc.setFont("helvetica", style);
+        doc.setTextColor(color);
+        doc.text(text, x, y, { align: align });
+    };
+
+    // =================================================================
+    // HEADER SECTION
+    // =================================================================
+    
+    // Top Bar (Color #183263)
+    doc.setFillColor(primaryColor);
+    doc.rect(0, 0, pageW, 15, 'F');
+    
+    drawText('WanBite Investments Co. Ltd.', pageW / 2, 8, 18, 'bold', '#FFFFFF', 'center');
+    drawText('carskenya.co.ke', pageW / 2, 13, 10, 'normal', '#FFFFFF', 'center');
+    
+    y = 25;
+
+    // RECEIPT TITLE
+    doc.setTextColor(primaryColor);
+    doc.setFontSize(24);
+    doc.setFont("helvetica", "bold");
+    doc.text("OFFICIAL RECEIPT", pageW / 2, y, null, null, "center");
+    y += 10;
+    
+    // Receipt Metadata Box (ID and Date)
+    doc.setDrawColor(primaryColor);
+    doc.setLineWidth(0.5);
+    doc.rect(margin, y, boxW, 15);
+    
+    drawText('RECEIPT NO:', margin + 3, y + 5, 10, 'bold', secondaryColor);
+    drawText(data.receiptId, margin + 3, y + 11, 14, 'bold', primaryColor);
+    
+    drawText('DATE:', pageW - margin - 3, y + 5, 10, 'bold', secondaryColor, 'right');
+    drawText(data.receiptDate, pageW - margin - 3, y + 11, 14, 'bold', primaryColor, 'right');
+    y += 18;
+
+    // =================================================================
+    // MAIN BODY
+    // =================================================================
+
+    // Received From
+    doc.setTextColor(primaryColor);
+    drawText('RECEIVED FROM:', margin, y, 10, 'bold');
+    doc.setDrawColor(0);
+    doc.line(margin + 35, y, pageW - margin, y);
+    drawText(data.receivedFrom, margin + 35, y - 0.5, 12, 'bold', 0);
+    y += lineHeight;
+
+    // The Sum of Money (Words)
+    drawText('THE SUM OF:', margin, y + 3, 10, 'bold');
+    doc.setFillColor(240, 240, 240); 
+    doc.rect(margin + 35, y, boxW - 35, lineHeight * 2.5, 'F'); // Box for words
+    doc.setDrawColor(0);
+    doc.setLineWidth(0.2);
+    doc.rect(margin + 35, y, boxW - 35, lineHeight * 2.5);
+    
+    doc.setTextColor(0);
+    doc.setFontSize(11);
+    // Use splitTextToSize to wrap the words nicely within the box
+    const wrappedWords = doc.splitTextToSize(data.amountWords, boxW - 37);
+    doc.text(wrappedWords, margin + 36, y + 4);
+    y += lineHeight * 2.5 + 4;
+
+    // Being Paid For
+    drawText('BEING PAID FOR:', margin, y, 10, 'bold', primaryColor);
+    doc.line(margin + 35, y, pageW - margin, y);
+    drawText(data.beingPaidFor, margin + 35, y - 0.5, 12, 'bold', 0);
+    y += lineHeight + 5;
+
+    // Payment References Section
+    doc.setTextColor(primaryColor);
+    drawText('PAYMENT DETAILS:', margin, y, 10, 'bold');
+    y += 3;
+
+    doc.setFontSize(10);
+    doc.setTextColor(0);
+
+    // Row 1: Cheque and RTGS/TT
+    doc.rect(margin, y, boxW * 0.45, lineHeight); // Cheque Box
+    doc.text(`Cheque No: ${data.paymentDetails.chequeNo || 'N/A'}`, margin + 2, y + 4);
+    doc.rect(margin + boxW * 0.55, y, boxW * 0.45, lineHeight); // RTGS/TT Box
+    doc.text(`RTGS/TT No: ${data.paymentDetails.rtgsTtNo || 'N/A'}`, margin + boxW * 0.55 + 2, y + 4);
+    y += lineHeight + 1;
+
+    // Row 2: Bank Used and Receipt Type
+    doc.rect(margin, y, boxW * 0.45, lineHeight); // Bank Used Box
+    doc.text(`Bank Used: ${data.paymentDetails.bankUsed || 'N/A'}`, margin + 2, y + 4);
+    doc.rect(margin + boxW * 0.55, y, boxW * 0.45, lineHeight); // Receipt Type Box
+    doc.text(`Receipt Type: ${data.receiptType}`, margin + boxW * 0.55 + 2, y + 4);
+    y += lineHeight + 5;
+
+    // =================================================================
+    // AMOUNT FIGURE (BIG BOX)
+    // =================================================================
+    const amountBoxH = 15;
+    const amountBoxY = y + 5;
+    
+    // Total Amount Box (Right Side)
+    doc.setFillColor(secondaryColor);
+    doc.rect(pageW - margin - 70, amountBoxY, 70, amountBoxH, 'F');
+    
+    doc.setTextColor(255);
+    drawText('AMOUNT FIGURE', pageW - margin - 65, amountBoxY + 4, 8, 'bold', 255);
+    drawText(`${data.currency} ${data.amountReceived.toLocaleString('en-US', { minimumFractionDigits: 2 })}`, pageW - margin - 5, amountBoxY + 11, 18, 'bold', 255, 'right');
+    
+    // Balance Details (Left Side)
+    doc.setTextColor(primaryColor);
+    drawText('BALANCE DETAILS', margin, amountBoxY + 4, 10, 'bold');
+    doc.setFontSize(12);
+    doc.setTextColor(0);
+
+    const balanceText = data.balanceDetails.balanceRemaining > 0 
+        ? `${data.currency} ${data.balanceDetails.balanceRemaining.toLocaleString('en-US', { minimumFractionDigits: 2 })}` 
+        : 'ZERO';
+    
+    drawText(`Balance Remaining: ${balanceText}`, margin, amountBoxY + 10, 10);
+    drawText(`Due On/Before: ${data.balanceDetails.balanceDueDate || 'N/A'}`, margin, amountBoxY + 14, 10);
+    
+    y = amountBoxY + amountBoxH + 5;
+
+    // =================================================================
+    // FOOTER/SIGNATURES
+    // =================================================================
+
+    doc.setTextColor(primaryColor);
+    drawText('... With thanks', margin, y + 10, 12, 'italic', secondaryColor);
+    
+    doc.line(pageW - margin - 50, y + 15, pageW - margin, y + 15);
+    drawText('For WanBite Investment Co. LTD', pageW - margin - 50, y + 19, 10, 'normal', primaryColor);
+    y += 25;
+
+
+    // --- Global Footer ---
+    doc.setFillColor(primaryColor);
+    doc.rect(0, doc.internal.pageSize.getHeight() - 10, pageW, 10, 'F');
+    
+    doc.setTextColor(255);
+    doc.setFontSize(9);
+    const footerText = `Location: Ngong Road, Kilimani, Nairobi. | Email: sales@carskenya.co.ke | Phone: 0713147136`;
+    doc.text(footerText, pageW / 2, doc.internal.pageSize.getHeight() - 4, null, null, "center");
+
+    doc.save(`Receipt_${data.receiptId}.pdf`);
 }
+
+
+// --- Keep the rest of the script.js after this point ---
+// ... (The rest of the script including section 6, 7, 8, and the stubs remain below)
+// ...
 
 // =================================================================
 //                 7. BANK MANAGEMENT MODULE (NEW)
