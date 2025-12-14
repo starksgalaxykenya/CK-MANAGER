@@ -93,9 +93,9 @@ function renderDashboard() {
     appContent.innerHTML = `
         <h2 class="text-4xl font-extrabold mb-8 text-primary-blue">CDMS Dashboard</h2>
         <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
-            ${createDashboardCard('📄 Document Generator', 'Invoices, Receipts, Agreements', 'bg-green-100 border-green-400', 'handleDocumentGenerator')}
-            ${createDashboardCard('🚢 Fleet Management', 'Car Tracking, Clearing, ETA', 'bg-yellow-100 border-yellow-400', 'handleFleetManagement')}
-            ${createDashboardCard('📝 HR & Requisitions', 'Leave Applications, Requisition Forms', 'bg-red-100 border-red-400', 'handleHRManagement')}
+            ${createDashboardCard('塘 Document Generator', 'Invoices, Receipts, Agreements', 'bg-green-100 border-green-400', 'handleDocumentGenerator')}
+            ${createDashboardCard('圓 Fleet Management', 'Car Tracking, Clearing, ETA', 'bg-yellow-100 border-yellow-400', 'handleFleetManagement')}
+            ${createDashboardCard('統 HR & Requisitions', 'Leave Applications, Requisition Forms', 'bg-red-100 border-red-400', 'handleHRManagement')}
         </div>
     `;
     
@@ -119,17 +119,18 @@ function createDashboardCard(title, subtitle, colorClass, handler) {
 }
 
 // =================================================================
-//                 4. DOCUMENT GENERATOR ROUTING
+//                 4. DOCUMENT GENERATOR ROUTING (UPDATED)
 // =================================================================
 
 function handleDocumentGenerator() {
     appContent.innerHTML = `
         <h2 class="text-3xl font-bold mb-6 text-primary-blue">Document Generator</h2>
-        <div class="flex space-x-4 mb-6">
-            <button onclick="renderInvoiceForm()" class="bg-primary-blue hover:bg-blue-900 text-white p-3 rounded-lg transition duration-150">Invoice/Proforma</button>
-            <button onclick="renderReceiptForm()" class="bg-secondary-red hover:bg-red-700 text-white p-3 rounded-lg transition duration-150">Payment Receipt</button>
-            <button onclick="renderAgreementForm()" class="bg-gray-700 hover:bg-gray-900 text-white p-3 rounded-lg transition duration-150">Car Sales Agreement</button>
-            <button onclick="renderBankManagement()" class="bg-green-600 hover:bg-green-700 text-white p-3 rounded-lg transition duration-150">BANKS</button>
+        <div class="flex space-x-4 mb-6 flex-wrap">
+            <button onclick="renderInvoiceForm()" class="bg-primary-blue hover:bg-blue-900 text-white p-3 rounded-lg transition duration-150 mb-2">Invoice/Proforma</button>
+            <button onclick="renderInvoiceHistory()" class="bg-gray-700 hover:bg-gray-900 text-white p-3 rounded-lg transition duration-150 mb-2">Invoice History</button>
+            <button onclick="renderReceiptForm()" class="bg-secondary-red hover:bg-red-700 text-white p-3 rounded-lg transition duration-150 mb-2">Payment Receipt</button>
+            <button onclick="renderAgreementForm()" class="bg-gray-700 hover:bg-gray-900 text-white p-3 rounded-lg transition duration-150 mb-2">Car Sales Agreement</button>
+            <button onclick="renderBankManagement()" class="bg-green-600 hover:bg-green-700 text-white p-3 rounded-lg transition duration-150 mb-2">BANKS</button>
         </div>
         <div id="document-form-area">
             <p class="text-gray-600">Select a document type or manage bank accounts.</p>
@@ -141,7 +142,7 @@ function renderAgreementForm() {
 }
 
 // =================================================================
-//                 5. RECEIPT/PAYMENT LOGIC (FROM PREVIOUS STEP)
+//                 5. RECEIPT/PAYMENT LOGIC 
 // =================================================================
 
 function renderReceiptForm() {
@@ -543,7 +544,7 @@ async function deleteBank(bankId) {
 
 
 // =================================================================
-//                 6. INVOICE/PROFORMA LOGIC (FROM LAST STEP)
+//                 6. INVOICE/PROFORMA LOGIC (UPDATED)
 // =================================================================
 
 // --- Fetch Bank Details Helper ---
@@ -787,7 +788,7 @@ function generateInvoiceId(clientName, carModel, carYear) {
 
 
 /**
- * Generates a beautifully designed, one-page PDF for the invoice/proforma.
+ * Generates a beautifully designed, one-page PDF for the invoice/proforma. (FIXED LAYOUT)
  */
 function generateInvoicePDF(data) {
     const { jsPDF } = window.jspdf;
@@ -798,6 +799,8 @@ function generateInvoicePDF(data) {
     
     const pageW = doc.internal.pageSize.getWidth();
     let y = 10; 
+    const margin = 10;
+    const termIndent = 5; // Indent for the list text (25mm)
 
     // --- HELPER FUNCTIONS ---
     const drawText = (text, x, y, size, style = 'normal', color = primaryColor, align = 'left') => {
@@ -807,14 +810,28 @@ function generateInvoicePDF(data) {
         doc.text(text, x, y, { align: align });
     };
 
+    /**
+     * Draws a numbered/bulleted term, handling line wrapping. (UPDATED FOR BETTER WRAPPING)
+     * @param {object} doc - jsPDF instance.
+     * @param {number} yStart - Current Y position.
+     * @param {string} bullet - The bullet point (e.g., 'a.', '•').
+     * @param {string} text - The clause text.
+     * @returns {number} The new Y position after the text.
+     */
     const drawTerm = (doc, yStart, bullet, text) => {
+        const textWidth = 188 - margin - termIndent; // Max width for text (188 - 15 = 173mm)
+        
         doc.setFontSize(10);
         doc.setFont("helvetica", "bold");
-        doc.text(bullet, 20, yStart);
+        doc.text(bullet, margin, yStart);
+        
         doc.setFont("helvetica", "normal");
-        let lines = doc.splitTextToSize(text, 170);
-        doc.text(lines, 25, yStart);
-        return yStart + (lines.length * 4) + 2; 
+        let lines = doc.splitTextToSize(text, textWidth);
+        
+        // Starting X for the wrapped text
+        doc.text(lines, margin + termIndent, yStart);
+        
+        return yStart + (lines.length * 4.5) + 1; // Advance Y position (4.5 is line height)
     };
 
     // =================================================================
@@ -831,10 +848,10 @@ function generateInvoicePDF(data) {
     y = 25;
 
     // Document Type and Invoice ID
-    drawText(data.docType.toUpperCase(), 10, y, 26, 'bold', primaryColor);
+    drawText(data.docType.toUpperCase(), margin, y, 26, 'bold', primaryColor);
     y += 10;
 
-    drawText(`Invoice ID: ${data.invoiceId}`, 10, y, 14);
+    drawText(`Invoice ID: ${data.invoiceId}`, margin, y, 14);
     y += 10;
 
     // =================================================================
@@ -842,7 +859,7 @@ function generateInvoicePDF(data) {
     // =================================================================
 
     doc.setFillColor(240, 240, 240); 
-    doc.rect(10, y, 188, 30, 'F');
+    doc.rect(margin, y, 188, 30, 'F');
     doc.setTextColor(primaryColor);
 
     drawText('INVOICE TO:', 15, y + 5, 10, 'bold');
@@ -861,17 +878,17 @@ function generateInvoicePDF(data) {
     // VEHICLE DETAILS TABLE
     // =================================================================
     
-    drawText('DESCRIPTION OF GOODS', 10, y, 14, 'bold', primaryColor);
+    drawText('DESCRIPTION OF GOODS', margin, y, 14, 'bold', primaryColor);
     y += 5;
     
     doc.setFontSize(10);
     doc.setFont("helvetica", "italic");
-    doc.text("Referring to used Motor Vehicle(s); We hereby confirm the following sale to you:", 10, y + 2);
+    doc.text("Referring to used Motor Vehicle(s); We hereby confirm the following sale to you:", margin, y + 2);
     y += 8;
 
     // Table Header
     doc.setFillColor(primaryColor);
-    doc.rect(10, y, 188, 8, 'F');
+    doc.rect(margin, y, 188, 8, 'F');
     doc.setTextColor(255);
     drawText('Make/Model', 12, y + 5.5, 9, 'bold');
     drawText('VIN / Year', 50, y + 5.5, 9, 'bold');
@@ -883,7 +900,7 @@ function generateInvoicePDF(data) {
 
     // Table Row
     doc.setFillColor(255);
-    doc.rect(10, y, 188, 8, 'F');
+    doc.rect(margin, y, 188, 8, 'F');
     doc.setTextColor(0);
     drawText(`${data.carDetails.make} ${data.carDetails.model}`, 12, y + 5.5, 10);
     drawText(`${data.carDetails.vin} / ${data.carDetails.year}`, 50, y + 5.5, 10);
@@ -910,69 +927,82 @@ function generateInvoicePDF(data) {
     y += 25;
     
     // =================================================================
-    // TERMS OF PURCHASE
+    // TERMS OF PURCHASE (FIXED TEXT WRAPPING)
     // =================================================================
 
-    drawText('TERMS OF PURCHASE PRICE (C&F TO MSA)', 10, y, 14, 'bold', primaryColor);
+    drawText('TERMS OF PURCHASE PRICE (C&F TO MSA)', margin, y, 14, 'bold', primaryColor);
     y += 5;
     
+    // Term 1: Currency Clause
     y = drawTerm(doc, y, '•', 'All payments due under this contract shall be made in USD. In the event that payments are made in any other currency the same shall be subject to the current forex exchange rate.');
 
+    // Term 2: Price and Payment Schedule (The intro line that was previously cut off)
     doc.setFontSize(10);
     doc.setFont("helvetica", "normal");
     let priceText = `Purchase Price in the sum of USD ${data.pricing.totalUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })} shall be paid as follows on/by the DUE DATE:`;
-    doc.text(priceText, 10, y);
-    y += 5;
+    // Using drawTerm logic to wrap the intro line as well
+    let priceLines = doc.splitTextToSize(priceText, 188);
+    doc.text(priceLines, margin, y);
+    y += (priceLines.length * 4.5) + 1;
 
-    doc.setFontSize(10);
-    doc.setFont("helvetica", "bold");
+    // Term 2a: Deposit
     let depositText = `A deposit of USD ${data.pricing.depositUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })} being fifty percent (50%) of the purchase price on execution of the contract.`;
-    doc.text("a.", 15, y);
-    doc.text(depositText, 20, y);
-    y += 5;
+    y = drawTerm(doc, y, 'a.', depositText);
 
+    // Term 2b: Balance
     let balanceText = `The balance of USD ${data.pricing.balanceUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })} within ten (10) days after the date of Bill of Lading. The seller shall promptly notify the buyer of the date for due compliance.`;
-    doc.text("b.", 15, y);
-    doc.text(balanceText, 20, y);
-    y += 5;
+    y = drawTerm(doc, y, 'b.', balanceText);
 
+    // Term 2c: BOL Release
     y = drawTerm(doc, y, 'c.', 'The original Bill of Lading will be issued to the buyer upon confirmation of full receipt of the purchase price.');
+
+    // Term 2d: Cancellation/Forfeiture
     y = drawTerm(doc, y, 'd.', 'If you cancel to buy before or after shipment after purchase is confirmed, your deposit is to be forfeited.');
+
+    // Term 2e: As Is Condition
     y = drawTerm(doc, y, 'e.', 'All the vehicles are subject to AS IS CONDITION.');
+
+    // Term 2f: Third Party Payment
     y = drawTerm(doc, y, 'f.', 'Payment will be made by the invoiced person. If a third party makes a payment, please kindly inform us the relationship due to security reasons.');
     y += 5;
     
     // =================================================================
-    // PAYMENT INSTRUCTIONS
+    // PAYMENT INSTRUCTIONS (FIXED OVERLAP)
     // =================================================================
     
     doc.setFillColor(255, 245, 230); 
-    doc.rect(10, y, 188, 30, 'F');
+    doc.rect(margin, y, 188, 30, 'F');
     doc.setDrawColor(secondaryColor);
     doc.setLineWidth(0.5);
-    doc.rect(10, y, 188, 30);
+    doc.rect(margin, y, 188, 30);
     
+    // Title
     drawText('KINDLY PAY USD / KSH TO THE FOLLOWING BANK ACCOUNT:', 15, y + 5, 11, 'bold', primaryColor);
     
+    // Exchange Rate Note - moved to the right side of the box, adjusted X coordinate
+    doc.setFontSize(8);
+    doc.text(`Exchange rate used USD 1 = KES ${data.exchangeRate}`, 190 - margin, y + 5, null, null, "right");
+    doc.text(`NOTE: Due date is ${data.dueDate}`, 190 - margin, y + 10, null, null, "right");
+
+    // Deposit amount display (Y position adjusted slightly higher)
     doc.setFontSize(14);
     doc.setFont("helvetica", "bold");
-    doc.text(`USD ${data.pricing.depositUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })}`, 15, y + 12);
-    doc.text(`/ KSH ${data.pricing.depositKSH.toLocaleString('en-US', { minimumFractionDigits: 2 })}`, 70, y + 12);
+    doc.text(`USD ${data.pricing.depositUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })}`, 15, y + 15);
+    doc.text(`/ KSH ${data.pricing.depositKSH.toLocaleString('en-US', { minimumFractionDigits: 2 })}`, 70, y + 15);
 
+    // Bank Details (Y positions adjusted for better spacing)
     doc.setFontSize(9);
     doc.setTextColor(0);
-    doc.text(`Bank Name: ${data.bankDetails.name}`, 15, y + 18);
-    doc.text(`Account Name: ${data.bankDetails.accountName}`, 70, y + 18);
-    doc.text(`Account No: ${data.bankDetails.accountNumber}`, 15, y + 23);
-    doc.text(`SWIFT/IBAN: ${data.bankDetails.swiftCode}`, 70, y + 23);
-    
-    doc.setFontSize(8);
-    doc.text(`Exchange rate used USD 1 = KES ${data.exchangeRate}`, 160, y + 5, null, null, "right");
-    doc.text(`NOTE: Due date is ${data.dueDate}`, 160, y + 10, null, null, "right");
+    doc.text(`Bank Name: ${data.bankDetails.name} (Branch: ${data.bankDetails.branch || 'N/A'})`, 15, y + 21);
+    doc.text(`Account Name: ${data.bankDetails.accountName}`, 15, y + 25);
+    doc.text(`Account No: ${data.bankDetails.accountNumber}`, 110, y + 25);
+    doc.text(`SWIFT/IBAN: ${data.bankDetails.swiftCode}`, 110, y + 21);
+
     y += 30;
 
+    // Attention Clause
     doc.setTextColor(secondaryColor);
-    drawText('[ATTENTION] The Buyer Should bear the cost of Bank Charge when remitting T/T', 10, y + 5, 9, 'bold');
+    drawText('[ATTENTION] The Buyer Should bear the cost of Bank Charge when remitting T/T', margin, y + 5, 9, 'bold');
     y += 10;
     
     // =================================================================
@@ -980,8 +1010,8 @@ function generateInvoicePDF(data) {
     // =================================================================
 
     doc.setDrawColor(primaryColor);
-    doc.line(10, y + 15, 90, y + 15);
-    drawText(`Accepted and Confirmed by Buyer: ${data.buyerNameConfirmation}`, 10, y + 19, 10);
+    doc.line(margin, y + 15, 90, y + 15);
+    drawText(`Accepted and Confirmed by Buyer: ${data.buyerNameConfirmation}`, margin, y + 19, 10);
 
     doc.line(110, y + 15, 190, y + 15);
     drawText('Seller: WANBITE INVESTMENTS COMPANY LIMITED', 110, y + 19, 10);
@@ -1001,6 +1031,99 @@ function generateInvoicePDF(data) {
 
     doc.save(`${data.docType}_${data.invoiceId}.pdf`);
 }
+
+
+// =================================================================
+//                 8. INVOICE HISTORY MODULE (NEW)
+// =================================================================
+
+/**
+ * Renders the container for the Invoice History list.
+ */
+function renderInvoiceHistory() {
+    const formArea = document.getElementById('document-form-area');
+    formArea.innerHTML = `
+        <div class="p-6 border border-gray-300 rounded-xl bg-white shadow-lg">
+            <h3 class="text-xl font-semibold mb-6 text-primary-blue">Previously Saved Invoices</h3>
+            <div id="invoice-history-list">
+                <p class="text-center text-gray-500">Loading invoices...</p>
+            </div>
+        </div>
+    `;
+    fetchInvoiceHistory();
+}
+
+/**
+ * Fetches all invoices from Firestore and displays them in a list.
+ */
+async function fetchInvoiceHistory() {
+    const listElement = document.getElementById('invoice-history-list');
+    listElement.innerHTML = `<p class="text-center text-gray-500">Fetching data...</p>`;
+    let html = ``;
+
+    try {
+        // Order by creation date descending
+        const snapshot = await db.collection("invoices").orderBy("createdAt", "desc").limit(50).get();
+        if (snapshot.empty) {
+            listElement.innerHTML = `<p class="text-center text-gray-500">No invoices found.</p>`;
+            return;
+        }
+
+        html = `<ul class="divide-y divide-gray-200">`;
+        snapshot.forEach(doc => {
+            const data = doc.data();
+            // Store the entire data object as a JSON string to easily pass to the PDF function
+            // Note: We need to handle Firebase Timestamp when stringifying
+            const invoiceDataForRedownload = { 
+                ...data, 
+                firestoreId: doc.id,
+                // Ensure Timestamp is converted for JSON.stringify to work correctly
+                createdAt: data.createdAt ? data.createdAt.toDate().toISOString() : new Date().toISOString() 
+            };
+            const invoiceDataJson = JSON.stringify(invoiceDataForRedownload); 
+            
+            html += `
+                <li class="p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center bg-gray-50 hover:bg-white transition duration-100">
+                    <div class="flex-1 min-w-0">
+                        <strong class="text-primary-blue">${data.docType} ${data.invoiceId}</strong> 
+                        <span class="text-sm text-gray-600 block sm:inline-block sm:ml-4">
+                            Client: ${data.clientName} | Car: ${data.carDetails.model}
+                        </span>
+                    </div>
+                    <div class="mt-2 sm:mt-0">
+                        <button onclick='reDownloadInvoice(${invoiceDataJson})' 
+                                class="bg-primary-blue hover:bg-blue-900 text-white text-xs py-1 px-3 rounded-full transition duration-150">
+                            Re-Download PDF
+                        </button>
+                    </div>
+                </li>
+            `;
+        });
+        html += `</ul>`;
+        listElement.innerHTML = html;
+
+    } catch (error) {
+        console.error("Error fetching invoice history:", error);
+        listElement.innerHTML = `<p class="text-red-500">Error loading invoice history. Check console for details.</p>`;
+    }
+}
+
+/**
+ * Re-downloads the PDF for a selected invoice document.
+ * @param {object} data - The invoice data object retrieved from Firestore.
+ */
+function reDownloadInvoice(data) {
+    // The issueDate is stored as a string in Firestore and should be available directly in data.
+    // If it was stored as a date object in the history fetch, it needs conversion back to a string for consistency
+    if (data.issueDate) {
+        // Assume it's already a formatted string from the original save/history fetch
+    } else if (data.createdAt && typeof data.createdAt === 'string') {
+        // If we serialized the Firestore Timestamp as ISO string, use that date
+        data.issueDate = new Date(data.createdAt).toLocaleDateString('en-US');
+    }
+    generateInvoicePDF(data);
+}
+
 
 // =================================================================
 //                 7. STUBS FOR OTHER MODULES
