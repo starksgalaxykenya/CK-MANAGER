@@ -811,11 +811,11 @@ function generateInvoicePDF(data) {
     };
 
     /**
-     * Draws a numbered/bulleted term, handling line wrapping. (UPDATED FOR BETTER WRAPPING)
+     * Draws a numbered/bulleted term, handling line wrapping and applying bold/color to specific price elements.
      * @param {object} doc - jsPDF instance.
      * @param {number} yStart - Current Y position.
      * @param {string} bullet - The bullet point (e.g., 'a.', '•').
-     * @param {string} text - The clause text.
+     * @param {string} text - The clause text containing price strings to highlight.
      * @returns {number} The new Y position after the text.
      */
     const drawTerm = (doc, yStart, bullet, text) => {
@@ -823,15 +823,52 @@ function generateInvoicePDF(data) {
         
         doc.setFontSize(10);
         doc.setFont("helvetica", "bold");
+        doc.setTextColor(primaryColor);
         doc.text(bullet, margin, yStart);
         
         doc.setFont("helvetica", "normal");
         let lines = doc.splitTextToSize(text, textWidth);
+        let currentY = yStart;
+        const lineHeight = 4.5;
         
-        // Starting X for the wrapped text
-        doc.text(lines, margin + termIndent, yStart);
-        
-        return yStart + (lines.length * 4.5) + 1; // Advance Y position (4.5 is line height)
+        lines.forEach(line => {
+            let currentX = margin + termIndent;
+            
+            // Check for USD price pattern in the line
+            const regex = /(USD\s[0-9,.]+|KSH\s[0-9,.]+)/g;
+            let match;
+            let lastIndex = 0;
+
+            doc.setTextColor(primaryColor); // Default color
+            doc.setFont("helvetica", "normal");
+
+            while ((match = regex.exec(line)) !== null) {
+                // Draw text before the price
+                let preText = line.substring(lastIndex, match.index);
+                doc.text(preText, currentX, currentY);
+                currentX += doc.getStringUnitWidth(preText) * doc.getFontSize() / doc.internal.scaleFactor;
+                
+                // Draw the price in bold red
+                let priceText = match[0];
+                doc.setTextColor(secondaryColor);
+                doc.setFont("helvetica", "bold");
+                doc.text(priceText, currentX, currentY);
+                currentX += doc.getStringUnitWidth(priceText) * doc.getFontSize() / doc.internal.scaleFactor;
+                
+                // Reset font and color
+                doc.setTextColor(primaryColor);
+                doc.setFont("helvetica", "normal");
+                lastIndex = match.index + priceText.length;
+            }
+
+            // Draw remaining text after the last price (or the whole line if no price was found)
+            let postText = line.substring(lastIndex);
+            doc.text(postText, currentX, currentY);
+            
+            currentY += lineHeight;
+        });
+
+        return currentY + 1; // Advance Y position by a little extra padding
     };
 
     // =================================================================
@@ -927,7 +964,7 @@ function generateInvoicePDF(data) {
     y += 25;
     
     // =================================================================
-    // TERMS OF PURCHASE (FIXED TEXT WRAPPING)
+    // TERMS OF PURCHASE (FIXED TEXT WRAPPING AND BOLD PRICE)
     // =================================================================
 
     drawText('TERMS OF PURCHASE PRICE (C&F TO MSA)', margin, y, 14, 'bold', primaryColor);
@@ -936,20 +973,21 @@ function generateInvoicePDF(data) {
     // Term 1: Currency Clause
     y = drawTerm(doc, y, '•', 'All payments due under this contract shall be made in USD. In the event that payments are made in any other currency the same shall be subject to the current forex exchange rate.');
 
-    // Term 2: Price and Payment Schedule (The intro line that was previously cut off)
+    // Term 2: Price and Payment Schedule (The intro line)
     doc.setFontSize(10);
     doc.setFont("helvetica", "normal");
-    let priceText = `Purchase Price in the sum of USD ${data.pricing.totalUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })} shall be paid as follows on/by the DUE DATE:`;
+    doc.setTextColor(primaryColor);
+    let priceTextIntro = `Purchase Price in the sum of USD ${data.pricing.totalUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })} shall be paid as follows on/by the DUE DATE:`;
     // Using drawTerm logic to wrap the intro line as well
-    let priceLines = doc.splitTextToSize(priceText, 188);
-    doc.text(priceLines, margin, y);
-    y += (priceLines.length * 4.5) + 1;
+    let priceLinesIntro = doc.splitTextToSize(priceTextIntro, 188);
+    doc.text(priceLinesIntro, margin, y);
+    y += (priceLinesIntro.length * 4.5) + 1;
 
-    // Term 2a: Deposit
+    // Term 2a: Deposit (Price bolded and red by drawTerm)
     let depositText = `A deposit of USD ${data.pricing.depositUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })} being fifty percent (50%) of the purchase price on execution of the contract.`;
     y = drawTerm(doc, y, 'a.', depositText);
 
-    // Term 2b: Balance
+    // Term 2b: Balance (Price bolded and red by drawTerm)
     let balanceText = `The balance of USD ${data.pricing.balanceUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })} within ten (10) days after the date of Bill of Lading. The seller shall promptly notify the buyer of the date for due compliance.`;
     y = drawTerm(doc, y, 'b.', balanceText);
 
@@ -967,38 +1005,57 @@ function generateInvoicePDF(data) {
     y += 5;
     
     // =================================================================
-    // PAYMENT INSTRUCTIONS (FIXED OVERLAP)
+    // PAYMENT INSTRUCTIONS (FIXED TO NEW LAYOUT)
     // =================================================================
     
     doc.setFillColor(255, 245, 230); 
-    doc.rect(margin, y, 188, 30, 'F');
+    doc.rect(margin, y, 188, 40, 'F'); // Increased height for more lines
     doc.setDrawColor(secondaryColor);
     doc.setLineWidth(0.5);
-    doc.rect(margin, y, 188, 30);
+    doc.rect(margin, y, 188, 40);
+    
+    let currentY_bank = y + 5;
+    const padding = 6;
+    const rightX = 190 - margin;
     
     // Title
-    drawText('KINDLY PAY USD / KSH TO THE FOLLOWING BANK ACCOUNT:', 15, y + 5, 11, 'bold', primaryColor);
-    
-    // Exchange Rate Note - moved to the right side of the box, adjusted X coordinate
-    doc.setFontSize(8);
-    doc.text(`Exchange rate used USD 1 = KES ${data.exchangeRate}`, 190 - margin, y + 5, null, null, "right");
-    doc.text(`NOTE: Due date is ${data.dueDate}`, 190 - margin, y + 10, null, null, "right");
+    drawText('KINDLY PAY USD / KSH TO THE FOLLOWING BANK ACCOUNT:', 15, currentY_bank, 11, 'bold', primaryColor);
+    currentY_bank += 5; // Move down after the title
 
-    // Deposit amount display (Y position adjusted slightly higher)
+    // Exchange Rate Note - far right
+    doc.setFontSize(8);
+    doc.setTextColor(primaryColor);
+    doc.text(`Exchange rate used USD 1 = KES ${data.exchangeRate}`, rightX, y + 5, null, null, "right");
+    doc.text(`NOTE: Due date is ${data.dueDate}`, rightX, y + 10, null, null, "right");
+    
+    // Deposit amount display
     doc.setFontSize(14);
     doc.setFont("helvetica", "bold");
-    doc.text(`USD ${data.pricing.depositUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })}`, 15, y + 15);
-    doc.text(`/ KSH ${data.pricing.depositKSH.toLocaleString('en-US', { minimumFractionDigits: 2 })}`, 70, y + 15);
+    doc.setTextColor(secondaryColor);
+    doc.text(`USD ${data.pricing.depositUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })}`, 15, currentY_bank);
+    doc.text(`/ KSH ${data.pricing.depositKSH.toLocaleString('en-US', { minimumFractionDigits: 2 })}`, 70, currentY_bank);
+    currentY_bank += 7;
 
-    // Bank Details (Y positions adjusted for better spacing)
+    // Bank Details - Each on its own line
     doc.setFontSize(9);
-    doc.setTextColor(0);
-    doc.text(`Bank Name: ${data.bankDetails.name} (Branch: ${data.bankDetails.branch || 'N/A'})`, 15, y + 21);
-    doc.text(`Account Name: ${data.bankDetails.accountName}`, 15, y + 25);
-    doc.text(`Account No: ${data.bankDetails.accountNumber}`, 110, y + 25);
-    doc.text(`SWIFT/IBAN: ${data.bankDetails.swiftCode}`, 110, y + 21);
+    doc.setTextColor(0); // Black for details
 
-    y += 30;
+    doc.text(`Bank Name: ${data.bankDetails.name}`, 15, currentY_bank);
+    currentY_bank += padding;
+    
+    doc.text(`Branch Name: ${data.bankDetails.branch || 'N/A'}`, 15, currentY_bank);
+    currentY_bank += padding;
+    
+    doc.text(`Account Name: ${data.bankDetails.accountName}`, 15, currentY_bank);
+    currentY_bank += padding;
+
+    doc.text(`Account No: ${data.bankDetails.accountNumber} (${data.bankDetails.currency})`, 15, currentY_bank);
+    currentY_bank += padding;
+
+    doc.text(`SWIFT/BIC Code: ${data.bankDetails.swiftCode}`, 15, currentY_bank);
+    currentY_bank += padding - 5; // Less padding before attention clause
+
+    y += 40; // The total height of the instruction box
 
     // Attention Clause
     doc.setTextColor(secondaryColor);
@@ -1030,7 +1087,7 @@ function generateInvoicePDF(data) {
     doc.text(footerText, pageW / 2, doc.internal.pageSize.getHeight() - 4, null, null, "center");
 
     doc.save(`${data.docType}_${data.invoiceId}.pdf`);
-}
+                  }
 
 
 // =================================================================
