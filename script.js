@@ -2017,31 +2017,23 @@ function getStatusInfo(statusName) {
  * Renders the main Fleet Management UI.
  */
 function handleFleetManagement() {
-    // Generate columns for the dashboard
-    const statusColumnsHtml = FLEET_STATUSES.map(status => `
-        <div class="flex flex-col h-full bg-gray-50 p-4 rounded-xl shadow-inner">
-            <h3 class="text-lg font-bold mb-4 text-center p-2 rounded-lg ${getStatusInfo(status.name).color} border ${getStatusInfo(status.name).border}">
-                ${status.name}
-            </h3>
-            <div id="fleet-column-${status.id}" class="space-y-4 flex-grow overflow-y-auto min-h-[100px]">
-                <p class="text-center text-gray-500 text-sm">Loading cars...</p>
-            </div>
-        </div>
-    `).join('');
-
+    // FIX: Add check to ensure the user is authenticated before proceeding.
+    if (!currentUser) {
+        appContent.innerHTML = `
+            <h2 class="text-3xl font-bold mb-6 text-secondary-red">Access Denied</h2>
+            <p class="text-gray-800">Please sign in to access the Fleet Management dashboard.</p>
+        `;
+        return; // Stop execution if not logged in
+    }
+    
     appContent.innerHTML = `
-        <h2 class="text-3xl font-bold mb-6 text-primary-blue flex justify-between items-center">
-            Fleet Tracking Dashboard
-            <button onclick="showAddCarModal()" class="bg-green-600 hover:bg-green-700 text-white p-3 rounded-lg transition duration-150 text-sm">
-                + Add New Car
-            </button>
-        </h2>
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 min-h-[70vh]" id="fleet-dashboard">
-            ${statusColumnsHtml}
+        <h2 class="text-3xl font-bold mb-6 text-primary-blue">Fleet Management Dashboard</h2>
+        <div id="fleet-cars-list" class="space-y-4">
+            <p class="text-gray-600 font-semibold">Loading fleet data...</p>
         </div>
+        <button onclick="document.getElementById('add-car-modal').classList.remove('hidden')" class="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded transition duration-200 mt-6">Add New Vehicle</button>
     `;
-
-    // Start real-time listener for cars
+    // Now that we've confirmed authentication, we can safely call the fetching function
     renderFleetDashboard();
 }
 
