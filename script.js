@@ -424,6 +424,7 @@ function renderBankManagement() {
                 <h3 class="text-xl font-semibold mb-4 text-green-700">Add New Bank Account</h3>
                 <form id="add-bank-form" onsubmit="event.preventDefault(); addBankDetails()">
                     <input type="text" id="bankName" required placeholder="Bank Name (e.g., KCB Bank)" class="mt-2 block w-full p-2 border rounded-md">
+                    <input type="text" id="bankBranch" required placeholder="Bank Branch (e.g., Kilimani Branch)" class="mt-2 block w-full p-2 border rounded-md">
                     <input type="text" id="accountName" required placeholder="Account Name" value="WANBITE INVESTMENTS CO. LTD" class="mt-2 block w-full p-2 border rounded-md">
                     <input type="text" id="accountNumber" required placeholder="Account Number" class="mt-2 block w-full p-2 border rounded-md">
                     <input type="text" id="swiftCode" required placeholder="SWIFT/BIC Code" class="mt-2 block w-full p-2 border rounded-md">
@@ -454,6 +455,7 @@ function renderBankManagement() {
  */
 async function addBankDetails() {
     const bankName = document.getElementById('bankName').value;
+    const bankBranch = document.getElementById('bankBranch').value; // <-- NEW FIELD
     const accountName = document.getElementById('accountName').value;
     const accountNumber = document.getElementById('accountNumber').value;
     const swiftCode = document.getElementById('swiftCode').value;
@@ -461,6 +463,7 @@ async function addBankDetails() {
 
     const newBank = {
         name: bankName,
+        branch: bankBranch, // <-- NEW FIELD SAVED TO FIRESTORE
         accountName,
         accountNumber,
         swiftCode,
@@ -470,7 +473,7 @@ async function addBankDetails() {
 
     try {
         await db.collection("bankDetails").add(newBank);
-        alert(`Bank account for ${bankName} saved successfully!`);
+        alert(`Bank account for ${bankName} (${bankBranch}) saved successfully!`);
         document.getElementById('add-bank-form').reset();
         fetchAndDisplayBankDetails(); // Refresh the list
     } catch (error) {
@@ -481,6 +484,7 @@ async function addBankDetails() {
 
 /**
  * Fetches and displays all saved bank details in the list.
+ * (Updated to display the branch)
  */
 async function fetchAndDisplayBankDetails() {
     const listElement = document.getElementById('saved-banks-list');
@@ -505,6 +509,7 @@ async function fetchAndDisplayBankDetails() {
                         <strong class="text-lg text-primary-blue">${data.name} (${data.currency})</strong>
                         <button onclick="deleteBank('${doc.id}')" class="text-red-500 hover:text-red-700 text-sm">Delete</button>
                     </div>
+                    <p class="text-sm text-gray-700">Branch: ${data.branch || 'N/A'}</p>
                     <p class="text-sm text-gray-700">Account: ${data.accountName}</p>
                     <p class="text-sm text-gray-600">No: ${data.accountNumber} | SWIFT: ${data.swiftCode}</p>
                 </li>
@@ -517,8 +522,7 @@ async function fetchAndDisplayBankDetails() {
         console.error("Error fetching banks:", error);
         listElement.innerHTML = `<p class="text-red-500">Error loading bank accounts.</p>`;
     }
-}
-
+          }
 /**
  * Deletes a bank document from Firestore.
  * @param {string} bankId - The Firestore document ID of the bank.
@@ -545,27 +549,25 @@ async function deleteBank(bankId) {
 // --- Fetch Bank Details Helper ---
 async function fetchBankDetails() {
     const bankSelect = document.getElementById('bankDetailsSelect');
-    if (!bankSelect) return; // Exit if not on the invoice form
+    if (!bankSelect) return; 
 
-    bankSelect.innerHTML = '<option value="" disabled selected>Loading bank details...</option>';
+    // ... (rest of the function remains the same) ...
+
     try {
         const snapshot = await db.collection("bankDetails").get();
-        if (snapshot.empty) {
-            bankSelect.innerHTML = '<option value="" disabled selected>No bank accounts configured</option>';
-            return;
-        }
+        // ... (check for empty snapshot) ...
 
         let options = '<option value="" disabled selected>Select Bank Account</option>';
         snapshot.forEach(doc => {
             const data = doc.data();
             const detailsJson = JSON.stringify(data);
-            options += `<option value='${detailsJson}'>${data.name} (${data.currency})</option>`;
+            // UPDATED LINE: Include branch name in the displayed option text
+            options += `<option value='${detailsJson}'>${data.name} - ${data.branch || 'No Branch'} (${data.currency})</option>`;
         });
         bankSelect.innerHTML = options;
 
     } catch (error) {
-        console.error("Error fetching bank details:", error);
-        bankSelect.innerHTML = '<option value="" disabled selected>Error loading banks</option>';
+        // ... (error handling remains the same) ...
     }
 }
 
