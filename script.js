@@ -25,10 +25,6 @@ let currentUser = null;
 //                 NEW: SEQUENTIAL REFERENCE LOGIC
 // =================================================================
 
-/**
- * Generates a reference number with a serial suffix (0001, 0002...)
- * Format: REF-YYYYMMDD-NAME-0001
- */
 async function getSequentialReference(clientName) {
     const datePart = new Date().toISOString().slice(0, 10).replace(/-/g, '');
     const namePart = (clientName || "VAL").split(' ')[0].toUpperCase().substring(0, 3);
@@ -43,7 +39,7 @@ async function getSequentialReference(clientName) {
         }
         transaction.set(counterRef, { count: newCount }, { merge: true });
         const serial = newCount.toString().padStart(4, '0');
-        return `REF-${datePart}-${namePart}-${serial}`;
+        return `INV-${datePart}-${namePart}-${serial}`;
     });
 }
 
@@ -87,8 +83,6 @@ function renderAuthForm() {
     `;
 }
 
-function handleLogout() { auth.signOut(); }
-
 async function handleLogin() {
     const email = document.getElementById('email').value;
     const password = document.getElementById('password').value;
@@ -98,6 +92,8 @@ async function handleLogin() {
         alert("Login Failed: " + error.message);
     }
 }
+
+function handleLogout() { auth.signOut(); }
 
 // =================================================================
 //                 3. DASHBOARD & NAVIGATION
@@ -131,7 +127,7 @@ function createDashboardCard(title, subtitle, colorClass, handler) {
 }
 
 // =================================================================
-//                 4. DOCUMENT GENERATOR (LINKED WORKFLOW)
+//                 4. DOCUMENT GENERATOR (LINKED)
 // =================================================================
 
 function handleDocumentGenerator() {
@@ -141,62 +137,59 @@ function handleDocumentGenerator() {
             <button onclick="renderAgreementForm()" class="bg-primary-blue text-white p-3 rounded-lg mb-2">New Sales Agreement</button>
             <button onclick="renderAgreementHistory()" class="bg-gray-700 text-white p-3 rounded-lg mb-2">Agreement History</button>
             <button onclick="renderInvoiceHistory()" class="bg-gray-700 text-white p-3 rounded-lg mb-2">Invoice History</button>
-            <button onclick="renderReceiptForm()" class="bg-secondary-red text-white p-3 rounded-lg mb-2">New Receipt</button>
             <button onclick="renderReceiptHistory()" class="bg-gray-700 text-white p-3 rounded-lg mb-2">Receipt History</button>
             <button onclick="renderBankManagement()" class="bg-green-600 text-white p-3 rounded-lg mb-2">Manage Banks</button>
         </div>
         <div id="document-form-area">
-            <p class="text-gray-600">Start with a Sales Agreement to create a unified Reference ID.</p>
+            <p class="text-gray-600">Start by creating a Sales Agreement to generate a unified serial reference.</p>
         </div>
     `;
 }
 
-// --- SALES AGREEMENT ---
+// --- AGREEMENT ---
 function renderAgreementForm() {
     const formArea = document.getElementById('document-form-area');
     formArea.innerHTML = `
         <div class="p-6 border rounded-xl bg-white shadow-lg">
-            <h3 class="text-xl font-bold mb-4">New Sales Agreement</h3>
+            <h3 class="text-xl font-bold mb-4">Create Sales Agreement</h3>
             <form id="agreement-form" onsubmit="event.preventDefault(); saveAgreement();">
                 <input type="text" id="agr-client" placeholder="Client Name" class="w-full border p-2 mb-3 rounded" required>
-                <input type="text" id="agr-vehicle" placeholder="Vehicle Details" class="w-full border p-2 mb-3 rounded" required>
-                <button type="submit" class="w-full bg-primary-blue text-white py-3 rounded font-bold">Save Agreement & Create Reference</button>
+                <input type="text" id="agr-vehicle" placeholder="Vehicle Specification" class="w-full border p-2 mb-3 rounded" required>
+                <button type="submit" class="w-full bg-primary-blue text-white py-3 rounded font-bold">Save Agreement & Generate ID</button>
             </form>
         </div>
     `;
 }
 
 async function saveAgreement() {
-    const clientName = document.getElementById('agr-client').value;
+    const client = document.getElementById('agr-client').value;
     const vehicle = document.getElementById('agr-vehicle').value;
-    const refId = await getSequentialReference(clientName);
+    const refId = await getSequentialReference(client);
 
     await db.collection("agreements").add({
         referenceNumber: refId,
-        clientName,
-        vehicle,
+        clientName: client,
+        vehicle: vehicle,
         createdAt: firebase.firestore.FieldValue.serverTimestamp()
     });
 
-    alert("Agreement Created! Reference: " + refId);
+    alert("Agreement Saved. Reference: " + refId);
     renderAgreementHistory();
 }
 
 function renderAgreementHistory() {
     const formArea = document.getElementById('document-form-area');
-    formArea.innerHTML = `<h3 class="text-xl font-bold mb-4">Agreement History</h3><div id="hist-list" class="space-y-2"></div>`;
-    
+    formArea.innerHTML = `<h3 class="text-xl font-bold mb-4">Agreement History</h3><div id="agr-list" class="space-y-2"></div>`;
     db.collection("agreements").orderBy("createdAt", "desc").onSnapshot(snap => {
         let html = "";
         snap.forEach(doc => {
             const data = doc.data();
-            html += `
-                <div class="p-4 border rounded bg-gray-50 flex justify-between items-center">
-                    <div><strong>${data.referenceNumber}</strong> - ${data.clientName}</div>
-                    <button onclick='createInvoiceFromRef("${data.referenceNumber}", "${data.clientName}")' class="bg-blue-600 text-white px-4 py-1 rounded text-sm">Generate Invoice</button>
-                </div>`;
+            html += `<div class="p-4 border rounded bg-gray-50 flex justify-between items-center">
+                        <div><strong>${data.referenceNumber}</strong> - ${data.clientName}</div>
+                        <button onclick='createInvoiceFromRef("${data.referenceNumber}", "${data.clientName}")' class="bg-blue-600 text-white px-4 py-1 rounded text-sm">Create Invoice</button>
+                    </div>`;
         });
-        document.getElementById('hist-list').innerHTML = html || "No records.";
+        document.getElementById('agr-list').innerHTML = html || "No records.";
     });
 }
 
@@ -207,29 +200,29 @@ async function createInvoiceFromRef(refId, clientName) {
         clientName: clientName,
         createdAt: firebase.firestore.FieldValue.serverTimestamp()
     });
-    alert("Invoice generated with Ref: " + refId);
+    alert("Invoice linked to " + refId);
     renderInvoiceHistory();
 }
 
 function renderInvoiceHistory() {
     const formArea = document.getElementById('document-form-area');
-    formArea.innerHTML = `<h3 class="text-xl font-bold mb-4">Invoice History</h3><div id="inv-hist-list" class="space-y-2"></div>`;
-    
+    formArea.innerHTML = `<h3 class="text-xl font-bold mb-4">Invoice History</h3><div id="inv-list" class="space-y-2"></div>`;
     db.collection("invoices").orderBy("createdAt", "desc").onSnapshot(snap => {
         let html = "";
         snap.forEach(doc => {
             const data = doc.data();
-            html += `
-                <div class="p-4 border rounded bg-blue-50 flex justify-between items-center">
-                    <div><strong>${data.referenceNumber}</strong> - ${data.clientName}</div>
-                    <button onclick='createReceiptFromRef("${data.referenceNumber}", "${data.clientName}")' class="bg-green-600 text-white px-4 py-1 rounded text-sm">Generate Receipt</button>
-                </div>`;
+            html += `<div class="p-4 border rounded bg-blue-50 flex justify-between items-center">
+                        <div><strong>${data.referenceNumber}</strong> - ${data.clientName}</div>
+                        <button onclick='createReceiptFromRef("${data.referenceNumber}", "${data.clientName}")' class="bg-green-600 text-white px-4 py-1 rounded text-sm">Create Receipt</button>
+                    </div>`;
         });
-        document.getElementById('inv-hist-list').innerHTML = html || "No records.";
+        document.getElementById('inv-list').innerHTML = html || "No records.";
     });
 }
 
-// --- RECEIPT & PDF LOGIC (PRESERVED) ---
+// =================================================================
+//                 5. RECEIPT & PDF LOGIC (PRESERVED)
+// =================================================================
 
 function numberToWords(n) {
     if (typeof n !== 'number' || isNaN(n)) return '';
@@ -249,51 +242,28 @@ function numberToWords(n) {
     return result.charAt(0).toUpperCase() + result.slice(1) + ' only.';
 }
 
-function renderReceiptForm() {
-    const formArea = document.getElementById('document-form-area');
-    formArea.innerHTML = `
-        <div class="p-6 border border-secondary-red rounded-xl bg-white shadow-md">
-            <h3 class="text-xl font-semibold mb-4 text-secondary-red">New Payment Receipt</h3>
-            <form id="receipt-form" onsubmit="event.preventDefault(); saveReceipt()">
-                <input type="text" id="rcpt-ref" placeholder="Reference Number (from Invoice)" class="w-full border p-2 mb-3 rounded" required>
-                <input type="text" id="receivedFrom" required placeholder="Customer Name" class="w-full border p-2 mb-3 rounded">
-                <input type="number" id="amountReceived" step="0.01" required placeholder="Amount" class="w-full border p-2 mb-3 rounded">
-                <input type="text" id="beingPaidFor" required placeholder="Payment Description" class="w-full border p-2 mb-3 rounded">
-                <button type="submit" class="w-full bg-secondary-red text-white py-3 rounded font-bold">Generate & Save Receipt</button>
-            </form>
-        </div>
-    `;
-}
-
 async function createReceiptFromRef(refId, clientName) {
-    renderReceiptForm();
-    document.getElementById('rcpt-ref').value = refId;
-    document.getElementById('receivedFrom').value = clientName;
-}
-
-async function saveReceipt() {
-    const refId = document.getElementById('rcpt-ref').value;
-    const client = document.getElementById('receivedFrom').value;
-    const amount = parseFloat(document.getElementById('amountReceived').value);
+    const amount = prompt("Enter payment amount for " + refId);
+    if (!amount) return;
     
-    const data = {
+    const receiptData = {
         receiptId: refId,
-        receivedFrom: client,
-        amountReceived: amount,
-        amountWords: numberToWords(amount),
+        receivedFrom: clientName,
+        amountReceived: parseFloat(amount),
+        amountWords: numberToWords(parseFloat(amount)),
         receiptDate: new Date().toLocaleDateString(),
         createdAt: firebase.firestore.FieldValue.serverTimestamp()
     };
 
-    await db.collection("receipts").add(data);
-    alert("Receipt Saved!");
-    generateReceiptPDF(data);
+    await db.collection("receipts").add(receiptData);
+    alert("Receipt Created!");
+    generateReceiptPDF(receiptData);
     renderReceiptHistory();
 }
 
 function renderReceiptHistory() {
     const formArea = document.getElementById('document-form-area');
-    formArea.innerHTML = `<h3 class="text-xl font-bold mb-4">Receipt History</h3><div id="rcpt-hist-list" class="space-y-2"></div>`;
+    formArea.innerHTML = `<h3 class="text-xl font-bold mb-4">Receipt History</h3><div id="rcpt-list" class="space-y-2"></div>`;
     db.collection("receipts").orderBy("createdAt", "desc").onSnapshot(snap => {
         let html = "";
         snap.forEach(doc => {
@@ -303,7 +273,7 @@ function renderReceiptHistory() {
                         <button onclick='generateReceiptPDF(${JSON.stringify(data)})' class="bg-gray-600 text-white px-3 py-1 rounded text-sm">Download PDF</button>
                      </div>`;
         });
-        document.getElementById('rcpt-hist-list').innerHTML = html || "No records.";
+        document.getElementById('rcpt-list').innerHTML = html || "No records.";
     });
 }
 
@@ -319,7 +289,7 @@ function generateReceiptPDF(data) {
 }
 
 // =================================================================
-//                 5. BANK & FLEET (PRESERVED)
+//                 6. STUBS & BANKS (PRESERVED)
 // =================================================================
 
 function renderBankManagement() {
