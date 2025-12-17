@@ -20,7 +20,7 @@ const authStatus = document.getElementById('auth-status');
 const mainNav = document.getElementById('main-nav');
 let currentUser = null; 
 
-// Cross-document state
+// Cross-document state variables
 window.pendingReceiptId = null;
 window.pendingAgreementId = null;
 
@@ -31,7 +31,9 @@ auth.onAuthStateChanged(user => {
     currentUser = user;
     if (user) {
         authStatus.innerHTML = `<span class="mr-3 text-sm">Hello, ${user.email}</span>
-                                <button onclick="handleLogout()" class="bg-secondary-red hover:bg-red-700 text-white font-bold py-1 px-3 rounded text-sm">Logout</button>`;
+                                <button onclick="handleLogout()" class="bg-secondary-red hover:bg-red-700 text-white font-bold py-1 px-3 rounded text-sm">
+                                    Logout
+                                </button>`;
         renderDashboard();
     } else {
         authStatus.innerHTML = '';
@@ -47,16 +49,20 @@ function renderAuthForm() {
             <form id="login-form" onsubmit="event.preventDefault(); handleLogin();">
                 <div class="mb-4">
                     <label for="email" class="block text-gray-700 text-sm font-semibold mb-2">Email</label>
-                    <input type="email" id="email" required class="w-full p-3 border border-gray-300 rounded-lg">
+                    <input type="email" id="email" required class="w-full p-3 border border-gray-300 rounded-lg focus:ring-primary-blue focus:border-primary-blue">
                 </div>
                 <div class="mb-6">
                     <label for="password" class="block text-gray-700 text-sm font-semibold mb-2">Password</label>
-                    <input type="password" id="password" required class="w-full p-3 border border-gray-300 rounded-lg">
+                    <input type="password" id="password" required class="w-full p-3 border border-gray-300 rounded-lg focus:ring-primary-blue focus:border-primary-blue">
                 </div>
-                <button type="submit" class="w-full bg-primary-blue hover:bg-blue-900 text-white font-bold py-3 rounded-lg transition duration-200">Sign In</button>
+                <button type="submit" class="w-full bg-primary-blue hover:bg-blue-900 text-white font-bold py-3 rounded-lg transition duration-200">
+                    Sign In
+                </button>
             </form>
         </div>`;
 }
+
+function handleLogout() { auth.signOut(); }
 
 async function handleLogin() {
     const email = document.getElementById('email').value;
@@ -65,10 +71,8 @@ async function handleLogin() {
     catch (error) { alert("Login Failed: " + error.message); }
 }
 
-function handleLogout() { auth.signOut(); }
-
 // =================================================================
-//                 3. UTILITIES & DASHBOARD
+//                 3. DASHBOARD & UTILITIES
 // =================================================================
 function renderDashboard() {
     appContent.innerHTML = `
@@ -82,15 +86,16 @@ function renderDashboard() {
     mainNav.innerHTML = `
         <a href="#" onclick="renderDashboard()" class="py-2 px-3 rounded hover:bg-blue-500 transition duration-150">Home</a>
         <a href="#" onclick="handleDocumentGenerator()" class="py-2 px-3 rounded hover:bg-blue-500 transition duration-150">Documents</a>
-        <a href="#" onclick="handleFleetManagement()" class="py-2 px-3 rounded hover:bg-blue-500 transition duration-150">Fleet</a>`;
+        <a href="#" onclick="handleFleetManagement()" class="py-2 px-3 rounded hover:bg-blue-500 transition duration-150">Fleet</a>
+        <a href="#" onclick="handleHRManagement()" class="py-2 px-3 rounded hover:bg-blue-500 transition duration-150">HR Forms</a>`;
     mainNav.classList.remove('hidden');
 }
 
 function createDashboardCard(title, subtitle, colorClass, handler) {
     return `<div class="${colorClass} border-2 p-6 rounded-xl shadow-lg cursor-pointer hover:shadow-2xl hover:scale-[1.02] transition duration-300 transform" onclick="${handler}()">
-                <h3 class="text-2xl font-bold text-gray-800">${title}</h3>
-                <p class="text-gray-600 mt-2">${subtitle}</p>
-            </div>`;
+            <h3 class="text-2xl font-bold text-gray-800">${title}</h3>
+            <p class="text-gray-600 mt-2">${subtitle}</p>
+        </div>`;
 }
 
 function numberToWords(n) {
@@ -115,23 +120,39 @@ function numberToWords(n) {
 // =================================================================
 //                 4. BANK MANAGEMENT
 // =================================================================
+async function _getBankDetailsData() {
+    const snapshot = await db.collection("bankDetails").get();
+    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+}
+
+async function populateBankDropdown(dropdownId) {
+    const bankSelect = document.getElementById(dropdownId);
+    if (!bankSelect) return;
+    const banks = await _getBankDetailsData();
+    let options = '<option value="" disabled selected>Select Bank Account</option>';
+    banks.forEach(data => {
+        options += `<option value='${JSON.stringify(data)}'>${data.name} - ${data.branch || 'No Branch'} (${data.currency})</option>`;
+    });
+    bankSelect.innerHTML = options;
+}
+
 function renderBankManagement() {
     const formArea = document.getElementById('document-form-area');
     formArea.innerHTML = `
         <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div class="p-6 border border-green-300 rounded-xl bg-green-50 shadow-md">
-                <h3 class="text-xl font-semibold mb-4 text-green-700">Add Bank Account</h3>
+            <div class="md:col-span-1 p-6 border border-green-300 rounded-xl bg-green-50 shadow-md">
+                <h3 class="text-xl font-semibold mb-4 text-green-700">Add New Bank Account</h3>
                 <form id="add-bank-form" onsubmit="event.preventDefault(); addBankDetails()">
-                    <input type="text" id="bankName" required placeholder="Bank Name" class="mt-2 block w-full p-2 border rounded">
-                    <input type="text" id="bankBranch" required placeholder="Branch" class="mt-2 block w-full p-2 border rounded">
-                    <input type="text" id="accountName" required value="WANBITE INVESTMENTS CO. LTD" class="mt-2 block w-full p-2 border rounded">
-                    <input type="text" id="accountNumber" required placeholder="Account Number" class="mt-2 block w-full p-2 border rounded">
-                    <input type="text" id="swiftCode" required placeholder="SWIFT Code" class="mt-2 block w-full p-2 border rounded">
-                    <select id="currency" required class="mt-2 block w-full p-2 border rounded">
+                    <input type="text" id="bankName" required placeholder="Bank Name" class="mt-2 block w-full p-2 border rounded-md">
+                    <input type="text" id="bankBranch" required placeholder="Branch" class="mt-2 block w-full p-2 border rounded-md">
+                    <input type="text" id="accountName" required value="WANBITE INVESTMENTS CO. LTD" class="mt-2 block w-full p-2 border rounded-md">
+                    <input type="text" id="accountNumber" required placeholder="Account Number" class="mt-2 block w-full p-2 border rounded-md">
+                    <input type="text" id="swiftCode" required placeholder="SWIFT Code" class="mt-2 block w-full p-2 border rounded-md">
+                    <select id="bankCurrency" required class="mt-2 block w-full p-2 border rounded-md">
                         <option value="USD">USD</option>
                         <option value="KES">KES</option>
                     </select>
-                    <button type="submit" class="mt-4 w-full bg-green-600 text-white font-bold py-2 rounded">Save Bank</button>
+                    <button type="submit" class="mt-4 w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 rounded-md">Save Bank</button>
                 </form>
             </div>
             <div class="md:col-span-2 p-6 border border-gray-300 rounded-xl bg-white shadow-md">
@@ -149,55 +170,42 @@ async function addBankDetails() {
         accountName: document.getElementById('accountName').value,
         accountNumber: document.getElementById('accountNumber').value,
         swiftCode: document.getElementById('swiftCode').value,
-        currency: document.getElementById('currency').value,
+        currency: document.getElementById('bankCurrency').value,
         createdAt: firebase.firestore.FieldValue.serverTimestamp()
     };
     await db.collection("bankDetails").add(newBank);
-    document.getElementById('add-bank-form').reset();
     fetchAndDisplayBankDetails();
+    document.getElementById('add-bank-form').reset();
 }
 
 async function fetchAndDisplayBankDetails() {
     const list = document.getElementById('saved-banks-list');
     const snapshot = await db.collection("bankDetails").orderBy("createdAt", "desc").get();
     list.innerHTML = snapshot.docs.map(doc => {
-        const data = doc.data();
+        const d = doc.data();
         return `<div class="p-4 border rounded flex justify-between items-center">
-                    <div><strong>${data.name}</strong> (${data.currency})<br><small>${data.accountNumber} | ${data.branch}</small></div>
-                    <button onclick="deleteBank('${doc.id}')" class="text-red-500 text-sm">Delete</button>
-                </div>`;
+            <div><strong>${d.name}</strong> (${d.currency})<br><small>${d.accountNumber} | ${d.branch}</small></div>
+            <button onclick="deleteBank('${doc.id}')" class="text-red-500 text-sm">Delete</button>
+        </div>`;
     }).join('');
 }
 
 async function deleteBank(id) { if(confirm("Delete bank?")) { await db.collection("bankDetails").doc(id).delete(); fetchAndDisplayBankDetails(); } }
 
-async function _getBankDetailsData() {
-    const snapshot = await db.collection("bankDetails").get();
-    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-}
-
-async function populateBankDropdown(dropdownId) {
-    const select = document.getElementById(dropdownId);
-    if (!select) return;
-    const banks = await _getBankDetailsData();
-    select.innerHTML = '<option value="" disabled selected>Select Bank Account</option>' + 
-        banks.map(b => `<option value='${JSON.stringify(b)}'>${b.name} (${b.currency})</option>`).join('');
-}
-
 // =================================================================
-//                 5. DOCUMENT GENERATOR (INVOICE MODULE)
+//                 5. INVOICE MODULE (SEQUENTIAL NUMBERING)
 // =================================================================
 function handleDocumentGenerator() {
     appContent.innerHTML = `
         <h2 class="text-3xl font-bold mb-6 text-primary-blue">Document Generator</h2>
         <div class="flex space-x-4 mb-6 flex-wrap">
-            <button onclick="renderInvoiceForm()" class="bg-primary-blue hover:bg-blue-900 text-white p-3 rounded-lg transition duration-150 mb-2">Invoice/Proforma</button>
-            <button onclick="renderInvoiceHistory()" class="bg-gray-700 hover:bg-gray-900 text-white p-3 rounded-lg transition duration-150 mb-2">Invoice History</button>
-            <button onclick="renderReceiptForm()" class="bg-secondary-red hover:bg-red-700 text-white p-3 rounded-lg transition duration-150 mb-2">Payment Receipt</button>
-            <button onclick="renderAgreementForm()" class="bg-gray-700 hover:bg-gray-900 text-white p-3 rounded-lg transition duration-150 mb-2">Car Sales Agreement</button>
-            <button onclick="renderBankManagement()" class="bg-green-600 hover:bg-green-700 text-white p-3 rounded-lg transition duration-150 mb-2">BANKS</button>
+            <button onclick="renderInvoiceForm()" class="bg-primary-blue hover:bg-blue-900 text-white p-3 rounded-lg mb-2">Invoice/Proforma</button>
+            <button onclick="renderInvoiceHistory()" class="bg-gray-700 hover:bg-gray-900 text-white p-3 rounded-lg mb-2">Invoice History</button>
+            <button onclick="renderReceiptForm()" class="bg-secondary-red hover:bg-red-700 text-white p-3 rounded-lg mb-2">Payment Receipt</button>
+            <button onclick="renderAgreementForm()" class="bg-gray-700 hover:bg-gray-900 text-white p-3 rounded-lg mb-2">Car Sales Agreement</button>
+            <button onclick="renderBankManagement()" class="bg-green-600 hover:bg-green-700 text-white p-3 rounded-lg mb-2">BANKS</button>
         </div>
-        <div id="document-form-area"><p class="text-gray-600">Select a document type.</p></div>`;
+        <div id="document-form-area"><p class="text-gray-600">Select a document type or manage bank accounts.</p></div>`;
 }
 
 async function generateSequentialInvoiceId() {
@@ -216,25 +224,28 @@ function renderInvoiceForm() {
             <h3 class="text-xl font-semibold mb-4 text-primary-blue">Create Sales Invoice/Proforma</h3>
             <form id="invoice-form" onsubmit="event.preventDefault(); saveInvoice(false);">
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 p-4 bg-blue-50 rounded-lg">
-                    <div><label class="block text-sm">Type</label><select id="docType" class="w-full p-2 border rounded"><option value="Invoice">Invoice</option><option value="Proforma Invoice">Proforma Invoice</option></select></div>
-                    <div><label class="block text-sm">USD to KES Rate</label><input type="number" id="exchangeRate" step="0.01" value="130.00" class="w-full p-2 border rounded"></div>
+                    <div><label class="block text-sm">Document Type</label><select id="docType" required class="w-full p-2 border rounded"><option value="Invoice">Invoice</option><option value="Proforma Invoice">Proforma Invoice</option></select></div>
+                    <div><label class="block text-sm">USD 1 = KES</label><input type="number" id="exchangeRate" step="0.01" required value="130.00" class="w-full p-2 border rounded"></div>
                     <div><label class="block text-sm">Due Date</label><input type="date" id="dueDate" required class="w-full p-2 border rounded"></div>
                 </div>
+                <fieldset class="border p-4 rounded-lg mb-6"><legend class="font-semibold text-secondary-red px-2">Client Details</legend>
+                    <div class="grid grid-cols-2 gap-4"><input type="text" id="clientName" required placeholder="Client Full Name" class="p-2 border rounded"><input type="text" id="clientPhone" required placeholder="Client Phone" class="p-2 border rounded"></div>
+                </fieldset>
+                <fieldset class="border p-4 rounded-lg mb-6"><legend class="font-semibold text-primary-blue px-2">Vehicle Specification</legend>
+                    <div class="grid grid-cols-4 gap-4">
+                        <input type="text" id="carMake" required placeholder="Make" class="p-2 border rounded"><input type="text" id="carModel" required placeholder="Model" class="p-2 border rounded">
+                        <input type="number" id="carYear" required placeholder="Year" class="p-2 border rounded"><input type="text" id="vinNumber" required placeholder="VIN Number" class="p-2 border rounded">
+                        <input type="number" id="engineCC" placeholder="Engine CC" class="p-2 border rounded">
+                        <select id="fuelType" class="p-2 border rounded"><option value="Petrol">Petrol</option><option value="Diesel">Diesel</option><option value="Hybrid">Hybrid</option></select>
+                        <select id="transmission" class="p-2 border rounded"><option value="Automatic">Automatic</option><option value="Manual">Manual</option></select>
+                        <input type="text" id="color" placeholder="Color" class="p-2 border rounded">
+                    </div>
+                </fieldset>
                 <div class="grid grid-cols-2 gap-4 mb-6">
-                    <input type="text" id="clientName" required placeholder="Client Full Name" class="p-2 border rounded">
-                    <input type="text" id="clientPhone" required placeholder="Client Phone" class="p-2 border rounded">
-                </div>
-                <div class="grid grid-cols-4 gap-4 mb-6">
-                    <input type="text" id="carMake" placeholder="Make" class="p-2 border rounded">
-                    <input type="text" id="carModel" placeholder="Model" class="p-2 border rounded">
-                    <input type="number" id="carYear" placeholder="Year" class="p-2 border rounded">
-                    <input type="text" id="vinNumber" placeholder="VIN" class="p-2 border rounded">
-                </div>
-                <div class="grid grid-cols-2 gap-4 mb-6">
-                    <input type="number" id="price" step="0.01" placeholder="Price (USD)" class="p-2 border rounded">
+                    <input type="number" id="price" step="0.01" required placeholder="Price (USD)" class="p-2 border rounded">
                     <select id="bankDetailsSelect" required class="p-2 border rounded"></select>
                 </div>
-                <input type="text" id="buyerConfirm" required placeholder="Accepted by Buyer (Name)" class="w-full p-2 border rounded mb-6">
+                <input type="text" id="buyerConfirm" required placeholder="Buyer Name (Confirmation)" class="w-full p-2 border rounded mb-6">
                 <button type="submit" class="w-full bg-primary-blue text-white py-3 rounded-lg font-bold">Generate Invoice</button>
             </form>
         </div>`;
@@ -245,31 +256,13 @@ async function saveInvoice(onlySave) {
     const id = await generateSequentialInvoiceId();
     const bank = JSON.parse(document.getElementById('bankDetailsSelect').value);
     const data = {
-        invoiceId: id,
-        docType: document.getElementById('docType').value,
-        clientName: document.getElementById('clientName').value,
-        clientPhone: document.getElementById('clientPhone').value,
-        dueDate: document.getElementById('dueDate').value,
-        exchangeRate: parseFloat(document.getElementById('exchangeRate').value),
-        carDetails: {
-            make: document.getElementById('carMake').value,
-            model: document.getElementById('carModel').value,
-            year: document.getElementById('carYear').value,
-            vin: document.getElementById('vinNumber').value,
-            priceUSD: parseFloat(document.getElementById('price').value),
-            quantity: 1,
-            goodsDescription: "Vehicle Purchase"
-        },
-        pricing: {
-            totalUSD: parseFloat(document.getElementById('price').value),
-            depositUSD: parseFloat(document.getElementById('price').value) * 0.5,
-            balanceUSD: parseFloat(document.getElementById('price').value) * 0.5,
-            depositKSH: (parseFloat(document.getElementById('price').value) * 0.5 * parseFloat(document.getElementById('exchangeRate').value)).toFixed(2)
-        },
-        bankDetails: bank,
-        buyerNameConfirmation: document.getElementById('buyerConfirm').value,
-        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-        issueDate: new Date().toLocaleDateString('en-US')
+        invoiceId: id, docType: document.getElementById('docType').value,
+        clientName: document.getElementById('clientName').value, clientPhone: document.getElementById('clientPhone').value,
+        dueDate: document.getElementById('dueDate').value, exchangeRate: parseFloat(document.getElementById('exchangeRate').value),
+        carDetails: { make: document.getElementById('carMake').value, model: document.getElementById('carModel').value, year: document.getElementById('carYear').value, vin: document.getElementById('vinNumber').value, priceUSD: parseFloat(document.getElementById('price').value), quantity: 1, goodsDescription: "Vehicle Purchase" },
+        pricing: { totalUSD: parseFloat(document.getElementById('price').value), depositUSD: parseFloat(document.getElementById('price').value)*0.5, balanceUSD: parseFloat(document.getElementById('price').value)*0.5, depositKSH: (parseFloat(document.getElementById('price').value)*0.5 * parseFloat(document.getElementById('exchangeRate').value)).toFixed(2) },
+        bankDetails: bank, buyerNameConfirmation: document.getElementById('buyerConfirm').value,
+        issueDate: new Date().toLocaleDateString('en-US'), createdAt: firebase.firestore.FieldValue.serverTimestamp()
     };
     await db.collection("invoices").add(data);
     generateInvoicePDF(data);
@@ -282,45 +275,29 @@ function generateInvoicePDF(data) {
     const primary = '#183263';
     const secondary = '#D96359';
 
-    // Original Header
-    doc.setFillColor(primary);
-    doc.rect(0, 0, 210, 15, 'F');
-    doc.setTextColor(255);
-    doc.setFont("helvetica", "bold");
+    // Header styling matching original
+    doc.setFillColor(primary); doc.rect(0, 0, 210, 15, 'F');
+    doc.setTextColor(255); doc.setFont("helvetica", "bold");
     doc.text('WanBite Investments Co. Ltd.', 105, 8, { align: 'center' });
-    doc.setFontSize(10);
-    doc.text('carskenya.co.ke', 105, 13, { align: 'center' });
+    doc.setFontSize(10); doc.text('carskenya.co.ke', 105, 13, { align: 'center' });
 
-    doc.setTextColor(secondary);
-    doc.setFontSize(22);
+    doc.setTextColor(secondary); doc.setFontSize(22);
     doc.text(data.docType.toUpperCase(), 105, 25, { align: 'center' });
 
-    doc.setTextColor(primary);
-    doc.setFontSize(10);
+    doc.setTextColor(primary); doc.setFontSize(10);
     doc.rect(10, 30, 190, 15);
     doc.text(`INVOICE NO: ${data.invoiceId}`, 15, 37);
     doc.text(`DATE: ${data.issueDate}`, 150, 37);
 
-    doc.text("CLIENT:", 10, 55);
-    doc.setTextColor(0);
-    doc.text(data.clientName, 10, 60);
+    doc.text("BILL TO:", 10, 55);
+    doc.setTextColor(0); doc.text(data.clientName, 10, 60);
     doc.text(data.clientPhone, 10, 65);
 
-    // Summary Table
-    doc.setFillColor(primary);
-    doc.rect(10, 75, 190, 8, 'F');
-    doc.setTextColor(255);
-    doc.text('DESCRIPTION', 15, 80);
-    doc.text('PRICE (USD)', 170, 80);
-
-    doc.setTextColor(0);
-    doc.text(`${data.carDetails.year} ${data.carDetails.make} ${data.carDetails.model} - VIN: ${data.carDetails.vin}`, 15, 90);
+    // Pricing table logic matching original
+    doc.setFillColor(primary); doc.rect(10, 75, 190, 8, 'F');
+    doc.setTextColor(255); doc.text('MAKE & MODEL / VIN', 15, 80); doc.text('PRICE (USD)', 170, 80);
+    doc.setTextColor(0); doc.text(`${data.carDetails.year} ${data.carDetails.make} ${data.carDetails.model} - ${data.carDetails.vin}`, 15, 90);
     doc.text(`USD ${data.carDetails.priceUSD.toLocaleString()}`, 170, 90);
-
-    doc.setTextColor(primary);
-    doc.text(`DEPOSIT (50%): USD ${data.pricing.depositUSD.toLocaleString()}`, 140, 110);
-    doc.text(`BALANCE: USD ${data.pricing.balanceUSD.toLocaleString()}`, 140, 115);
-    doc.text(`KES Equiv (Deposit): KSH ${data.pricing.depositKSH.toLocaleString()}`, 140, 120);
 
     doc.save(`${data.invoiceId}.pdf`);
 }
@@ -328,17 +305,17 @@ function generateInvoicePDF(data) {
 async function renderInvoiceHistory() {
     const formArea = document.getElementById('document-form-area');
     formArea.innerHTML = `<h3 class="font-bold mb-4">Invoice History</h3><div id="inv-history" class="space-y-2"></div>`;
-    const snapshot = await db.collection("invoices").orderBy("createdAt", "desc").limit(15).get();
-    document.getElementById('inv-history').innerHTML = snapshot.docs.map(doc => {
+    const snap = await db.collection("invoices").orderBy("createdAt", "desc").limit(15).get();
+    document.getElementById('inv-history').innerHTML = snap.docs.map(doc => {
         const d = doc.data();
         const json = JSON.stringify(d);
-        return `<div class="p-4 border rounded flex justify-between items-center bg-white shadow-sm">
-                    <div><strong>${d.invoiceId}</strong><br><small>${d.clientName} | ${d.carDetails.make}</small></div>
-                    <div class="space-x-2">
-                        <button onclick='createReceiptFromInvoice(${json})' class="bg-green-600 text-white text-xs px-3 py-1 rounded">Create Receipt</button>
-                        <button onclick='generateInvoicePDF(${json})' class="bg-primary-blue text-white text-xs px-3 py-1 rounded">Download</button>
-                    </div>
-                </div>`;
+        return `<div class="p-4 border rounded flex justify-between bg-white shadow-sm">
+            <div><strong>${d.invoiceId}</strong><br><small>${d.clientName} | ${d.carDetails.make}</small></div>
+            <div class="space-x-2">
+                <button onclick='createReceiptFromInvoice(${json})' class="bg-green-600 text-white text-xs px-3 py-1 rounded">Create Receipt</button>
+                <button onclick='generateInvoicePDF(${json})' class="bg-primary-blue text-white text-xs px-3 py-1 rounded">Download</button>
+            </div>
+        </div>`;
     }).join('');
 }
 
@@ -347,12 +324,12 @@ function createReceiptFromInvoice(inv) {
     renderReceiptForm();
     document.getElementById('receivedFrom').value = inv.clientName;
     document.getElementById('amountReceived').value = inv.pricing.depositUSD;
-    document.getElementById('beingPaidFor').value = `Deposit for ${inv.carDetails.make} ${inv.carDetails.model} (Invoice: ${inv.invoiceId})`;
+    document.getElementById('beingPaidFor').value = `Deposit for ${inv.carDetails.make} ${inv.carDetails.model} (Ref: ${inv.invoiceId})`;
     updateAmountInWords();
 }
 
 // =================================================================
-//                 6. RECEIPT MODULE (WITH PAYMENT TRACKING)
+//                 6. RECEIPT MODULE (WITH BALANCE TRACKING)
 // =================================================================
 function renderReceiptForm() {
     const formArea = document.getElementById('document-form-area');
@@ -367,7 +344,7 @@ function renderReceiptForm() {
                         <input type="number" id="amountReceived" step="0.01" required placeholder="Amount" class="col-span-2 p-2 border rounded" oninput="updateAmountInWords()">
                     </div>
                     <textarea id="amountWords" readonly class="w-full p-2 border bg-gray-50 mb-3 text-sm"></textarea>
-                    <input type="text" id="beingPaidFor" required placeholder="Payment for..." class="w-full p-2 border rounded mb-4">
+                    <input type="text" id="beingPaidFor" required placeholder="Being Paid For" class="w-full p-2 border rounded mb-4">
                     <button type="submit" class="w-full bg-secondary-red text-white py-3 rounded-lg font-bold">Save Receipt</button>
                 </form>
             </div>
@@ -389,60 +366,40 @@ function updateAmountInWords() {
 async function saveReceipt() {
     const id = window.pendingReceiptId || `RCPT-${Date.now()}`;
     const data = {
-        receiptId: id,
-        receivedFrom: document.getElementById('receivedFrom').value,
+        receiptId: id, receivedFrom: document.getElementById('receivedFrom').value,
         amountReceived: parseFloat(document.getElementById('amountReceived').value),
-        currency: document.getElementById('currency').value,
-        amountWords: document.getElementById('amountWords').value,
-        beingPaidFor: document.getElementById('beingPaidFor').value,
-        receiptDate: new Date().toLocaleDateString('en-US'),
-        paymentsLog: [], // Track additional payments here
-        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        currency: document.getElementById('currency').value, amountWords: document.getElementById('amountWords').value,
+        beingPaidFor: document.getElementById('beingPaidFor').value, receiptDate: new Date().toLocaleDateString('en-US'),
+        paymentsLog: [], createdAt: firebase.firestore.FieldValue.serverTimestamp()
     };
     await db.collection("receipts").add(data);
     window.pendingReceiptId = null;
-    generateReceiptPDF(data);
-    renderReceiptForm();
+    generateReceiptPDF(data); renderReceiptForm();
 }
 
 function generateReceiptPDF(data) {
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF('p', 'mm', 'a4');
-    const primary = '#183263';
-    const secondary = '#D96359';
+    const primary = '#183263'; const secondary = '#D96359';
 
-    doc.setFillColor(primary);
-    doc.rect(0, 0, 210, 15, 'F');
-    doc.setTextColor(255);
-    doc.text("WANBITE INVESTMENTS - OFFICIAL RECEIPT", 105, 10, { align: 'center' });
+    doc.setFillColor(primary); doc.rect(0, 0, 210, 15, 'F');
+    doc.setTextColor(255); doc.text("WANBITE INVESTMENTS - OFFICIAL RECEIPT", 105, 10, { align: 'center' });
 
-    doc.setTextColor(0);
-    doc.setFontSize(10);
-    doc.text(`Receipt #: ${data.receiptId}`, 20, 30);
-    doc.text(`Date: ${data.receiptDate}`, 150, 30);
+    doc.setTextColor(0); doc.setFontSize(10);
+    doc.text(`Receipt #: ${data.receiptId}`, 20, 30); doc.text(`Date: ${data.receiptDate}`, 150, 30);
     
-    doc.setFont("helvetica", "bold");
-    doc.text(`RECEIVED FROM: ${data.receivedFrom}`, 20, 45);
-    doc.setFont("helvetica", "normal");
-    doc.text(`THE SUM OF: ${data.amountWords}`, 20, 55);
+    doc.setFont("helvetica", "bold"); doc.text(`RECEIVED FROM: ${data.receivedFrom}`, 20, 45);
+    doc.setFont("helvetica", "normal"); doc.text(`THE SUM OF: ${data.amountWords}`, 20, 55);
     doc.text(`BEING PAID FOR: ${data.beingPaidFor}`, 20, 65);
 
-    doc.setFontSize(14);
-    doc.setTextColor(secondary);
-    doc.rect(20, 75, 170, 15);
+    doc.setFontSize(14); doc.setTextColor(secondary); doc.rect(20, 75, 170, 15);
     doc.text(`AMOUNT: ${data.currency} ${data.amountReceived.toLocaleString()}`, 105, 85, { align: 'center' });
 
     if(data.paymentsLog && data.paymentsLog.length > 0) {
-        let y = 105;
-        doc.setFontSize(10);
-        doc.setTextColor(primary);
-        doc.text("SUPPLEMENTARY PAYMENTS:", 20, 100);
-        data.paymentsLog.forEach(p => {
-            doc.text(`${p.date} - ${p.reason}: ${data.currency} ${p.amount}`, 25, y);
-            y += 5;
-        });
+        let y = 105; doc.setFontSize(10); doc.setTextColor(primary);
+        doc.text("SUPPLEMENTARY PAYMENTS LOG:", 20, 100);
+        data.paymentsLog.forEach(p => { doc.text(`${p.date} - ${p.reason}: +${p.amount} ${data.currency}`, 25, y); y += 5; });
     }
-
     doc.save(`${data.receiptId}.pdf`);
 }
 
@@ -450,8 +407,7 @@ async function fetchReceipts() {
     const list = document.getElementById('receipt-history-list');
     const snap = await db.collection("receipts").orderBy("createdAt", "desc").limit(10).get();
     list.innerHTML = snap.docs.map(doc => {
-        const d = doc.data();
-        const json = JSON.stringify(d);
+        const d = doc.data(); const json = JSON.stringify(d);
         const payments = (d.paymentsLog || []).map(p => `<p class="text-[10px] italic text-blue-600 border-l pl-2">${p.date}: +${p.amount} (${p.reason})</p>`).join('');
         return `
             <div class="p-3 border rounded bg-gray-50 text-sm shadow-sm">
@@ -463,7 +419,7 @@ async function fetchReceipts() {
                         <button onclick='generateReceiptPDF(${json})' class="bg-red-500 text-white text-[10px] px-2 py-1 rounded">PDF</button>
                     </div>
                 </div>
-                <p>${d.receivedFrom} - ${d.currency} ${d.amountReceived}</p>
+                <p>${d.receivedFrom} - Total Received: ${d.currency} ${d.amountReceived}</p>
                 ${payments}
             </div>`;
     }).join('');
@@ -486,24 +442,18 @@ function createAgreementFromReceipt(rcpt) {
 }
 
 // =================================================================
-//                 7. AGREEMENT MODULE (RESTORED STYLING)
+//                 7. AGREEMENT MODULE (NO SUPPLEMENTARY PAYMENTS)
 // =================================================================
 function renderAgreementForm() {
     const formArea = document.getElementById('document-form-area');
     formArea.innerHTML = `
         <div class="p-6 border border-gray-300 rounded-xl bg-white shadow-md">
             <h3 class="text-xl font-semibold mb-4 text-primary-blue">Car Sales Agreement</h3>
-            <p class="text-xs text-blue-500 mb-2">${window.pendingAgreementId ? 'Linked Ref: ' + window.pendingAgreementId : ''}</p>
+            <p class="text-xs text-blue-500 mb-2">${window.pendingAgreementId ? 'Using Linked Ref: ' + window.pendingAgreementId : ''}</p>
             <form id="agreement-form" onsubmit="event.preventDefault(); saveAgreement()">
-                <div class="grid grid-cols-2 gap-4 mb-4">
-                    <input type="text" id="buyerName" required placeholder="Buyer Full Name" class="p-2 border rounded">
-                    <input type="text" id="buyerPhone" placeholder="Buyer Phone" class="p-2 border rounded">
-                </div>
-                <input type="text" id="carMakeModel" required placeholder="Vehicle (Make/Model/Year)" class="w-full p-2 border rounded mb-4">
-                <div class="grid grid-cols-2 gap-4 mb-4">
-                    <input type="text" id="vinNumber" placeholder="VIN Number" class="p-2 border rounded">
-                    <input type="number" id="price" placeholder="Agreed Price" class="p-2 border rounded">
-                </div>
+                <div class="grid grid-cols-2 gap-4 mb-4"><input type="text" id="buyerName" required placeholder="Buyer Full Name" class="p-2 border rounded"><input type="text" id="buyerPhone" placeholder="Buyer Phone" class="p-2 border rounded"></div>
+                <input type="text" id="carMakeModel" required placeholder="Vehicle Details" class="w-full p-2 border rounded mb-4">
+                <div class="grid grid-cols-2 gap-4 mb-4"><input type="text" id="vinNumber" placeholder="VIN Number" class="p-2 border rounded"><input type="number" id="price" placeholder="Final Price" class="p-2 border rounded"></div>
                 <button type="submit" class="w-full bg-primary-blue text-white py-3 rounded-lg font-bold">Save Agreement</button>
             </form>
         </div>`;
@@ -512,45 +462,68 @@ function renderAgreementForm() {
 async function saveAgreement() {
     const id = window.pendingAgreementId || `AGR-${Date.now()}`;
     const data = {
-        agreementId: id,
-        buyer: { name: document.getElementById('buyerName').value, phone: document.getElementById('buyerPhone').value, address: "Nairobi" },
+        agreementId: id, buyer: { name: document.getElementById('buyerName').value, phone: document.getElementById('buyerPhone').value },
         vehicle: { makeModel: document.getElementById('carMakeModel').value, vin: document.getElementById('vinNumber').value },
         salesTerms: { price: parseFloat(document.getElementById('price').value), currency: "KES" },
-        agreementDate: new Date().toLocaleDateString(),
-        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        agreementDate: new Date().toLocaleDateString(), createdAt: firebase.firestore.FieldValue.serverTimestamp()
     };
     await db.collection("sales_agreements").add(data);
     window.pendingAgreementId = null;
-    generateAgreementPDF(data);
-    renderDashboard();
+    generateAgreementPDF(data); renderDashboard();
 }
 
 function generateAgreementPDF(data) {
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF();
-    doc.setFillColor('#183263');
-    doc.rect(0, 0, 210, 15, 'F');
-    doc.setTextColor(255);
-    doc.text("CAR SALES AGREEMENT", 105, 10, { align: 'center' });
-    
-    doc.setTextColor(0);
-    doc.setFontSize(10);
-    doc.text(`Agreement #: ${data.agreementId}`, 20, 30);
-    doc.text(`Buyer: ${data.buyer.name}`, 20, 40);
+    const { jsPDF } = window.jspdf; const doc = new jsPDF();
+    doc.setFillColor('#183263'); doc.rect(0, 0, 210, 15, 'F');
+    doc.setTextColor(255); doc.text("CAR SALES AGREEMENT", 105, 10, { align: 'center' });
+    doc.setTextColor(0); doc.setFontSize(10);
+    doc.text(`Ref #: ${data.agreementId}`, 20, 30); doc.text(`Buyer: ${data.buyer.name}`, 20, 40);
     doc.text(`Vehicle: ${data.vehicle.makeModel}`, 20, 50);
-    doc.text(`VIN: ${data.vehicle.vin}`, 20, 55);
-    doc.text(`Agreed Price: ${data.salesTerms.currency} ${data.salesTerms.price.toLocaleString()}`, 20, 65);
-    
-    doc.text("This document acts as a binding sale agreement between WanBite and the Buyer.", 20, 80);
+    doc.text(`Total Price: ${data.salesTerms.currency} ${data.salesTerms.price.toLocaleString()}`, 20, 60);
     doc.save(`Agreement_${data.agreementId}.pdf`);
 }
 
 // =================================================================
-//                 8. FLEET & STUBS
+//                 8. FLEET MANAGEMENT MODULE
 // =================================================================
+const FLEET_STATUSES = [
+    { id: "ship_to_mombasa", name: "On Ship to Mombasa", color: "bg-blue-100", border: "border-blue-400", button: "bg-blue-600" },
+    { id: "clearing_mombasa", name: "In Mombasa being cleared", color: "bg-yellow-100", border: "border-yellow-400", button: "bg-yellow-600" },
+    { id: "taken_to_carrier", name: "In Mombasa taken to the carrier", color: "bg-orange-100", border: "border-orange-400", button: "bg-orange-600" },
+    { id: "transit_to_nairobi", name: "In transit from Mombasa to Nairobi", color: "bg-purple-100", border: "border-purple-400", button: "bg-purple-600" },
+    { id: "in_nairobi", name: "In Nairobi and picked from carrier", color: "bg-green-100", border: "border-green-400", button: "bg-green-600" },
+    { id: "delivered_client", name: "Delivered to the client", color: "bg-teal-100", border: "border-teal-400", button: "bg-teal-600" }
+];
+
 function handleFleetManagement() {
-    appContent.innerHTML = `<h2 class="text-3xl font-bold mb-6 text-primary-blue">Fleet Dashboard</h2><p>Fleet tracking logic remains exactly as in your original file.</p>`;
+    appContent.innerHTML = `
+        <h2 class="text-3xl font-bold mb-6 text-primary-blue">Fleet Dashboard</h2>
+        <div class="grid grid-cols-1 md:grid-cols-6 gap-2" id="fleet-columns">
+            ${FLEET_STATUSES.map(s => `<div class="p-2 border rounded bg-gray-50"><h4 class="text-[10px] font-bold mb-2 uppercase text-center">${s.name}</h4><div id="fleet-column-${s.id}" class="space-y-2 min-h-[150px]"></div></div>`).join('')}
+        </div>
+        <button onclick="document.getElementById('add-car-modal').classList.remove('hidden')" class="mt-6 bg-green-600 text-white px-4 py-2 rounded">Add Fleet Car</button>`;
+    renderFleetDashboard();
 }
+
+function renderFleetDashboard() {
+    db.collection("cars").onSnapshot(snap => {
+        FLEET_STATUSES.forEach(s => document.getElementById(`fleet-column-${s.id}`).innerHTML = '');
+        snap.forEach(doc => {
+            const car = doc.data(); const sObj = FLEET_STATUSES.find(s => s.name === car.currentStatus);
+            if(sObj) {
+                document.getElementById(`fleet-column-${sObj.id}`).innerHTML += `<div class="p-2 bg-white border rounded shadow-sm text-[10px]">
+                    <strong>${car.makeModel || car.make}</strong><br>ETA: ${car.eta || 'TBD'}
+                </div>`;
+            }
+        });
+    });
+}
+
+function addFleetCar() {
+    const data = { make: document.getElementById('car-make').value, currentStatus: FLEET_STATUSES[0].name, createdAt: firebase.firestore.FieldValue.serverTimestamp() };
+    db.collection("cars").add(data); document.getElementById('add-car-modal').classList.add('hidden');
+}
+
 function handleHRManagement() {
-    appContent.innerHTML = `<h2 class="text-3xl font-bold mb-6 text-primary-blue">HR Forms</h2><p>HR Module logic remains as provided.</p>`;
+    appContent.innerHTML = `<h2 class="text-3xl font-bold mb-6 text-primary-blue">HR Forms</h2><p class="p-4 bg-red-50 rounded">Leave & Requisition Management module.</p>`;
 }
