@@ -119,6 +119,20 @@ function createDashboardCard(title, subtitle, colorClass, handler) {
     `;
 }
 
+// New Utility for Shared Reference & Serial Generation
+async function generateSharedRefId(clientName, carModel, carYear, collectionName) {
+    const datePart = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const namePart = clientName.split(' ')[0].toUpperCase().substring(0, 3);
+    const modelPart = carModel.toUpperCase().substring(0, 3);
+    const baseId = `${datePart}-${namePart}-${modelPart}-${carYear}`;
+    
+    // Fetch current count to determine the serial suffix (0001, 0002, etc.)
+    const snapshot = await db.collection(collectionName).get();
+    const serial = (snapshot.size + 1).toString().padStart(4, '0');
+    
+    return `${baseId}-${serial}`;
+}
+
 // =================================================================
 //                 4. DOCUMENT GENERATOR ROUTING (UPDATED)
 // =================================================================
@@ -178,6 +192,11 @@ function numberToWords(n) {
     return result.charAt(0).toUpperCase() + result.slice(1) + ' only.';
 }
 
+// Add this helper function to handle the "Add Payment" action for Receipts
+async function handleReceiptAddPayment(receiptData) {
+    // This re-uses your existing renderAddPaymentModal logic but targets the 'receipts' collection
+    renderAddPaymentModal(receiptData, "receipts");
+}
 
 /**
  * Renders the new comprehensive Receipt form.
@@ -1270,6 +1289,18 @@ function renderInvoiceHistory() {
         </div>
     `;
     fetchInvoices();
+  // Inside the fetchInvoices() snapshot.forEach loop:
+html += `
+    <div class="mt-2 sm:mt-0 space-x-2">
+        <button onclick='reDownloadInvoice(${invoiceDataJson})' 
+                class="bg-primary-blue hover:bg-blue-600 text-white text-xs py-1 px-3 rounded-full">
+            Re-Download PDF
+        </button>
+        <button onclick='generateReceiptFromRef(${invoiceDataJson})' 
+                class="bg-green-600 hover:bg-green-700 text-white text-xs py-1 px-3 rounded-full">
+            Generate Receipt
+        </button>
+    </div>`;
 }
 
 /**
