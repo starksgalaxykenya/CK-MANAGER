@@ -138,9 +138,44 @@ async function generateSharedRefId(clientName, carModel, carYear, collectionName
 //                 4. DOCUMENT GENERATOR ROUTING (UPDATED)
 // =================================================================
 
+// =================================================================
+//                 4. DOCUMENT GENERATOR ROUTING (UPDATED)
+// =================================================================
+
 function handleDocumentGenerator() {
     appContent.innerHTML = `
         <h2 class="text-3xl font-bold mb-6 text-primary-blue">Document Generator</h2>
+        
+        <!-- Search and Filter Section -->
+        <div class="mb-6 p-4 bg-white rounded-xl shadow-md border border-gray-200">
+            <div class="flex flex-wrap gap-4 items-end">
+                <div class="flex-1 min-w-[300px]">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Search Documents</label>
+                    <div class="flex gap-2">
+                        <input type="text" id="document-search" placeholder="Search by client name, reference number, or car make/model..." class="flex-1 p-3 border border-gray-300 rounded-lg focus:ring-primary-blue focus:border-primary-blue">
+                        <button onclick="searchDocuments()" class="bg-primary-blue hover:bg-blue-900 text-white font-bold py-2 px-6 rounded-lg transition duration-150">
+                            Search
+                        </button>
+                        <button onclick="clearSearch()" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-lg transition duration-150">
+                            Clear
+                        </button>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Document Type</label>
+                    <select id="document-type-filter" class="p-3 border border-gray-300 rounded-lg focus:ring-primary-blue focus:border-primary-blue">
+                        <option value="all">All Documents</option>
+                        <option value="receipt">Receipts Only</option>
+                        <option value="invoice">Invoices Only</option>
+                        <option value="agreement">Sales Agreements Only</option>
+                    </select>
+                </div>
+            </div>
+            <div class="mt-3 text-sm text-gray-600">
+                <p>Search by: Client Name, Reference Number, Car Make/Model, Phone Number, or VIN</p>
+            </div>
+        </div>
+
         <div class="flex space-x-4 mb-6 flex-wrap">
             <button onclick="renderInvoiceForm()" class="bg-primary-blue hover:bg-blue-900 text-white p-3 rounded-lg transition duration-150 mb-2">Invoice/Proforma</button>
             <button onclick="renderInvoiceHistory()" class="bg-gray-700 hover:bg-gray-900 text-white p-3 rounded-lg transition duration-150 mb-2">Invoice History</button>
@@ -148,11 +183,538 @@ function handleDocumentGenerator() {
             <button onclick="renderAgreementForm()" class="bg-gray-700 hover:bg-gray-900 text-white p-3 rounded-lg transition duration-150 mb-2">Car Sales Agreement</button>
             <button onclick="renderBankManagement()" class="bg-green-600 hover:bg-green-700 text-white p-3 rounded-lg transition duration-150 mb-2">BANKS</button>
         </div>
+        
         <div id="document-form-area">
-            <p class="text-gray-600">Select a document type or manage bank accounts.</p>
+            <div id="search-results" class="hidden">
+                <h3 class="text-xl font-bold mb-4 text-primary-blue">Search Results</h3>
+                <div id="search-results-list" class="space-y-4">
+                    <!-- Search results will appear here -->
+                </div>
+            </div>
+            <div id="document-creation-area">
+                <p class="text-gray-600">Select a document type or manage bank accounts.</p>
+            </div>
         </div>
     `;
 }
+
+// =================================================================
+//                 13. DOCUMENT SEARCH FUNCTIONALITY (NEW)
+// =================================================================
+
+/**
+ * Searches across all document types
+ */
+async function searchDocuments() {
+    const searchTerm = document.getElementById('document-search').value.trim().toLowerCase();
+    const docTypeFilter = document.getElementById('document-type-filter').value;
+    
+    if (!searchTerm) {
+        alert("Please enter a search term");
+        return;
+    }
+    
+    // Show loading state
+    const resultsList = document.getElementById('search-results-list');
+    const searchResultsDiv = document.getElementById('search-results');
+    const docCreationArea = document.getElementById('document-creation-area');
+    
+    resultsList.innerHTML = '<p class="text-center text-gray-500">Searching documents...</p>';
+    searchResultsDiv.classList.remove('hidden');
+    docCreationArea.classList.add('hidden');
+    
+    let allResults = [];
+    
+    try {
+        // Search Receipts if applicable
+        if (docTypeFilter === 'all' || docTypeFilter === 'receipt') {
+            const receiptResults = await searchReceipts(searchTerm);
+            allResults = allResults.concat(receiptResults.map(r => ({...r, type: 'receipt'})));
+        }
+        
+        // Search Invoices if applicable
+        if (docTypeFilter === 'all' || docTypeFilter === 'invoice') {
+            const invoiceResults = await searchInvoices(searchTerm);
+            allResults = allResults.concat(invoiceResults.map(i => ({...i, type: 'invoice'})));
+        }
+        
+        // Search Agreements if applicable
+        if (docTypeFilter === 'all' || docTypeFilter === 'agreement') {
+            const agreementResults = await searchAgreements(searchTerm);
+            allResults = allResults.concat(agreementResults.map(a => ({...a, type: 'agreement'})));
+        }
+        
+        // Sort by date (newest first)
+        allResults.sort((a, b) => {
+            const dateA = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(a.createdAt || 0);
+            const dateB = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(b.createdAt || 0);
+            return dateB - dateA;
+        });
+        
+        displaySearchResults(allResults, searchTerm);
+        
+    } catch (error) {
+        console.error("Error searching documents:", error);
+        resultsList.innerHTML = '<p class="text-red-500 text-center">Error searching documents. Please try again.</p>';
+    }
+}
+
+/**
+ * Searches receipts based on various criteria
+ */
+async function searchReceipts(searchTerm) {
+    const results = [];
+    
+    try {
+        // Search by receipt ID
+        const receiptIdQuery = await db.collection("receipts")
+            .where("receiptId", ">=", searchTerm.toUpperCase())
+            .where("receiptId", "<=", searchTerm.toUpperCase() + '\uf8ff')
+            .limit(20)
+            .get();
+        
+        receiptIdQuery.forEach(doc => {
+            if (!results.some(r => r.id === doc.id)) {
+                results.push({id: doc.id, ...doc.data()});
+            }
+        });
+        
+        // Search by client name
+        const clientNameQuery = await db.collection("receipts")
+            .where("receivedFrom", ">=", searchTerm)
+            .where("receivedFrom", "<=", searchTerm + '\uf8ff')
+            .limit(20)
+            .get();
+        
+        clientNameQuery.forEach(doc => {
+            if (!results.some(r => r.id === doc.id)) {
+                results.push({id: doc.id, ...doc.data()});
+            }
+        });
+        
+        // Search by being paid for (car make/model)
+        const carQuery = await db.collection("receipts")
+            .where("beingPaidFor", ">=", searchTerm)
+            .where("beingPaidFor", "<=", searchTerm + '\uf8ff')
+            .limit(20)
+            .get();
+        
+        carQuery.forEach(doc => {
+            if (!results.some(r => r.id === doc.id)) {
+                results.push({id: doc.id, ...doc.data()});
+            }
+        });
+        
+        // Search by invoice reference
+        const invoiceRefQuery = await db.collection("receipts")
+            .where("invoiceReference", ">=", searchTerm)
+            .where("invoiceReference", "<=", searchTerm + '\uf8ff')
+            .limit(20)
+            .get();
+        
+        invoiceRefQuery.forEach(doc => {
+            if (!results.some(r => r.id === doc.id)) {
+                results.push({id: doc.id, ...doc.data()});
+            }
+        });
+        
+    } catch (error) {
+        console.error("Error searching receipts:", error);
+    }
+    
+    return results;
+}
+
+/**
+ * Searches invoices based on various criteria
+ */
+async function searchInvoices(searchTerm) {
+    const results = [];
+    
+    try {
+        // Search by invoice ID
+        const invoiceIdQuery = await db.collection("invoices")
+            .where("invoiceId", ">=", searchTerm.toUpperCase())
+            .where("invoiceId", "<=", searchTerm.toUpperCase() + '\uf8ff')
+            .limit(20)
+            .get();
+        
+        invoiceIdQuery.forEach(doc => {
+            if (!results.some(r => r.id === doc.id)) {
+                results.push({id: doc.id, ...doc.data()});
+            }
+        });
+        
+        // Search by client name
+        const clientNameQuery = await db.collection("invoices")
+            .where("clientName", ">=", searchTerm)
+            .where("clientName", "<=", searchTerm + '\uf8ff')
+            .limit(20)
+            .get();
+        
+        clientNameQuery.forEach(doc => {
+            if (!results.some(r => r.id === doc.id)) {
+                results.push({id: doc.id, ...doc.data()});
+            }
+        });
+        
+        // Search by client phone
+        const phoneQuery = await db.collection("invoices")
+            .where("clientPhone", ">=", searchTerm)
+            .where("clientPhone", "<=", searchTerm + '\uf8ff')
+            .limit(20)
+            .get();
+        
+        phoneQuery.forEach(doc => {
+            if (!results.some(r => r.id === doc.id)) {
+                results.push({id: doc.id, ...doc.data()});
+            }
+        });
+        
+        // Search by car make/model
+        const carMakeQuery = await db.collection("invoices")
+            .where("carDetails.make", ">=", searchTerm)
+            .where("carDetails.make", "<=", searchTerm + '\uf8ff')
+            .limit(20)
+            .get();
+        
+        carMakeQuery.forEach(doc => {
+            if (!results.some(r => r.id === doc.id)) {
+                results.push({id: doc.id, ...doc.data()});
+            }
+        });
+        
+        const carModelQuery = await db.collection("invoices")
+            .where("carDetails.model", ">=", searchTerm)
+            .where("carDetails.model", "<=", searchTerm + '\uf8ff')
+            .limit(20)
+            .get();
+        
+        carModelQuery.forEach(doc => {
+            if (!results.some(r => r.id === doc.id)) {
+                results.push({id: doc.id, ...doc.data()});
+            }
+        });
+        
+        // Search by VIN
+        const vinQuery = await db.collection("invoices")
+            .where("carDetails.vin", ">=", searchTerm.toUpperCase())
+            .where("carDetails.vin", "<=", searchTerm.toUpperCase() + '\uf8ff')
+            .limit(20)
+            .get();
+        
+        vinQuery.forEach(doc => {
+            if (!results.some(r => r.id === doc.id)) {
+                results.push({id: doc.id, ...doc.data()});
+            }
+        });
+        
+    } catch (error) {
+        console.error("Error searching invoices:", error);
+    }
+    
+    return results;
+}
+
+/**
+ * Searches sales agreements based on various criteria
+ */
+async function searchAgreements(searchTerm) {
+    const results = [];
+    
+    try {
+        // Search by buyer name
+        const buyerNameQuery = await db.collection("sales_agreements")
+            .where("buyer.name", ">=", searchTerm)
+            .where("buyer.name", "<=", searchTerm + '\uf8ff')
+            .limit(20)
+            .get();
+        
+        buyerNameQuery.forEach(doc => {
+            if (!results.some(r => r.id === doc.id)) {
+                results.push({id: doc.id, ...doc.data()});
+            }
+        });
+        
+        // Search by buyer phone
+        const buyerPhoneQuery = await db.collection("sales_agreements")
+            .where("buyer.phone", ">=", searchTerm)
+            .where("buyer.phone", "<=", searchTerm + '\uf8ff')
+            .limit(20)
+            .get();
+        
+        buyerPhoneQuery.forEach(doc => {
+            if (!results.some(r => r.id === doc.id)) {
+                results.push({id: doc.id, ...doc.data()});
+            }
+        });
+        
+        // Search by vehicle make/model
+        const vehicleQuery = await db.collection("sales_agreements")
+            .where("vehicle.makeModel", ">=", searchTerm)
+            .where("vehicle.makeModel", "<=", searchTerm + '\uf8ff')
+            .limit(20)
+            .get();
+        
+        vehicleQuery.forEach(doc => {
+            if (!results.some(r => r.id === doc.id)) {
+                results.push({id: doc.id, ...doc.data()});
+            }
+        });
+        
+        // Search by VIN
+        const vinQuery = await db.collection("sales_agreements")
+            .where("vehicle.vin", ">=", searchTerm.toUpperCase())
+            .where("vehicle.vin", "<=", searchTerm.toUpperCase() + '\uf8ff')
+            .limit(20)
+            .get();
+        
+        vinQuery.forEach(doc => {
+            if (!results.some(r => r.id === doc.id)) {
+                results.push({id: doc.id, ...doc.data()});
+            }
+        });
+        
+    } catch (error) {
+        console.error("Error searching agreements:", error);
+    }
+    
+    return results;
+}
+
+/**
+ * Displays search results
+ */
+function displaySearchResults(results, searchTerm) {
+    const resultsList = document.getElementById('search-results-list');
+    
+    if (results.length === 0) {
+        resultsList.innerHTML = `
+            <div class="text-center p-8 bg-gray-50 rounded-lg">
+                <p class="text-gray-600">No documents found for "<span class="font-semibold">${searchTerm}</span>"</p>
+                <p class="text-sm text-gray-500 mt-2">Try searching with different terms</p>
+            </div>
+        `;
+        return;
+    }
+    
+    let html = `
+        <div class="mb-4">
+            <p class="text-gray-600">Found <span class="font-bold text-primary-blue">${results.length}</span> documents for "<span class="font-semibold">${searchTerm}</span>"</p>
+        </div>
+    `;
+    
+    results.forEach(doc => {
+        const docJson = JSON.stringify({
+            ...doc,
+            firestoreId: doc.id,
+            createdAt: doc.createdAt ? (doc.createdAt.toDate ? doc.createdAt.toDate().toISOString() : doc.createdAt) : new Date().toISOString()
+        });
+        
+        if (doc.type === 'receipt') {
+            html += renderReceiptSearchResult(doc, docJson);
+        } else if (doc.type === 'invoice') {
+            html += renderInvoiceSearchResult(doc, docJson);
+        } else if (doc.type === 'agreement') {
+            html += renderAgreementSearchResult(doc, docJson);
+        }
+    });
+    
+    resultsList.innerHTML = html;
+}
+
+/**
+ * Renders a receipt search result card
+ */
+function renderReceiptSearchResult(doc, docJson) {
+    const date = doc.receiptDate || (doc.createdAt?.toDate ? doc.createdAt.toDate().toLocaleDateString() : 'N/A');
+    
+    return `
+        <div class="p-4 border border-secondary-red/30 rounded-lg bg-white shadow-sm hover:shadow-md transition duration-200">
+            <div class="flex justify-between items-start">
+                <div class="flex-1">
+                    <div class="flex items-center gap-2 mb-2">
+                        <span class="bg-secondary-red text-white text-xs font-bold px-2 py-1 rounded">RECEIPT</span>
+                        <span class="text-sm text-gray-500">${date}</span>
+                    </div>
+                    <h4 class="font-bold text-gray-800">${doc.receiptId}</h4>
+                    <p class="text-sm text-gray-700 mt-1"><strong>From:</strong> ${doc.receivedFrom}</p>
+                    <p class="text-sm text-gray-600"><strong>For:</strong> ${doc.beingPaidFor || 'N/A'}</p>
+                    <p class="text-sm text-gray-600"><strong>Amount:</strong> ${doc.currency} ${doc.amountReceived?.toFixed(2) || '0.00'}</p>
+                    ${doc.invoiceReference ? `<p class="text-sm text-gray-600"><strong>Invoice Ref:</strong> ${doc.invoiceReference}</p>` : ''}
+                </div>
+                <div class="flex flex-col gap-2 ml-4">
+                    <button onclick='reDownloadReceipt(${docJson})' 
+                            class="bg-secondary-red hover:bg-red-700 text-white text-xs py-1 px-3 rounded-full transition duration-150">
+                        Download
+                    </button>
+                    <button onclick='addPaymentToReceipt(${docJson})' 
+                            class="bg-primary-blue hover:bg-blue-700 text-white text-xs py-1 px-3 rounded-full transition duration-150">
+                        Add Payment
+                    </button>
+                    <button onclick='viewReceiptBalances(${docJson})' 
+                            class="bg-green-600 hover:bg-green-700 text-white text-xs py-1 px-3 rounded-full transition duration-150">
+                        View Balances
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+/**
+ * Renders an invoice search result card
+ */
+function renderInvoiceSearchResult(doc, docJson) {
+    const date = doc.issueDate || (doc.createdAt?.toDate ? doc.createdAt.toDate().toLocaleDateString() : 'N/A');
+    
+    return `
+        <div class="p-4 border border-primary-blue/30 rounded-lg bg-white shadow-sm hover:shadow-md transition duration-200">
+            <div class="flex justify-between items-start">
+                <div class="flex-1">
+                    <div class="flex items-center gap-2 mb-2">
+                        <span class="bg-primary-blue text-white text-xs font-bold px-2 py-1 rounded">${doc.docType || 'INVOICE'}</span>
+                        <span class="text-sm text-gray-500">${date}</span>
+                    </div>
+                    <h4 class="font-bold text-gray-800">${doc.invoiceId}</h4>
+                    <p class="text-sm text-gray-700 mt-1"><strong>Client:</strong> ${doc.clientName}</p>
+                    <p class="text-sm text-gray-600"><strong>Vehicle:</strong> ${doc.carDetails?.make || ''} ${doc.carDetails?.model || ''} ${doc.carDetails?.year || ''}</p>
+                    <p class="text-sm text-gray-600"><strong>Total:</strong> USD ${doc.pricing?.totalUSD?.toFixed(2) || '0.00'}</p>
+                    <p class="text-sm text-gray-600"><strong>Phone:</strong> ${doc.clientPhone || 'N/A'}</p>
+                </div>
+                <div class="flex flex-col gap-2 ml-4">
+                    <button onclick='reDownloadInvoice(${docJson})' 
+                            class="bg-primary-blue hover:bg-blue-700 text-white text-xs py-1 px-3 rounded-full transition duration-150">
+                        Download
+                    </button>
+                    <button onclick='createReceiptFromInvoice(${docJson})' 
+                            class="bg-secondary-red hover:bg-red-700 text-white text-xs py-1 px-3 rounded-full transition duration-150">
+                        Create Receipt
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+/**
+ * Renders an agreement search result card
+ */
+function renderAgreementSearchResult(doc, docJson) {
+    const date = doc.agreementDate || (doc.createdAt?.toDate ? doc.createdAt.toDate().toLocaleDateString() : 'N/A');
+    
+    return `
+        <div class="p-4 border border-gray-300 rounded-lg bg-white shadow-sm hover:shadow-md transition duration-200">
+            <div class="flex justify-between items-start">
+                <div class="flex-1">
+                    <div class="flex items-center gap-2 mb-2">
+                        <span class="bg-gray-700 text-white text-xs font-bold px-2 py-1 rounded">AGREEMENT</span>
+                        <span class="text-sm text-gray-500">${date}</span>
+                    </div>
+                    <h4 class="font-bold text-gray-800">Agreement #${doc.id.substring(0, 8)}...</h4>
+                    <p class="text-sm text-gray-700 mt-1"><strong>Buyer:</strong> ${doc.buyer?.name || 'N/A'}</p>
+                    <p class="text-sm text-gray-600"><strong>Vehicle:</strong> ${doc.vehicle?.makeModel || 'N/A'}</p>
+                    <p class="text-sm text-gray-600"><strong>Total:</strong> ${doc.salesTerms?.currency || 'KES'} ${doc.salesTerms?.price?.toFixed(2) || '0.00'}</p>
+                    <p class="text-sm text-gray-600"><strong>Phone:</strong> ${doc.buyer?.phone || 'N/A'}</p>
+                </div>
+                <div class="flex flex-col gap-2 ml-4">
+                    <button onclick='reDownloadAgreement(${docJson})' 
+                            class="bg-gray-700 hover:bg-gray-800 text-white text-xs py-1 px-3 rounded-full transition duration-150">
+                        Download
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+/**
+ * Clears search and shows the default view
+ */
+function clearSearch() {
+    document.getElementById('document-search').value = '';
+    document.getElementById('document-type-filter').value = 'all';
+    
+    const searchResultsDiv = document.getElementById('search-results');
+    const docCreationArea = document.getElementById('document-creation-area');
+    
+    searchResultsDiv.classList.add('hidden');
+    docCreationArea.classList.remove('hidden');
+}
+
+// Add event listener for Enter key in search
+document.addEventListener('DOMContentLoaded', function() {
+    // This will be initialized when handleDocumentGenerator is called
+});
+
+// Update the handleDocumentGenerator to include event listener
+// Add this to the handleDocumentGenerator function after setting the HTML:
+const handleDocumentGeneratorUpdated = function() {
+    appContent.innerHTML = `
+        <h2 class="text-3xl font-bold mb-6 text-primary-blue">Document Generator</h2>
+        
+        <!-- Search and Filter Section -->
+        <div class="mb-6 p-4 bg-white rounded-xl shadow-md border border-gray-200">
+            <div class="flex flex-wrap gap-4 items-end">
+                <div class="flex-1 min-w-[300px]">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Search Documents</label>
+                    <div class="flex gap-2">
+                        <input type="text" id="document-search" placeholder="Search by client name, reference number, or car make/model..." class="flex-1 p-3 border border-gray-300 rounded-lg focus:ring-primary-blue focus:border-primary-blue">
+                        <button onclick="searchDocuments()" class="bg-primary-blue hover:bg-blue-900 text-white font-bold py-2 px-6 rounded-lg transition duration-150">
+                            Search
+                        </button>
+                        <button onclick="clearSearch()" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-lg transition duration-150">
+                            Clear
+                        </button>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Document Type</label>
+                    <select id="document-type-filter" class="p-3 border border-gray-300 rounded-lg focus:ring-primary-blue focus:border-primary-blue">
+                        <option value="all">All Documents</option>
+                        <option value="receipt">Receipts Only</option>
+                        <option value="invoice">Invoices Only</option>
+                        <option value="agreement">Sales Agreements Only</option>
+                    </select>
+                </div>
+            </div>
+            <div class="mt-3 text-sm text-gray-600">
+                <p>Search by: Client Name, Reference Number, Car Make/Model, Phone Number, or VIN</p>
+            </div>
+        </div>
+
+        <div class="flex space-x-4 mb-6 flex-wrap">
+            <button onclick="renderInvoiceForm()" class="bg-primary-blue hover:bg-blue-900 text-white p-3 rounded-lg transition duration-150 mb-2">Invoice/Proforma</button>
+            <button onclick="renderInvoiceHistory()" class="bg-gray-700 hover:bg-gray-900 text-white p-3 rounded-lg transition duration-150 mb-2">Invoice History</button>
+            <button onclick="renderReceiptForm()" class="bg-secondary-red hover:bg-red-700 text-white p-3 rounded-lg transition duration-150 mb-2">Payment Receipt</button>
+            <button onclick="renderAgreementForm()" class="bg-gray-700 hover:bg-gray-900 text-white p-3 rounded-lg transition duration-150 mb-2">Car Sales Agreement</button>
+            <button onclick="renderBankManagement()" class="bg-green-600 hover:bg-green-700 text-white p-3 rounded-lg transition duration-150 mb-2">BANKS</button>
+        </div>
+        
+        <div id="document-form-area">
+            <div id="search-results" class="hidden">
+                <h3 class="text-xl font-bold mb-4 text-primary-blue">Search Results</h3>
+                <div id="search-results-list" class="space-y-4">
+                    <!-- Search results will appear here -->
+                </div>
+            </div>
+            <div id="document-creation-area">
+                <p class="text-gray-600">Select a document type or manage bank accounts.</p>
+            </div>
+        </div>
+    `;
+    
+    // Add event listener for Enter key
+    const searchInput = document.getElementById('document-search');
+    if (searchInput) {
+        searchInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                searchDocuments();
+            }
+        });
+    }
+};
+
 // -----------------------------------------------------------------
 // NOTE: renderAgreementForm() is fully defined in Section 10 now
 // -----------------------------------------------------------------
