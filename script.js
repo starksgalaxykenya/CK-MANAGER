@@ -643,6 +643,9 @@ async function calculateReceiptBalances(receiptId) {
 /**
  * Renders the new comprehensive Receipt form.
  */
+/**
+ * Renders the new comprehensive Receipt form.
+ */
 function renderReceiptForm(invoiceReference = '') {
     const formArea = document.getElementById('document-form-area');
     formArea.innerHTML = `
@@ -704,7 +707,10 @@ function renderReceiptForm(invoiceReference = '') {
                         <div class="grid grid-cols-3 gap-3">
                             <input type="text" id="chequeNo" placeholder="Cheque No. (Optional)" class="p-2 border rounded-md">
                             <input type="text" id="rtgsTtNo" placeholder="RTGS/TT No. (Optional)" class="p-2 border rounded-md">
-                            <input type="text" id="bankUsed" placeholder="Bank Used (e.g., KCB, NCBA)" class="p-2 border rounded-md">
+                            <select id="bankUsed" required class="p-2 border rounded-md">
+                                <option value="" disabled selected>Select Bank Used</option>
+                                <option value="Cash">Cash</option>
+                            </select>
                         </div>
                     </fieldset>
 
@@ -746,8 +752,55 @@ function renderReceiptForm(invoiceReference = '') {
         }, 500);
     }
     
+    // Load bank dropdown options
+    populateBankDropdownForReceipt();
     fetchReceipts();
 }
+
+/**
+ * Populates the bank dropdown in receipt form with saved banks
+ */
+async function populateBankDropdownForReceipt() {
+    const bankSelect = document.getElementById('bankUsed');
+    if (!bankSelect) return;
+
+    // Clear existing options except the first one
+    while (bankSelect.options.length > 1) {
+        bankSelect.remove(1);
+    }
+
+    try {
+        const snapshot = await db.collection("bankDetails").orderBy("createdAt", "desc").get();
+        
+        if (snapshot.empty) {
+            // Add a placeholder if no banks are configured
+            const option = document.createElement('option');
+            option.value = "";
+            option.textContent = "No banks configured. Add banks first.";
+            option.disabled = true;
+            bankSelect.appendChild(option);
+            return;
+        }
+
+        snapshot.forEach(doc => {
+            const data = doc.data();
+            const option = document.createElement('option');
+            option.value = `${data.name} - ${data.branch || 'No Branch'} (${data.currency})`;
+            option.textContent = `${data.name} - ${data.branch || 'No Branch'} (${data.currency})`;
+            bankSelect.appendChild(option);
+        });
+
+    } catch (error) {
+        console.error("Error loading banks for receipt:", error);
+        const option = document.createElement('option');
+        option.value = "";
+        option.textContent = "Error loading banks";
+        option.disabled = true;
+        bankSelect.appendChild(option);
+    }
+}
+
+
 
 /**
  * Fetches invoice details and auto-populates receipt form
@@ -875,6 +928,9 @@ function generateReceiptId(type, name) {
 /**
  * Saves the new receipt details to Firestore.
  */
+/**
+ * Saves the new receipt details to Firestore.
+ */
 async function saveReceipt() {
     const form = document.getElementById('receipt-form');
     if (!form.checkValidity()) {
@@ -962,7 +1018,7 @@ async function saveReceipt() {
             amountKSH: amountReceivedKSH,
             exchangeRate: exchangeRate,
             description: "Initial Payment",
-            paymentMethod: bankUsed ? `Bank: ${bankUsed}` : (chequeNo ? `Cheque: ${chequeNo}` : (rtgsTtNo ? `RTGS/TT: ${rtgsTtNo}` : "Cash")),
+            paymentMethod: bankUsed !== 'Cash' ? `Bank: ${bankUsed}` : (chequeNo ? `Cheque: ${chequeNo}` : (rtgsTtNo ? `RTGS/TT: ${rtgsTtNo}` : "Cash")),
             createdBy: currentUser.email,
             createdAt: firebase.firestore.FieldValue.serverTimestamp()
         };
@@ -977,13 +1033,19 @@ async function saveReceipt() {
         document.getElementById('receipt-form').reset();
         document.getElementById('amountWords').value = '';
         document.getElementById('invoice-details').classList.add('hidden');
+        
+        // Reset bank dropdown to default
+        const bankSelect = document.getElementById('bankUsed');
+        if (bankSelect) {
+            bankSelect.value = "";
+        }
+        
         fetchReceipts(); // Refresh history
     } catch (error) {
         console.error("Error saving receipt:", error);
         alert("Failed to save receipt: " + error.message);
     }
 }
-
 /**
  * Fetches and displays recent receipts.
  */
