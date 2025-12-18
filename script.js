@@ -525,8 +525,11 @@ async function saveReceipt() {
     const bankUsed = document.getElementById('bankUsed').value;
     const balanceRemaining = parseFloat(document.getElementById('balanceRemaining').value) || 0;
     const balanceDueDate = document.getElementById('balanceDueDate').value;
-    const invoiceReference = document.getElementById('invoiceReference').value;
-    const exchangeRate = parseFloat(document.getElementById('invoiceReference').dataset.exchangeRate) || 130;
+   const invoiceReference = document.getElementById('invoiceReference').value;
+const invoiceRefElement = document.getElementById('invoiceReference');
+const exchangeRate = invoiceRefElement && invoiceRefElement.dataset.exchangeRate 
+    ? parseFloat(invoiceRefElement.dataset.exchangeRate) 
+    : 130;
 
     if (isNaN(amountReceived) || amountReceived <= 0) {
         alert("Please enter a valid amount received.");
@@ -946,9 +949,9 @@ function addPaymentToExistingReceipt(receiptDocId, receiptNumber, clientName, ex
                         </p>
                     </div>
                     <div class="flex justify-end space-x-3">
-                        <button type="button" onclick="document.getElementById('add-payment-modal').remove()" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-md">
-                            Cancel
-                        </button>
+                       <button type="button" onclick="(() => { const modal = document.getElementById('add-payment-modal'); if (modal) modal.remove(); })()" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-md">
+    Cancel
+</button>
                         <button type="submit" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-md">
                             Add Payment
                         </button>
@@ -1035,7 +1038,10 @@ async function saveAdditionalPayment(receiptDocId, receiptNumber, exchangeRate) 
             "balanceDetails.balanceRemainingKSH": newBalanceKSH
         });
         
-        document.getElementById('add-payment-modal').remove();
+const modal = document.getElementById('add-payment-modal');
+if (modal) {
+    modal.remove();
+}
         alert(`Additional payment of ${paymentCurrency} ${paymentAmount.toFixed(2)} added successfully!`);
         
         // Refresh the view
@@ -1503,11 +1509,11 @@ async function populateBankDropdown(dropdownId) {
         return;
     }
 
-    banks.forEach(data => {
-        // Include the ID for easy lookup, but store the whole object as JSON string in the value
-        const detailsJson = JSON.stringify(data);
-        options += `<option value='${detailsJson}'>${data.name} - ${data.branch || 'No Branch'} (${data.currency})</option>`;
-    });
+   banks.forEach(data => {
+    // Include the ID for easy lookup, but store the whole object as JSON string in the value
+    const detailsJson = JSON.stringify(data).replace(/'/g, "&apos;");
+    options += `<option value="${detailsJson}">${data.name} - ${data.branch || 'No Branch'} (${data.currency})</option>`;
+});
 
     bankSelect.innerHTML = options;
 }
@@ -1642,15 +1648,24 @@ async function saveInvoice(onlySave) {
     const priceUSD = parseFloat(document.getElementById('price').value);
     const goodsDescription = document.getElementById('goodsDescription').value;
     
-    // Bank Details are stored as JSON string in the value, so we parse it
-    let bankDetails;
-    try {
-        bankDetails = JSON.parse(document.getElementById('bankDetailsSelect').value);
-    } catch (e) {
-        alert("Error reading selected bank details. Please re-select the bank account.");
-        console.error("Error parsing bank details:", e);
-        return;
-    }
+   // Bank Details are stored as JSON string in the value, so we parse it
+let bankDetails;
+try {
+    // First decode any HTML entities
+    const bankSelectValue = document.getElementById('bankDetailsSelect').value;
+    const decodedValue = bankSelectValue
+        .replace(/&apos;/g, "'")
+        .replace(/&quot;/g, '"')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&amp;/g, '&');
+    
+    bankDetails = JSON.parse(decodedValue);
+} catch (e) {
+    alert("Error reading selected bank details. Please re-select the bank account.");
+    console.error("Error parsing bank details:", e, "Raw value:", document.getElementById('bankDetailsSelect').value);
+    return;
+}
     
     const buyerNameConfirmation = document.getElementById('buyerNameConfirmation').value;
 
