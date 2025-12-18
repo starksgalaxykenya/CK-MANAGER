@@ -1558,7 +1558,6 @@ async function downloadReceiptWithHistory(receiptDocId) {
     doc.text(footerText, pageW / 2, doc.internal.pageSize.getHeight() - 4, null, null, "center");
 
     doc.save(`Receipt_${data.receiptId}_with_History.pdf`);
-    }
 }
 
 /**
