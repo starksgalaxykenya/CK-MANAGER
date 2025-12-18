@@ -115,127 +115,6 @@ function performGlobalSearch(searchTerm = '', filter = 'all') {
 }
 
 // =================================================================
-//                 3. DASHBOARD & NAVIGATION (UPDATED)
-// =================================================================
-
-function renderDashboard() {
-    appContent.innerHTML = `
-        <h2 class="text-4xl font-extrabold mb-8 text-primary-blue">CDMS Dashboard</h2>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
-            ${createDashboardCard('Document Generator', 'Invoices, Receipts, Agreements', 'bg-green-100 border-green-400', 'handleDocumentGenerator')}
-            ${createDashboardCard('Fleet Management', 'Car Tracking, Clearing, ETA', 'bg-yellow-100 border-yellow-400', 'handleFleetManagement')}
-        </div>
-    `;
-    
-    // Update navigation links
-    mainNav.innerHTML = `
-        <a href="#" onclick="renderDashboard()" class="py-2 px-3 rounded hover:bg-blue-500 transition duration-150">Home</a>
-        <a href="#" onclick="handleDocumentGenerator()" class="py-2 px-3 rounded hover:bg-blue-500 transition duration-150">Documents</a>
-        <a href="#" onclick="handleFleetManagement()" class="py-2 px-3 rounded hover:bg-blue-500 transition duration-150">Fleet</a>
-    `;
-    mainNav.classList.remove('hidden');
-}
-
-async function handleLogin() {
-    const email = document.getElementById('email').value;
-    const password = document.getElementById('password').value;
-    try {
-        await auth.signInWithEmailAndPassword(email, password);
-    } catch (error) {
-        console.error("Login failed:", error.message);
-        alert("Login Failed: " + error.message);
-    }
-}
-
-
-function createDashboardCard(title, subtitle, colorClass, handler) {
-    return `
-        <div class="${colorClass} border-2 p-6 rounded-xl shadow-lg cursor-pointer hover:shadow-2xl hover:scale-[1.02] transition duration-300 transform" onclick="${handler}()">
-            <h3 class="text-2xl font-bold text-gray-800">${title}</h3>
-            <p class="text-gray-600 mt-2">${subtitle}</p>
-        </div>
-    `;
-}
-
-// New Utility for Shared Reference & Serial Generation
-async function generateSharedRefId(clientName, carModel, carYear, collectionName) {
-    const datePart = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-    const namePart = clientName.split(' ')[0].toUpperCase().substring(0, 3);
-    const modelPart = carModel.toUpperCase().substring(0, 3);
-    const baseId = `${datePart}-${namePart}-${modelPart}-${carYear}`;
-    
-    // Fetch current count to determine the serial suffix (0001, 0002, etc.)
-    const snapshot = await db.collection(collectionName).get();
-    const serial = (snapshot.size + 1).toString().padStart(4, '0');
-    
-    return `${baseId}-${serial}`;
-}
-
-// =================================================================
-//                 4. DOCUMENT GENERATOR ROUTING (UPDATED)
-// =================================================================
-
-// =================================================================
-//                 4. DOCUMENT GENERATOR ROUTING (UPDATED)
-// =================================================================
-
-function handleDocumentGenerator() {
-    appContent.innerHTML = `
-        <h2 class="text-3xl font-bold mb-6 text-primary-blue">Document Generator</h2>
-        
-        <!-- Search and Filter Section -->
-        <div class="mb-6 p-4 bg-white rounded-xl shadow-md border border-gray-200">
-            <div class="flex flex-wrap gap-4 items-end">
-                <div class="flex-1 min-w-[300px]">
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Search Documents</label>
-                    <div class="flex gap-2">
-                        <input type="text" id="document-search" placeholder="Search by client name, reference number, or car make/model..." class="flex-1 p-3 border border-gray-300 rounded-lg focus:ring-primary-blue focus:border-primary-blue">
-                        <button onclick="searchDocuments()" class="bg-primary-blue hover:bg-blue-900 text-white font-bold py-2 px-6 rounded-lg transition duration-150">
-                            Search
-                        </button>
-                        <button onclick="clearSearch()" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-lg transition duration-150">
-                            Clear
-                        </button>
-                    </div>
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Document Type</label>
-                    <select id="document-type-filter" class="p-3 border border-gray-300 rounded-lg focus:ring-primary-blue focus:border-primary-blue">
-                        <option value="all">All Documents</option>
-                        <option value="receipt">Receipts Only</option>
-                        <option value="invoice">Invoices Only</option>
-                        <option value="agreement">Sales Agreements Only</option>
-                    </select>
-                </div>
-            </div>
-            <div class="mt-3 text-sm text-gray-600">
-                <p>Search by: Client Name, Reference Number, Car Make/Model, Phone Number, or VIN</p>
-            </div>
-        </div>
-
-        <div class="flex space-x-4 mb-6 flex-wrap">
-            <button onclick="renderInvoiceForm()" class="bg-primary-blue hover:bg-blue-900 text-white p-3 rounded-lg transition duration-150 mb-2">Invoice/Proforma</button>
-            <button onclick="renderInvoiceHistory()" class="bg-gray-700 hover:bg-gray-900 text-white p-3 rounded-lg transition duration-150 mb-2">Invoice History</button>
-            <button onclick="renderReceiptForm()" class="bg-secondary-red hover:bg-red-700 text-white p-3 rounded-lg transition duration-150 mb-2">Payment Receipt</button>
-            <button onclick="renderAgreementForm()" class="bg-gray-700 hover:bg-gray-900 text-white p-3 rounded-lg transition duration-150 mb-2">Car Sales Agreement</button>
-            <button onclick="renderBankManagement()" class="bg-green-600 hover:bg-green-700 text-white p-3 rounded-lg transition duration-150 mb-2">BANKS</button>
-        </div>
-        
-        <div id="document-form-area">
-            <div id="search-results" class="hidden">
-                <h3 class="text-xl font-bold mb-4 text-primary-blue">Search Results</h3>
-                <div id="search-results-list" class="space-y-4">
-                    <!-- Search results will appear here -->
-                </div>
-            </div>
-            <div id="document-creation-area">
-                <p class="text-gray-600">Select a document type or manage bank accounts.</p>
-            </div>
-        </div>
-    `;
-}
-
-// =================================================================
 //                 13. DOCUMENT SEARCH FUNCTIONALITY (NEW)
 // =================================================================
 
@@ -586,6 +465,128 @@ const handleDocumentGeneratorUpdated = function() {
         });
     }
 };
+
+// =================================================================
+//                 3. DASHBOARD & NAVIGATION (UPDATED)
+// =================================================================
+
+function renderDashboard() {
+    appContent.innerHTML = `
+        <h2 class="text-4xl font-extrabold mb-8 text-primary-blue">CDMS Dashboard</h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+            ${createDashboardCard('Document Generator', 'Invoices, Receipts, Agreements', 'bg-green-100 border-green-400', 'handleDocumentGenerator')}
+            ${createDashboardCard('Fleet Management', 'Car Tracking, Clearing, ETA', 'bg-yellow-100 border-yellow-400', 'handleFleetManagement')}
+        </div>
+    `;
+    
+    // Update navigation links
+    mainNav.innerHTML = `
+        <a href="#" onclick="renderDashboard()" class="py-2 px-3 rounded hover:bg-blue-500 transition duration-150">Home</a>
+        <a href="#" onclick="handleDocumentGenerator()" class="py-2 px-3 rounded hover:bg-blue-500 transition duration-150">Documents</a>
+        <a href="#" onclick="handleFleetManagement()" class="py-2 px-3 rounded hover:bg-blue-500 transition duration-150">Fleet</a>
+    `;
+    mainNav.classList.remove('hidden');
+}
+
+async function handleLogin() {
+    const email = document.getElementById('email').value;
+    const password = document.getElementById('password').value;
+    try {
+        await auth.signInWithEmailAndPassword(email, password);
+    } catch (error) {
+        console.error("Login failed:", error.message);
+        alert("Login Failed: " + error.message);
+    }
+}
+
+
+function createDashboardCard(title, subtitle, colorClass, handler) {
+    return `
+        <div class="${colorClass} border-2 p-6 rounded-xl shadow-lg cursor-pointer hover:shadow-2xl hover:scale-[1.02] transition duration-300 transform" onclick="${handler}()">
+            <h3 class="text-2xl font-bold text-gray-800">${title}</h3>
+            <p class="text-gray-600 mt-2">${subtitle}</p>
+        </div>
+    `;
+}
+
+// New Utility for Shared Reference & Serial Generation
+async function generateSharedRefId(clientName, carModel, carYear, collectionName) {
+    const datePart = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const namePart = clientName.split(' ')[0].toUpperCase().substring(0, 3);
+    const modelPart = carModel.toUpperCase().substring(0, 3);
+    const baseId = `${datePart}-${namePart}-${modelPart}-${carYear}`;
+    
+    // Fetch current count to determine the serial suffix (0001, 0002, etc.)
+    const snapshot = await db.collection(collectionName).get();
+    const serial = (snapshot.size + 1).toString().padStart(4, '0');
+    
+    return `${baseId}-${serial}`;
+}
+
+// =================================================================
+//                 4. DOCUMENT GENERATOR ROUTING (UPDATED)
+// =================================================================
+
+// =================================================================
+//                 4. DOCUMENT GENERATOR ROUTING (UPDATED)
+// =================================================================
+
+function handleDocumentGenerator() {
+    appContent.innerHTML = `
+        <h2 class="text-3xl font-bold mb-6 text-primary-blue">Document Generator</h2>
+        
+        <!-- Search and Filter Section -->
+        <div class="mb-6 p-4 bg-white rounded-xl shadow-md border border-gray-200">
+            <div class="flex flex-wrap gap-4 items-end">
+                <div class="flex-1 min-w-[300px]">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Search Documents</label>
+                    <div class="flex gap-2">
+                        <input type="text" id="document-search" placeholder="Search by client name, reference number, or car make/model..." class="flex-1 p-3 border border-gray-300 rounded-lg focus:ring-primary-blue focus:border-primary-blue">
+                        <button onclick="searchDocuments()" class="bg-primary-blue hover:bg-blue-900 text-white font-bold py-2 px-6 rounded-lg transition duration-150">
+                            Search
+                        </button>
+                        <button onclick="clearSearch()" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-lg transition duration-150">
+                            Clear
+                        </button>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Document Type</label>
+                    <select id="document-type-filter" class="p-3 border border-gray-300 rounded-lg focus:ring-primary-blue focus:border-primary-blue">
+                        <option value="all">All Documents</option>
+                        <option value="receipt">Receipts Only</option>
+                        <option value="invoice">Invoices Only</option>
+                        <option value="agreement">Sales Agreements Only</option>
+                    </select>
+                </div>
+            </div>
+            <div class="mt-3 text-sm text-gray-600">
+                <p>Search by: Client Name, Reference Number, Car Make/Model, Phone Number, or VIN</p>
+            </div>
+        </div>
+
+        <div class="flex space-x-4 mb-6 flex-wrap">
+            <button onclick="renderInvoiceForm()" class="bg-primary-blue hover:bg-blue-900 text-white p-3 rounded-lg transition duration-150 mb-2">Invoice/Proforma</button>
+            <button onclick="renderInvoiceHistory()" class="bg-gray-700 hover:bg-gray-900 text-white p-3 rounded-lg transition duration-150 mb-2">Invoice History</button>
+            <button onclick="renderReceiptForm()" class="bg-secondary-red hover:bg-red-700 text-white p-3 rounded-lg transition duration-150 mb-2">Payment Receipt</button>
+            <button onclick="renderAgreementForm()" class="bg-gray-700 hover:bg-gray-900 text-white p-3 rounded-lg transition duration-150 mb-2">Car Sales Agreement</button>
+            <button onclick="renderBankManagement()" class="bg-green-600 hover:bg-green-700 text-white p-3 rounded-lg transition duration-150 mb-2">BANKS</button>
+        </div>
+        
+        <div id="document-form-area">
+            <div id="search-results" class="hidden">
+                <h3 class="text-xl font-bold mb-4 text-primary-blue">Search Results</h3>
+                <div id="search-results-list" class="space-y-4">
+                    <!-- Search results will appear here -->
+                </div>
+            </div>
+            <div id="document-creation-area">
+                <p class="text-gray-600">Select a document type or manage bank accounts.</p>
+            </div>
+        </div>
+    `;
+}
+
 
 // -----------------------------------------------------------------
 // NOTE: renderAgreementForm() is fully defined in Section 10 now
