@@ -121,9 +121,6 @@ function performGlobalSearch(searchTerm = '', filter = 'all') {
 /**
  * Searches across all document types
  */
-/**
- * Searches across all document types
- */
 async function searchDocuments() {
     const searchTerm = document.getElementById('document-search')?.value.trim().toLowerCase();
     const docTypeFilter = document.getElementById('document-type-filter')?.value;
@@ -167,9 +164,6 @@ async function searchDocuments() {
     await performSearch(searchTerm, docTypeFilter || 'all');
 }
 
-/**
- * Helper function to perform the actual search
- */
 /**
  * Helper function to perform the actual search
  */
@@ -231,9 +225,7 @@ async function performSearch(searchTerm, docTypeFilter) {
         }
     }
 }
-/**
- * Helper function to display search results
- */
+
 /**
  * Helper function to display search results
  */
@@ -276,6 +268,7 @@ function displaySearchResults(results, searchTerm) {
     
     resultsList.innerHTML = html;
 }
+
 /**
  * Renders a receipt search result card
  */
@@ -384,9 +377,6 @@ function renderAgreementSearchResult(doc, docJson) {
 /**
  * Clears search and shows the default view
  */
-/**
- * Clears search and shows the default view
- */
 function clearSearch() {
     // Get elements with null checks
     const searchInput = document.getElementById('document-search');
@@ -406,9 +396,67 @@ document.addEventListener('DOMContentLoaded', function() {
     // This will be initialized when handleDocumentGenerator is called
 });
 
-// Update the handleDocumentGenerator to include event listener
-// Add this to the handleDocumentGenerator function after setting the HTML:
-const handleDocumentGeneratorUpdated = function() {
+// =================================================================
+//                 3. DASHBOARD & NAVIGATION (UPDATED)
+// =================================================================
+
+function renderDashboard() {
+    appContent.innerHTML = `
+        <h2 class="text-4xl font-extrabold mb-8 text-primary-blue">CDMS Dashboard</h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+            ${createDashboardCard('Document Generator', 'Invoices, Receipts, Agreements', 'bg-green-100 border-green-400', 'handleDocumentGenerator')}
+            ${createDashboardCard('Fleet Management', 'Car Tracking, Clearing, ETA', 'bg-yellow-100 border-yellow-400', 'handleFleetManagement')}
+        </div>
+    `;
+    
+    // Update navigation links
+    mainNav.innerHTML = `
+        <a href="#" onclick="renderDashboard()" class="py-2 px-3 rounded hover:bg-blue-500 transition duration-150">Home</a>
+        <a href="#" onclick="handleDocumentGenerator()" class="py-2 px-3 rounded hover:bg-blue-500 transition duration-150">Documents</a>
+        <a href="#" onclick="handleFleetManagement()" class="py-2 px-3 rounded hover:bg-blue-500 transition duration-150">Fleet</a>
+    `;
+    mainNav.classList.remove('hidden');
+}
+
+async function handleLogin() {
+    const email = document.getElementById('email').value;
+    const password = document.getElementById('password').value;
+    try {
+        await auth.signInWithEmailAndPassword(email, password);
+    } catch (error) {
+        console.error("Login failed:", error.message);
+        alert("Login Failed: " + error.message);
+    }
+}
+
+function createDashboardCard(title, subtitle, colorClass, handler) {
+    return `
+        <div class="${colorClass} border-2 p-6 rounded-xl shadow-lg cursor-pointer hover:shadow-2xl hover:scale-[1.02] transition duration-300 transform" onclick="${handler}()">
+            <h3 class="text-2xl font-bold text-gray-800">${title}</h3>
+            <p class="text-gray-600 mt-2">${subtitle}</p>
+        </div>
+    `;
+}
+
+// New Utility for Shared Reference & Serial Generation
+async function generateSharedRefId(clientName, carModel, carYear, collectionName) {
+    const datePart = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const namePart = clientName.split(' ')[0].toUpperCase().substring(0, 3);
+    const modelPart = carModel.toUpperCase().substring(0, 3);
+    const baseId = `${datePart}-${namePart}-${modelPart}-${carYear}`;
+    
+    // Fetch current count to determine the serial suffix (0001, 0002, etc.)
+    const snapshot = await db.collection(collectionName).get();
+    const serial = (snapshot.size + 1).toString().padStart(4, '0');
+    
+    return `${baseId}-${serial}`;
+}
+
+// =================================================================
+//                 4. DOCUMENT GENERATOR ROUTING (UPDATED)
+// =================================================================
+
+function handleDocumentGenerator() {
     appContent.innerHTML = `
         <h2 class="text-3xl font-bold mb-6 text-primary-blue">Document Generator</h2>
         
@@ -472,134 +520,11 @@ const handleDocumentGeneratorUpdated = function() {
             }
         });
     }
-};
-
-// =================================================================
-//                 3. DASHBOARD & NAVIGATION (UPDATED)
-// =================================================================
-
-function renderDashboard() {
-    appContent.innerHTML = `
-        <h2 class="text-4xl font-extrabold mb-8 text-primary-blue">CDMS Dashboard</h2>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
-            ${createDashboardCard('Document Generator', 'Invoices, Receipts, Agreements', 'bg-green-100 border-green-400', 'handleDocumentGenerator')}
-            ${createDashboardCard('Fleet Management', 'Car Tracking, Clearing, ETA', 'bg-yellow-100 border-yellow-400', 'handleFleetManagement')}
-        </div>
-    `;
-    
-    // Update navigation links
-    mainNav.innerHTML = `
-        <a href="#" onclick="renderDashboard()" class="py-2 px-3 rounded hover:bg-blue-500 transition duration-150">Home</a>
-        <a href="#" onclick="handleDocumentGenerator()" class="py-2 px-3 rounded hover:bg-blue-500 transition duration-150">Documents</a>
-        <a href="#" onclick="handleFleetManagement()" class="py-2 px-3 rounded hover:bg-blue-500 transition duration-150">Fleet</a>
-    `;
-    mainNav.classList.remove('hidden');
 }
-
-async function handleLogin() {
-    const email = document.getElementById('email').value;
-    const password = document.getElementById('password').value;
-    try {
-        await auth.signInWithEmailAndPassword(email, password);
-    } catch (error) {
-        console.error("Login failed:", error.message);
-        alert("Login Failed: " + error.message);
-    }
-}
-
-
-function createDashboardCard(title, subtitle, colorClass, handler) {
-    return `
-        <div class="${colorClass} border-2 p-6 rounded-xl shadow-lg cursor-pointer hover:shadow-2xl hover:scale-[1.02] transition duration-300 transform" onclick="${handler}()">
-            <h3 class="text-2xl font-bold text-gray-800">${title}</h3>
-            <p class="text-gray-600 mt-2">${subtitle}</p>
-        </div>
-    `;
-}
-
-// New Utility for Shared Reference & Serial Generation
-async function generateSharedRefId(clientName, carModel, carYear, collectionName) {
-    const datePart = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-    const namePart = clientName.split(' ')[0].toUpperCase().substring(0, 3);
-    const modelPart = carModel.toUpperCase().substring(0, 3);
-    const baseId = `${datePart}-${namePart}-${modelPart}-${carYear}`;
-    
-    // Fetch current count to determine the serial suffix (0001, 0002, etc.)
-    const snapshot = await db.collection(collectionName).get();
-    const serial = (snapshot.size + 1).toString().padStart(4, '0');
-    
-    return `${baseId}-${serial}`;
-}
-
-// =================================================================
-//                 4. DOCUMENT GENERATOR ROUTING (UPDATED)
-// =================================================================
-
-// =================================================================
-//                 4. DOCUMENT GENERATOR ROUTING (UPDATED)
-// =================================================================
-
-function handleDocumentGenerator() {
-    appContent.innerHTML = `
-        <h2 class="text-3xl font-bold mb-6 text-primary-blue">Document Generator</h2>
-        
-        <!-- Search and Filter Section -->
-        <div class="mb-6 p-4 bg-white rounded-xl shadow-md border border-gray-200">
-            <div class="flex flex-wrap gap-4 items-end">
-                <div class="flex-1 min-w-[300px]">
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Search Documents</label>
-                    <div class="flex gap-2">
-                        <input type="text" id="document-search" placeholder="Search by client name, reference number, or car make/model..." class="flex-1 p-3 border border-gray-300 rounded-lg focus:ring-primary-blue focus:border-primary-blue">
-                        <button onclick="searchDocuments()" class="bg-primary-blue hover:bg-blue-900 text-white font-bold py-2 px-6 rounded-lg transition duration-150">
-                            Search
-                        </button>
-                        <button onclick="clearSearch()" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-lg transition duration-150">
-                            Clear
-                        </button>
-                    </div>
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Document Type</label>
-                    <select id="document-type-filter" class="p-3 border border-gray-300 rounded-lg focus:ring-primary-blue focus:border-primary-blue">
-                        <option value="all">All Documents</option>
-                        <option value="receipt">Receipts Only</option>
-                        <option value="invoice">Invoices Only</option>
-                        <option value="agreement">Sales Agreements Only</option>
-                    </select>
-                </div>
-            </div>
-            <div class="mt-3 text-sm text-gray-600">
-                <p>Search by: Client Name, Reference Number, Car Make/Model, Phone Number, or VIN</p>
-            </div>
-        </div>
-
-        <div class="flex space-x-4 mb-6 flex-wrap">
-            <button onclick="renderInvoiceForm()" class="bg-primary-blue hover:bg-blue-900 text-white p-3 rounded-lg transition duration-150 mb-2">Invoice/Proforma</button>
-            <button onclick="renderInvoiceHistory()" class="bg-gray-700 hover:bg-gray-900 text-white p-3 rounded-lg transition duration-150 mb-2">Invoice History</button>
-            <button onclick="renderReceiptForm()" class="bg-secondary-red hover:bg-red-700 text-white p-3 rounded-lg transition duration-150 mb-2">Payment Receipt</button>
-            <button onclick="renderAgreementForm()" class="bg-gray-700 hover:bg-gray-900 text-white p-3 rounded-lg transition duration-150 mb-2">Car Sales Agreement</button>
-            <button onclick="renderBankManagement()" class="bg-green-600 hover:bg-green-700 text-white p-3 rounded-lg transition duration-150 mb-2">BANKS</button>
-        </div>
-        
-        <div id="document-form-area">
-            <div id="search-results" class="hidden">
-                <h3 class="text-xl font-bold mb-4 text-primary-blue">Search Results</h3>
-                <div id="search-results-list" class="space-y-4">
-                    <!-- Search results will appear here -->
-                </div>
-            </div>
-            <div id="document-creation-area">
-                <p class="text-gray-600">Select a document type or manage bank accounts.</p>
-            </div>
-        </div>
-    `;
-}
-
 
 // -----------------------------------------------------------------
 // NOTE: renderAgreementForm() is fully defined in Section 10 now
 // -----------------------------------------------------------------
-
 
 // =================================================================
 //                 5. RECEIPT/PAYMENT LOGIC (COMPREHENSIVELY REVISED)
@@ -968,11 +893,11 @@ async function saveReceipt() {
     const bankUsed = document.getElementById('bankUsed').value;
     const balanceRemaining = parseFloat(document.getElementById('balanceRemaining').value) || 0;
     const balanceDueDate = document.getElementById('balanceDueDate').value;
-   const invoiceReference = document.getElementById('invoiceReference').value;
-const invoiceRefElement = document.getElementById('invoiceReference');
-const exchangeRate = invoiceRefElement && invoiceRefElement.dataset.exchangeRate 
-    ? parseFloat(invoiceRefElement.dataset.exchangeRate) 
-    : 130;
+    const invoiceReference = document.getElementById('invoiceReference').value;
+    const invoiceRefElement = document.getElementById('invoiceReference');
+    const exchangeRate = invoiceRefElement && invoiceRefElement.dataset.exchangeRate 
+        ? parseFloat(invoiceRefElement.dataset.exchangeRate) 
+        : 130;
 
     if (isNaN(amountReceived) || amountReceived <= 0) {
         alert("Please enter a valid amount received.");
@@ -1481,10 +1406,11 @@ async function saveAdditionalPayment(receiptDocId, receiptNumber, exchangeRate) 
             "balanceDetails.balanceRemainingKSH": newBalanceKSH
         });
         
-const modal = document.getElementById('add-payment-modal');
-if (modal) {
-    modal.remove();
-}
+        const modal = document.getElementById('add-payment-modal');
+        if (modal) {
+            modal.remove();
+        }
+        
         alert(`Additional payment of ${paymentCurrency} ${paymentAmount.toFixed(2)} added successfully!`);
         
         // Refresh the view
@@ -1952,11 +1878,13 @@ async function populateBankDropdown(dropdownId) {
         return;
     }
 
-   banks.forEach(data => {
-    // Include the ID for easy lookup, but store the whole object as JSON string in the value
-    const detailsJson = JSON.stringify(data).replace(/'/g, "&apos;");
-    options += `<option value="${detailsJson}">${data.name} - ${data.branch || 'No Branch'} (${data.currency})</option>`;
-});
+    banks.forEach(data => {
+        // Properly escape JSON for HTML attribute
+        const detailsJson = JSON.stringify(data)
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&apos;');
+        options += `<option value="${detailsJson}">${data.name} - ${data.branch || 'No Branch'} (${data.currency})</option>`;
+    });
 
     bankSelect.innerHTML = options;
 }
@@ -2091,24 +2019,25 @@ async function saveInvoice(onlySave) {
     const priceUSD = parseFloat(document.getElementById('price').value);
     const goodsDescription = document.getElementById('goodsDescription').value;
     
-   // Bank Details are stored as JSON string in the value, so we parse it
-let bankDetails;
-try {
-    // First decode any HTML entities
-    const bankSelectValue = document.getElementById('bankDetailsSelect').value;
-    const decodedValue = bankSelectValue
-        .replace(/&apos;/g, "'")
-        .replace(/&quot;/g, '"')
-        .replace(/&lt;/g, '<')
-        .replace(/&gt;/g, '>')
-        .replace(/&amp;/g, '&');
-    
-    bankDetails = JSON.parse(decodedValue);
-} catch (e) {
-    alert("Error reading selected bank details. Please re-select the bank account.");
-    console.error("Error parsing bank details:", e, "Raw value:", document.getElementById('bankDetailsSelect').value);
-    return;
-}
+    // Bank Details are stored as JSON string in the value, so we parse it
+    let bankDetails;
+    try {
+        const bankSelectValue = document.getElementById('bankDetailsSelect').value;
+        
+        // Decode HTML entities
+        const decodedValue = bankSelectValue
+            .replace(/&apos;/g, "'")
+            .replace(/&quot;/g, '"')
+            .replace(/&lt;/g, '<')
+            .replace(/&gt;/g, '>')
+            .replace(/&amp;/g, '&');
+        
+        bankDetails = JSON.parse(decodedValue);
+    } catch (e) {
+        alert("Error reading selected bank details. Please re-select the bank account.");
+        console.error("Error parsing bank details:", e);
+        return;
+    }
     
     const buyerNameConfirmation = document.getElementById('buyerNameConfirmation').value;
 
@@ -3157,5 +3086,72 @@ function handleFleetManagement() {
 }
 
 // =================================================================
-//                 12. REMOVED HR MANAGEMENT MODULE
+//                 SEARCH FUNCTIONS (ADDED - WERE MISSING)
 // =================================================================
+
+/**
+ * Search receipts by various fields
+ */
+async function searchReceipts(searchTerm) {
+    try {
+        // Search in multiple fields
+        const receiptsSnapshot = await db.collection("receipts")
+            .where("receivedFrom", ">=", searchTerm)
+            .where("receivedFrom", "<=", searchTerm + '\uf8ff')
+            .get();
+        
+        const results = [];
+        receiptsSnapshot.forEach(doc => {
+            results.push({ id: doc.id, ...doc.data() });
+        });
+        
+        return results;
+    } catch (error) {
+        console.error("Error searching receipts:", error);
+        return [];
+    }
+}
+
+/**
+ * Search invoices by various fields
+ */
+async function searchInvoices(searchTerm) {
+    try {
+        const invoicesSnapshot = await db.collection("invoices")
+            .where("clientName", ">=", searchTerm)
+            .where("clientName", "<=", searchTerm + '\uf8ff')
+            .get();
+        
+        const results = [];
+        invoicesSnapshot.forEach(doc => {
+            results.push({ id: doc.id, ...doc.data() });
+        });
+        
+        return results;
+    } catch (error) {
+        console.error("Error searching invoices:", error);
+        return [];
+    }
+}
+
+/**
+ * Search agreements by various fields
+ */
+async function searchAgreements(searchTerm) {
+    try {
+        const agreementsSnapshot = await db.collection("sales_agreements")
+            .where("buyer.name", ">=", searchTerm)
+            .where("buyer.name", "<=", searchTerm + '\uf8ff')
+            .get();
+        
+        const results = [];
+        agreementsSnapshot.forEach(doc => {
+            results.push({ id: doc.id, ...doc.data() });
+        });
+        
+        return results;
+    } catch (error) {
+        console.error("Error searching agreements:", error);
+        return [];
+    }
+}
