@@ -931,6 +931,9 @@ function generateReceiptId(type, name) {
 /**
  * Saves the new receipt details to Firestore.
  */
+/**
+ * Saves the new receipt details to Firestore.
+ */
 async function saveReceipt() {
     const form = document.getElementById('receipt-form');
     if (!form.checkValidity()) {
@@ -975,6 +978,66 @@ async function saveReceipt() {
         amountReceivedKSH = amountReceived * exchangeRate;
     }
 
+    // Check if a receipt with the same invoice reference already exists
+    let existingReceipt = null;
+    let existingReceiptId = null;
+    
+    if (invoiceReference) {
+        try {
+            const existingReceipts = await db.collection("receipts")
+                .where("invoiceReference", "==", invoiceReference)
+                .limit(1)
+                .get();
+            
+            if (!existingReceipts.empty) {
+                existingReceipt = existingReceipts.docs[0].data();
+                existingReceiptId = existingReceipts.docs[0].id;
+            }
+        } catch (error) {
+            console.error("Error checking for existing receipt:", error);
+        }
+    }
+
+    // If existing receipt found, ask user if they want to add payment to it
+    if (existingReceipt && existingReceiptId) {
+        const shouldAddToExisting = confirm(`A receipt already exists for invoice reference: ${invoiceReference}\n\nDo you want to add this payment to the existing receipt (${existingReceipt.receiptId}) instead of creating a new one?`);
+        
+        if (shouldAddToExisting) {
+            // Add payment to existing receipt
+            await addPaymentToExistingReceiptFromForm(
+                existingReceiptId,
+                existingReceipt.receiptId,
+                existingReceipt.receivedFrom,
+                existingReceipt.exchangeRate || exchangeRate,
+                {
+                    amount: amountReceived,
+                    currency: currency,
+                    amountUSD: amountReceivedUSD,
+                    amountKSH: amountReceivedKSH,
+                    chequeNo,
+                    rtgsTtNo,
+                    bankUsed,
+                    description: `Additional payment for: ${beingPaidFor}`,
+                    paymentMethod: bankUsed !== 'Cash' ? `Bank: ${bankUsed}` : (chequeNo ? `Cheque: ${chequeNo}` : (rtgsTtNo ? `RTGS/TT: ${rtgsTtNo}` : "Cash"))
+                }
+            );
+            
+            // Show payment history for the receipt
+            viewReceiptPaymentDetails(existingReceiptId, existingReceipt.receiptId, existingReceipt.receivedFrom);
+            
+            // Reset form
+            document.getElementById('receipt-form').reset();
+            document.getElementById('amountWords').value = '';
+            document.getElementById('invoice-details').classList.add('hidden');
+            const bankSelect = document.getElementById('bankUsed');
+            if (bankSelect) bankSelect.value = "";
+            
+            fetchReceipts(); // Refresh history
+            return;
+        }
+    }
+
+    // If no existing receipt or user chose to create new, create new receipt
     const receiptData = {
         receiptId,
         receiptType,
@@ -1046,8 +1109,69 @@ async function saveReceipt() {
         alert("Failed to save receipt: " + error.message);
     }
 }
+
 /**
- * Fetches and displays recent receipts.
+ * Helper function to add payment to existing receipt from receipt form
+ */
+async function addPaymentToExistingReceiptFromForm(receiptDocId, receiptNumber, clientName, exchangeRate, paymentDetails) {
+    const { amount, currency, amountUSD, amountKSH, chequeNo, rtgsTtNo, bankUsed, description, paymentMethod } = paymentDetails;
+    
+    // Get next payment number
+    const paymentsSnapshot = await db.collection("receipt_payments")
+        .where("receiptId", "==", receiptDocId)
+        .get();
+    
+    const nextPaymentNumber = paymentsSnapshot.size + 1;
+    
+    // Save payment record
+    const paymentData = {
+        receiptId: receiptDocId,
+        receiptNumber: receiptNumber,
+        paymentNumber: nextPaymentNumber,
+        paymentDate: new Date().toLocaleDateString('en-US'),
+        amount: amount,
+        currency: currency,
+        amountUSD: amountUSD,
+        amountKSH: amountKSH,
+        exchangeRate: exchangeRate,
+        description: description,
+        paymentMethod: paymentMethod,
+        createdBy: currentUser.email,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    };
+    
+    try {
+        await db.collection("receipt_payments").add(paymentData);
+        
+        // Update receipt balance
+        const receiptDoc = await db.collection("receipts").doc(receiptDocId).get();
+        const receiptData = receiptDoc.data();
+        
+        const currentBalanceUSD = receiptData.balanceDetails?.balanceRemainingUSD || 0;
+        const newBalanceUSD = Math.max(0, currentBalanceUSD - amountUSD);
+        const newBalanceKSH = newBalanceUSD * exchangeRate;
+        
+        await db.collection("receipts").doc(receiptDocId).update({
+            "balanceDetails.balanceRemaining": newBalanceUSD,
+            "balanceDetails.balanceRemainingUSD": newBalanceUSD,
+            "balanceDetails.balanceRemainingKSH": newBalanceKSH,
+            "amountReceived": (receiptData.amountReceived || 0) + amount,
+            "amountReceivedUSD": (receiptData.amountReceivedUSD || 0) + amountUSD,
+            "amountReceivedKSH": (receiptData.amountReceivedKSH || 0) + amountKSH
+        });
+        
+        alert(`Additional payment of ${currency} ${amount.toFixed(2)} added to receipt ${receiptNumber} successfully!`);
+        
+        return true;
+    } catch (error) {
+        console.error("Error saving additional payment:", error);
+        alert("Failed to save payment: " + error.message);
+        return false;
+    }
+}
+
+/**
+ * Fetches and displays recent receipts with payment history button
  */
 async function fetchReceipts() {
     const receiptList = document.getElementById('recent-receipts');
@@ -1084,20 +1208,21 @@ async function fetchReceipts() {
                             <strong class="text-gray-800">${data.receiptId}</strong><br>
                             <span class="text-sm text-gray-600">From: ${data.receivedFrom}</span><br>
                             <span class="text-sm text-gray-600">Amount: ${data.currency} ${data.amountReceived.toFixed(2)}</span><br>
+                            ${data.invoiceReference ? `<span class="text-xs text-primary-blue">Invoice Ref: ${data.invoiceReference}</span><br>` : ''}
                             <span class="text-xs text-secondary-red">Payments: ${balances.paymentCount} | Total Paid: USD ${totalPaidUSD.toFixed(2)} / KES ${totalPaidKSH.toFixed(2)}</span>
                         </div>
                         <div class="mt-2 sm:mt-0 space-x-2">
                             <button onclick='reDownloadReceipt(${receiptDataJson})' 
                                     class="bg-secondary-red hover:bg-red-600 text-white text-xs py-1 px-3 rounded-full transition duration-150">
-                                Re-Download PDF
+                                Download PDF
                             </button>
                             <button onclick='addPaymentToReceipt(${receiptDataJson})' 
                                     class="bg-primary-blue hover:bg-blue-600 text-white text-xs py-1 px-3 rounded-full transition duration-150">
                                 Add Payment
                             </button>
-                            <button onclick='viewReceiptBalances(${receiptDataJson})' 
+                            <button onclick='viewReceiptPaymentDetails("${doc.id}", "${data.receiptId}", "${data.receivedFrom}")' 
                                     class="bg-green-600 hover:bg-green-700 text-white text-xs py-1 px-3 rounded-full transition duration-150">
-                                View Balances
+                                View History
                             </button>
                         </div>
                     </li>`;
@@ -1110,6 +1235,334 @@ async function fetchReceipts() {
     }
 }
 
+/**
+ * Views detailed payment history for a specific receipt
+ */
+async function viewReceiptPaymentDetails(receiptDocId, receiptNumber, clientName) {
+    const balances = await calculateReceiptBalances(receiptDocId);
+    
+    let paymentDetailsHtml = `<h4 class="font-bold text-primary-blue mb-3">Payment History for ${receiptNumber}</h4>`;
+    paymentDetailsHtml += `<p class="text-sm text-gray-600 mb-4">Client: ${clientName}</p>`;
+    
+    if (balances.payments.length === 0) {
+        paymentDetailsHtml += `<p class="text-gray-500">No payment history found.</p>`;
+    } else {
+        paymentDetailsHtml += `<div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Payment #</th>
+                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Date</th>
+                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Amount</th>
+                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">USD Equivalent</th>
+                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">KES Equivalent</th>
+                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Method</th>
+                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Description</th>
+                    </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-200">`;
+        
+        balances.payments.forEach((payment, index) => {
+            paymentDetailsHtml += `<tr>
+                <td class="px-4 py-2 text-sm">${index + 1}</td>
+                <td class="px-4 py-2 text-sm">${payment.paymentDate || 'N/A'}</td>
+                <td class="px-4 py-2 text-sm font-bold">${payment.currency} ${payment.amount.toFixed(2)}</td>
+                <td class="px-4 py-2 text-sm">USD ${payment.amountUSD?.toFixed(2) || (payment.currency === 'USD' ? payment.amount.toFixed(2) : (payment.amount / (payment.exchangeRate || 130)).toFixed(2))}</td>
+                <td class="px-4 py-2 text-sm">KES ${payment.amountKSH?.toFixed(2) || (payment.currency === 'KSH' ? payment.amount.toFixed(2) : (payment.amount * (payment.exchangeRate || 130)).toFixed(2))}</td>
+                <td class="px-4 py-2 text-sm">${payment.paymentMethod || 'N/A'}</td>
+                <td class="px-4 py-2 text-sm">${payment.description || 'N/A'}</td>
+            </tr>`;
+        });
+        
+        paymentDetailsHtml += `</tbody></table>`;
+        
+        // Add summary
+        paymentDetailsHtml += `<div class="mt-4 p-3 bg-blue-50 rounded-lg">
+            <h5 class="font-bold text-primary-blue mb-2">Payment Summary</h5>
+            <p class="text-sm">Total Payments: ${balances.payments.length}</p>
+            <p class="text-sm">Total Paid (USD): <span class="font-bold">${balances.totalPaidUSD.toFixed(2)}</span></p>
+            <p class="text-sm">Total Paid (KES): <span class="font-bold">${balances.totalPaidKSH.toFixed(2)}</span></p>
+        </div>`;
+    }
+    
+    const modalHtml = `
+        <div id="payment-details-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+            <div class="relative top-20 mx-auto p-5 border w-3/4 shadow-lg rounded-md bg-white">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-lg font-semibold text-primary-blue">Payment Details - ${receiptNumber}</h3>
+                    <div class="flex space-x-2">
+                        <button onclick='downloadReceiptWithHistory("${receiptDocId}")' 
+                                class="bg-secondary-red hover:bg-red-700 text-white text-xs py-1 px-3 rounded-md transition duration-150">
+                            Download Receipt with History
+                        </button>
+                        <button onclick="document.getElementById('payment-details-modal').remove()" class="text-gray-500 hover:text-gray-700">
+                            &times;
+                        </button>
+                    </div>
+                </div>
+                ${paymentDetailsHtml}
+                <div class="mt-4 flex justify-end">
+                    <button onclick="document.getElementById('payment-details-modal').remove()" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-md">
+                        Close
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+}
+
+/**
+ * Downloads receipt PDF with full payment history
+ */
+async function downloadReceiptWithHistory(receiptDocId) {
+    try {
+        // Get receipt data
+        const receiptDoc = await db.collection("receipts").doc(receiptDocId).get();
+        if (!receiptDoc.exists) {
+            alert("Receipt not found!");
+            return;
+        }
+        
+        const receiptData = receiptDoc.data();
+        
+        // Get payment history
+        const balances = await calculateReceiptBalances(receiptDocId);
+        
+        // Add payment history to receipt data for PDF generation
+        receiptData.paymentHistory = balances.payments;
+        receiptData.totalPayments = balances.payments.length;
+        receiptData.totalPaidUSD = balances.totalPaidUSD;
+        receiptData.totalPaidKSH = balances.totalPaidKSH;
+        
+        // Generate enhanced PDF
+        generateReceiptWithHistoryPDF(receiptData);
+        
+    } catch (error) {
+        console.error("Error downloading receipt with history:", error);
+        alert("Failed to download receipt with history: " + error.message);
+    }
+}
+
+/**
+ * Generates and downloads a custom PDF for the receipt with payment history.
+ */
+function generateReceiptWithHistoryPDF(data) {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF('p', 'mm', 'a4'); 
+
+    const primaryColor = '#183263'; // WanBite Blue
+    const secondaryColor = '#D96359'; // Red
+    
+    const pageW = doc.internal.pageSize.getWidth();
+    let y = 10; 
+    const margin = 10;
+    const boxW = pageW - (2 * margin);
+    const lineHeight = 7; 
+
+    // --- HELPER FUNCTION ---
+    const drawText = (text, x, y, size, style = 'normal', color = primaryColor, align = 'left') => {
+        doc.setFontSize(size);
+        doc.setFont("helvetica", style);
+        doc.setTextColor(color);
+        doc.text(text, x, y, { align: align });
+    };
+
+    // =================================================================
+    // HEADER SECTION
+    // =================================================================
+    
+    // Top Bar (Color #183263)
+    doc.setFillColor(primaryColor);
+    doc.rect(0, 0, pageW, 15, 'F');
+    
+    drawText('WanBite Investments Co. Ltd.', pageW / 2, 8, 18, 'bold', '#FFFFFF', 'center');
+    drawText('carskenya.co.ke', pageW / 2, 13, 10, 'normal', '#FFFFFF', 'center');
+    
+    y = 25;
+
+    // RECEIPT TITLE
+    doc.setTextColor(primaryColor);
+    doc.setFontSize(24);
+    doc.setFont("helvetica", "bold");
+    doc.text("OFFICIAL RECEIPT", pageW / 2, y, null, null, "center");
+    y += 12;
+    
+    // Receipt Metadata Box (ID and Date)
+    doc.setDrawColor(primaryColor);
+    doc.setLineWidth(0.5);
+    doc.rect(margin, y, boxW, 15);
+    
+    drawText('RECEIPT NO:', margin + 3, y + 5, 10, 'bold', secondaryColor);
+    drawText(data.receiptId, margin + 3, y + 11, 14, 'bold', primaryColor);
+    
+    drawText('DATE:', pageW - margin - 3, y + 5, 10, 'bold', secondaryColor, 'right');
+    drawText(data.receiptDate, pageW - margin - 3, y + 11, 14, 'bold', primaryColor, 'right');
+    y += 20;
+
+    // =================================================================
+    // MAIN BODY
+    // =================================================================
+
+    // Received From
+    doc.setTextColor(primaryColor);
+    drawText('RECEIVED FROM:', margin, y, 10, 'bold');
+    doc.setDrawColor(0);
+    doc.line(margin + 35, y, pageW - margin, y);
+    drawText(data.receivedFrom, margin + 35, y - 0.5, 12, 'bold', 0);
+    y += lineHeight + 2;
+
+    // The Sum of Money (Words)
+    drawText('THE SUM OF:', margin, y + 3, 10, 'bold');
+    doc.setFillColor(240, 240, 240); 
+    doc.rect(margin + 35, y, boxW - 35, lineHeight * 2.5, 'F'); // Box for words
+    doc.setDrawColor(0);
+    doc.setLineWidth(0.2);
+    doc.rect(margin + 35, y, boxW - 35, lineHeight * 2.5);
+    
+    doc.setTextColor(0);
+    doc.setFontSize(11);
+    // Use splitTextToSize to wrap the words nicely within the box
+    const wrappedWords = doc.splitTextToSize(data.amountWords, boxW - 37);
+    doc.text(wrappedWords, margin + 36, y + 4);
+    y += lineHeight * 2.5 + 5;
+
+    // Being Paid For
+    drawText('BEING PAID FOR:', margin, y, 10, 'bold', primaryColor);
+    doc.line(margin + 35, y, pageW - margin, y);
+    drawText(data.beingPaidFor, margin + 35, y - 0.5, 12, 'bold', 0);
+    y += lineHeight + 4;
+
+    // Payment References Section
+    doc.setTextColor(primaryColor);
+    drawText('PAYMENT DETAILS:', margin, y, 10, 'bold');
+    y += 4;
+
+    doc.setFontSize(10);
+    doc.setTextColor(0);
+
+    // Row 1: Cheque and RTGS/TT
+    doc.rect(margin, y, boxW * 0.45, lineHeight); // Cheque Box
+    doc.text(`Cheque No: ${data.paymentDetails.chequeNo || 'N/A'}`, margin + 2, y + 4.5);
+    doc.rect(margin + boxW * 0.55, y, boxW * 0.45, lineHeight); // RTGS/TT Box
+    doc.text(`RTGS/TT No: ${data.paymentDetails.rtgsTtNo || 'N/A'}`, margin + boxW * 0.55 + 2, y + 4.5);
+    y += lineHeight + 2;
+
+    // Row 2: Bank Used and Receipt Type
+    doc.rect(margin, y, boxW * 0.45, lineHeight); // Bank Used Box
+    doc.text(`Bank Used: ${data.paymentDetails.bankUsed || 'N/A'}`, margin + 2, y + 4.5);
+    doc.rect(margin + boxW * 0.55, y, boxW * 0.45, lineHeight); // Receipt Type Box
+    doc.text(`Receipt Type: ${data.receiptType}`, margin + boxW * 0.55 + 2, y + 4.5);
+    y += lineHeight + 6;
+
+    // =================================================================
+    // AMOUNT FIGURE (BIG BOX)
+    // =================================================================
+    const amountBoxH = 15;
+    const amountBoxY = y + 5;
+    
+    // Total Amount Box (Right Side)
+    doc.setFillColor(secondaryColor);
+    doc.rect(pageW - margin - 70, amountBoxY, 70, amountBoxH, 'F');
+    
+    doc.setTextColor(255);
+    drawText('AMOUNT FIGURE', pageW - margin - 65, amountBoxY + 4, 8, 'bold', 255);
+    drawText(`${data.currency} ${data.amountReceived.toLocaleString('en-US', { minimumFractionDigits: 2 })}`, pageW - margin - 5, amountBoxY + 11, 18, 'bold', 255, 'right');
+    
+    // Balance Details (Left Side)
+    doc.setTextColor(primaryColor);
+    drawText('BALANCE DETAILS', margin, amountBoxY + 4, 10, 'bold');
+    doc.setFontSize(12);
+    doc.setTextColor(0);
+
+    const balanceText = data.balanceDetails.balanceRemaining > 0 
+        ? `${data.currency} ${data.balanceDetails.balanceRemaining.toLocaleString('en-US', { minimumFractionDigits: 2 })}` 
+        : 'ZERO';
+    
+    drawText(`Balance Remaining: ${balanceText}`, margin, amountBoxY + 10, 10);
+    drawText(`Due On/Before: ${data.balanceDetails.balanceDueDate || 'N/A'}`, margin, amountBoxY + 14, 10);
+    
+    y = amountBoxY + amountBoxH + 7;
+
+    // =================================================================
+    // PAYMENT HISTORY SECTION (NEW)
+    // =================================================================
+    if (data.paymentHistory && data.paymentHistory.length > 0) {
+        y += 5;
+        drawText('PAYMENT HISTORY', margin, y, 12, 'bold', primaryColor);
+        y += 8;
+        
+        // Table Header
+        doc.setFillColor(primaryColor);
+        doc.rect(margin, y, boxW, 6, 'F');
+        doc.setTextColor(255);
+        drawText('#', margin + 2, y + 4, 8, 'bold', 255);
+        drawText('Date', margin + 15, y + 4, 8, 'bold', 255);
+        drawText('Amount', margin + 50, y + 4, 8, 'bold', 255);
+        drawText('Method', margin + 90, y + 4, 8, 'bold', 255);
+        drawText('Description', margin + 130, y + 4, 8, 'bold', 255);
+        y += 6;
+        
+        // Payment Rows
+        doc.setFontSize(8);
+        doc.setTextColor(0);
+        
+        data.paymentHistory.forEach((payment, index) => {
+            if (y > doc.internal.pageSize.getHeight() - 20) {
+                doc.addPage();
+                y = 10;
+            }
+            
+            doc.rect(margin, y, boxW, 5);
+            drawText(`${index + 1}`, margin + 2, y + 3.5, 8);
+            drawText(payment.paymentDate || 'N/A', margin + 15, y + 3.5, 8);
+            drawText(`${payment.currency} ${payment.amount.toFixed(2)}`, margin + 50, y + 3.5, 8);
+            drawText(payment.paymentMethod || 'N/A', margin + 90, y + 3.5, 8);
+            
+            // Truncate description if too long
+            const description = payment.description || 'N/A';
+            const shortDesc = description.length > 30 ? description.substring(0, 27) + '...' : description;
+            drawText(shortDesc, margin + 130, y + 3.5, 8);
+            
+            y += 5;
+        });
+        
+        // Summary
+        y += 3;
+        doc.setFillColor(240, 240, 240);
+        doc.rect(margin, y, boxW, 8, 'F');
+        doc.rect(margin, y, boxW, 8);
+        doc.setFontSize(9);
+        doc.setTextColor(primaryColor);
+        doc.setFont("helvetica", "bold");
+        doc.text(`Total Payments: ${data.totalPayments}`, margin + 5, y + 5);
+        doc.text(`Total Paid: USD ${data.totalPaidUSD.toFixed(2)} / KES ${data.totalPaidKSH.toFixed(2)}`, margin + 70, y + 5);
+        y += 10;
+    }
+
+    // =================================================================
+    // FOOTER/SIGNATURES
+    // =================================================================
+
+    doc.setTextColor(primaryColor);
+    drawText('... With thanks', margin, y + 10, 12, 'italic', secondaryColor);
+    
+    doc.line(pageW - margin - 50, y + 15, pageW - margin, y + 15);
+    drawText('For WanBite Investment Co. LTD', pageW - margin - 50, y + 19, 10, 'normal', primaryColor);
+    y += 25;
+
+    // --- Global Footer ---
+    doc.setFillColor(primaryColor);
+    doc.rect(0, doc.internal.pageSize.getHeight() - 10, pageW, 10, 'F');
+    
+    doc.setTextColor(255);
+    doc.setFontSize(9);
+    const footerText = `Location: Ngong Road, Kilimani, Nairobi. | Email: sales@carskenya.co.ke | Phone: 0713147136`;
+    doc.text(footerText, pageW / 2, doc.internal.pageSize.getHeight() - 4, null, null, "center");
+
+    doc.save(`Receipt_${data.receiptId}_with_History.pdf`);
+}
 /**
  * Renders a view of all receipt balances
  */
