@@ -2,6 +2,8 @@
 //                 1. FIREBASE CONFIGURATION & INIT
 // =================================================================
 
+// !!! IMPORTANT: REPLACE WITH YOUR ACTUAL FIREBASE CONFIG !!!
+// For Firebase JS SDK v7.20.0 and later, measurementId is optional
 const firebaseConfig = {
   apiKey: "AIzaSyCuUKCxYx0jYKqWOQaN82K5zFGlQsKQsK0",
   authDomain: "ck-manager-1abdc.firebaseapp.com",
@@ -12,32 +14,38 @@ const firebaseConfig = {
   measurementId: "G-7Z71W1NSX4"
 };
 
+// Initialize Firebase
 const app = firebase.initializeApp(firebaseConfig);
 const auth = app.auth();
 const db = app.firestore();
 
+// Global Elements & State
 const appContent = document.getElementById('app-content');
 const authStatus = document.getElementById('auth-status');
 const mainNav = document.getElementById('main-nav');
 let currentUser = null; 
 
-// Cross-document state variables
-window.pendingReceiptRef = null;
-window.pendingAgreementRef = null;
+// Invoice counter storage
+let invoiceCounter = null;
 
 // =================================================================
 //                 2. AUTHENTICATION & ROUTING
 // =================================================================
 
+/**
+ * The central listener that controls the app's state (logged in vs. logged out).
+ */
 auth.onAuthStateChanged(user => {
     currentUser = user;
     if (user) {
+        // User is signed in.
         authStatus.innerHTML = `<span class="mr-3 text-sm">Hello, ${user.email}</span>
                                 <button onclick="handleLogout()" class="bg-secondary-red hover:bg-red-700 text-white font-bold py-1 px-3 rounded text-sm">
                                     Logout
                                 </button>`;
         renderDashboard();
     } else {
+        // User is signed out.
         authStatus.innerHTML = '';
         mainNav.classList.add('hidden');
         renderAuthForm();
@@ -69,34 +77,39 @@ function handleLogout() {
     auth.signOut();
 }
 
+// =================================================================
+//                 3. DASHBOARD & NAVIGATION (UPDATED)
+// =================================================================
+
+function renderDashboard() {
+    appContent.innerHTML = `
+        <h2 class="text-4xl font-extrabold mb-8 text-primary-blue">CDMS Dashboard</h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+            ${createDashboardCard('Document Generator', 'Invoices, Receipts, Agreements', 'bg-green-100 border-green-400', 'handleDocumentGenerator')}
+            ${createDashboardCard('Fleet Management', 'Car Tracking, Clearing, ETA', 'bg-yellow-100 border-yellow-400', 'handleFleetManagement')}
+        </div>
+    `;
+    
+    // Update navigation links
+    mainNav.innerHTML = `
+        <a href="#" onclick="renderDashboard()" class="py-2 px-3 rounded hover:bg-blue-500 transition duration-150">Home</a>
+        <a href="#" onclick="handleDocumentGenerator()" class="py-2 px-3 rounded hover:bg-blue-500 transition duration-150">Documents</a>
+        <a href="#" onclick="handleFleetManagement()" class="py-2 px-3 rounded hover:bg-blue-500 transition duration-150">Fleet</a>
+    `;
+    mainNav.classList.remove('hidden');
+}
+
 async function handleLogin() {
     const email = document.getElementById('email').value;
     const password = document.getElementById('password').value;
     try {
         await auth.signInWithEmailAndPassword(email, password);
     } catch (error) {
+        console.error("Login failed:", error.message);
         alert("Login Failed: " + error.message);
     }
 }
 
-// =================================================================
-//                 3. DASHBOARD (UPDATED: REMOVED FLEET/HR)
-// =================================================================
-
-function renderDashboard() {
-    appContent.innerHTML = `
-        <h2 class="text-4xl font-extrabold mb-8 text-primary-blue">CDMS Dashboard</h2>
-        <div class="grid grid-cols-1 md:grid-cols-1 gap-8">
-            ${createDashboardCard('Document Generator', 'Invoices, Receipts, Agreements', 'bg-green-100 border-green-400', 'handleDocumentGenerator')}
-        </div>
-    `;
-    
-    mainNav.innerHTML = `
-        <a href="#" onclick="renderDashboard()" class="py-2 px-3 rounded hover:bg-blue-500 transition duration-150">Home</a>
-        <a href="#" onclick="handleDocumentGenerator()" class="py-2 px-3 rounded hover:bg-blue-500 transition duration-150">Documents</a>
-    `;
-    mainNav.classList.remove('hidden');
-}
 
 function createDashboardCard(title, subtitle, colorClass, handler) {
     return `
@@ -107,26 +120,22 @@ function createDashboardCard(title, subtitle, colorClass, handler) {
     `;
 }
 
-// =================================================================
-//                 4. SEQUENTIAL NUMBERING UTILITY
-// =================================================================
-
-async function generateSequentialId(collectionName, prefix) {
-    const now = new Date();
-    const yearMonth = `${now.getFullYear()}${(now.getMonth() + 1).toString().padStart(2, '0')}`;
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+// New Utility for Shared Reference & Serial Generation
+async function generateSharedRefId(clientName, carModel, carYear, collectionName) {
+    const datePart = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const namePart = clientName.split(' ')[0].toUpperCase().substring(0, 3);
+    const modelPart = carModel.toUpperCase().substring(0, 3);
+    const baseId = `${datePart}-${namePart}-${modelPart}-${carYear}`;
     
-    // Fetch documents created in the current month to determine count
-    const snapshot = await db.collection(collectionName)
-        .where("createdAt", ">=", startOfMonth)
-        .get();
-    
+    // Fetch current count to determine the serial suffix (0001, 0002, etc.)
+    const snapshot = await db.collection(collectionName).get();
     const serial = (snapshot.size + 1).toString().padStart(4, '0');
-    return `${prefix}-${yearMonth}-${serial}`;
+    
+    return `${baseId}-${serial}`;
 }
 
 // =================================================================
-//                 5. DOCUMENT GENERATOR ROUTING
+//                 4. DOCUMENT GENERATOR ROUTING (UPDATED)
 // =================================================================
 
 function handleDocumentGenerator() {
@@ -144,17 +153,28 @@ function handleDocumentGenerator() {
         </div>
     `;
 }
+// -----------------------------------------------------------------
+// NOTE: renderAgreementForm() is fully defined in Section 10 now
+// -----------------------------------------------------------------
+
 
 // =================================================================
-//                 6. RECEIPT LOGIC
+//                 5. RECEIPT/PAYMENT LOGIC (COMPREHENSIVELY REVISED)
 // =================================================================
 
+/**
+ * Helper function to convert a number to words (for KES amounts).
+ * This is a simplified function and may not handle extremely large numbers perfectly.
+ */
 function numberToWords(n) {
     if (typeof n !== 'number' || isNaN(n)) return '';
+
     const whole = Math.floor(n);
     const decimal = Math.round((n - whole) * 100);
+
     const a = ['', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen'];
     const b = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
+    
     const numToWords = (num) => {
         if (num < 20) return a[num];
         if (num < 100) return b[Math.floor(num / 10)] + (num % 10 === 0 ? '' : ' ' + a[num % 10]);
@@ -163,21 +183,33 @@ function numberToWords(n) {
         if (num < 1000000000) return numToWords(Math.floor(num / 1000000)) + ' million' + (num % 1000000 === 0 ? '' : ' ' + numToWords(num % 1000000));
         return numToWords(Math.floor(num / 1000000000)) + ' billion' + (num % 1000000000 === 0 ? '' : ' ' + numToWords(num % 1000000000));
     };
+
     let result = numToWords(whole).replace(/\s\s+/g, ' ').trim();
-    if (decimal > 0) result += ` and ${numToWords(decimal)} cents`;
+
+    if (decimal > 0) {
+        result += ` and ${numToWords(decimal)} cents`;
+    }
+
     return result.charAt(0).toUpperCase() + result.slice(1) + ' only.';
 }
 
-function renderReceiptForm() {
-    const formArea = document.getElementById('document-form-area');
-    // Pre-fill reference if coming from Invoice History
-    const displayRef = window.pendingReceiptRef || "";
+// Add this helper function to handle the "Add Payment" action for Receipts
+async function handleReceiptAddPayment(receiptData) {
+    // This re-uses your existing renderAddPaymentModal logic but targets the 'receipts' collection
+    renderAddPaymentModal(receiptData, "receipts");
+}
 
+/**
+ * Renders the new comprehensive Receipt form.
+ */
+function renderReceiptForm(invoiceReference = '') {
+    const formArea = document.getElementById('document-form-area');
     formArea.innerHTML = `
         <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div class="p-6 border border-secondary-red rounded-xl bg-white shadow-md">
                 <h3 class="text-xl font-semibold mb-4 text-secondary-red">New Payment Receipt</h3>
                 <form id="receipt-form" onsubmit="event.preventDefault(); saveReceipt()">
+                    
                     <div class="grid grid-cols-2 gap-3 mb-4">
                         <select id="receiptType" required class="block w-full p-2 border rounded-md">
                             <option value="" disabled selected>Select Receipt Type</option>
@@ -188,6 +220,7 @@ function renderReceiptForm() {
                         </select>
                         <input type="text" id="receivedFrom" required placeholder="Received From (Customer Name)" class="block w-full p-2 border rounded-md">
                     </div>
+
                     <fieldset class="border p-4 rounded-lg mb-4">
                         <legend class="text-base font-semibold text-primary-blue px-2">Amount Received</legend>
                         <div class="grid grid-cols-3 gap-3">
@@ -202,25 +235,29 @@ function renderReceiptForm() {
                             <textarea id="amountWords" rows="2" readonly class="mt-1 block w-full p-2 border rounded-md bg-gray-100 text-gray-800"></textarea>
                         </div>
                     </fieldset>
-                    <input type="text" id="beingPaidFor" required placeholder="Being Paid For" class="mb-4 block w-full p-2 border rounded-md">
+
+                    <input type="text" id="beingPaidFor" required placeholder="Being Paid For (e.g., Toyota Vitz 2018 Deposit)" value="${invoiceReference}" class="mb-4 block w-full p-2 border rounded-md">
+
                     <fieldset class="border p-4 rounded-lg mb-4">
                         <legend class="text-base font-semibold text-primary-blue px-2">Payment References</legend>
                         <div class="grid grid-cols-3 gap-3">
-                            <input type="text" id="chequeNo" placeholder="Cheque No." class="p-2 border rounded-md">
-                            <input type="text" id="rtgsTtNo" placeholder="RTGS/TT No." class="p-2 border rounded-md">
-                            <input type="text" id="bankUsed" placeholder="Bank Used" class="p-2 border rounded-md">
+                            <input type="text" id="chequeNo" placeholder="Cheque No. (Optional)" class="p-2 border rounded-md">
+                            <input type="text" id="rtgsTtNo" placeholder="RTGS/TT No. (Optional)" class="p-2 border rounded-md">
+                            <input type="text" id="bankUsed" placeholder="Bank Used (e.g., KCB, NCBA)" class="p-2 border rounded-md">
                         </div>
                     </fieldset>
+
                     <div class="grid grid-cols-2 gap-3 mb-6">
-                        <input type="number" id="balanceRemaining" step="0.01" placeholder="Balance Remaining" class="block w-full p-2 border rounded-md">
-                        <input type="date" id="balanceDueDate" class="block w-full p-2 border rounded-md">
+                        <input type="number" id="balanceRemaining" step="0.01" placeholder="Balance Remaining (Optional)" class="block w-full p-2 border rounded-md">
+                        <input type="date" id="balanceDueDate" placeholder="To be paid on or before" class="block w-full p-2 border rounded-md">
                     </div>
-                    <p class="text-xs text-blue-600 mb-2">${displayRef ? 'Ref: ' + displayRef : ''}</p>
+
                     <button type="submit" class="w-full bg-secondary-red hover:bg-red-700 text-white font-bold py-3 rounded-lg transition duration-150">
                         Generate & Save Receipt
                     </button>
                 </form>
             </div>
+
             <div class="p-6 border border-gray-300 rounded-xl bg-white shadow-md">
                 <h3 class="text-xl font-semibold mb-4 text-primary-blue">Recent Receipts</h3>
                 <div id="recent-receipts">
@@ -232,6 +269,9 @@ function renderReceiptForm() {
     fetchReceipts();
 }
 
+/**
+ * Updates the amount in words field dynamically.
+ */
 function updateAmountInWords() {
     const amountField = document.getElementById('amountReceived');
     const currencyField = document.getElementById('currency');
@@ -245,10 +285,29 @@ function updateAmountInWords() {
     }
 
     let words = numberToWords(amount);
-    words = currency === 'USD' ? words.replace('only', 'US Dollars only.') : words.replace('only', 'Kenya Shillings only.');
+    
+    if (currency === 'USD') {
+        words = words.replace('only', 'US Dollars only.');
+    } else { // KSH
+        words = words.replace('only', 'Kenya Shillings only.');
+    }
+
     wordsField.value = words;
 }
 
+/**
+ * Generates a custom receipt ID based on date, type, and name.
+ */
+function generateReceiptId(type, name) {
+    const datePart = new Date().toISOString().slice(0, 10).replace(/-/g, ''); // YYYYMMDD
+    const typePart = type.split(' ')[0].toUpperCase().substring(0, 3);
+    const namePart = name.split(' ')[0].toUpperCase().substring(0, 3);
+    return `RCPT-${datePart}-${typePart}-${namePart}`;
+}
+
+/**
+ * Saves the new receipt details to Firestore.
+ */
 async function saveReceipt() {
     const form = document.getElementById('receipt-form');
     if (!form.checkValidity()) {
@@ -258,26 +317,40 @@ async function saveReceipt() {
     
     const receiptType = document.getElementById('receiptType').value;
     const receivedFrom = document.getElementById('receivedFrom').value;
-    // Use manual reference if provided, else generate sequential
-    const receiptId = window.pendingReceiptRef || await generateSequentialId("receipts", "RCPT");
+    const currency = document.getElementById('currency').value;
+    const amountReceived = parseFloat(document.getElementById('amountReceived').value);
+    const amountWords = document.getElementById('amountWords').value;
+    const beingPaidFor = document.getElementById('beingPaidFor').value;
+    const chequeNo = document.getElementById('chequeNo').value;
+    const rtgsTtNo = document.getElementById('rtgsTtNo').value;
+    const bankUsed = document.getElementById('bankUsed').value;
+    const balanceRemaining = parseFloat(document.getElementById('balanceRemaining').value) || 0;
+    const balanceDueDate = document.getElementById('balanceDueDate').value;
+
+    if (isNaN(amountReceived) || amountReceived <= 0) {
+        alert("Please enter a valid amount received.");
+        return;
+    }
+
+    const receiptId = generateReceiptId(receiptType, receivedFrom);
     const receiptDate = new Date().toLocaleDateString('en-US');
 
     const receiptData = {
         receiptId,
         receiptType,
         receivedFrom,
-        currency: document.getElementById('currency').value,
-        amountReceived: parseFloat(document.getElementById('amountReceived').value),
-        amountWords: document.getElementById('amountWords').value,
-        beingPaidFor: document.getElementById('beingPaidFor').value,
+        currency,
+        amountReceived,
+        amountWords,
+        beingPaidFor,
         paymentDetails: {
-            chequeNo: document.getElementById('chequeNo').value,
-            rtgsTtNo: document.getElementById('rtgsTtNo').value,
-            bankUsed: document.getElementById('bankUsed').value
+            chequeNo,
+            rtgsTtNo,
+            bankUsed
         },
         balanceDetails: {
-            balanceRemaining: parseFloat(document.getElementById('balanceRemaining').value) || 0,
-            balanceDueDate: document.getElementById('balanceDueDate').value
+            balanceRemaining,
+            balanceDueDate
         },
         receiptDate,
         createdBy: currentUser.email,
@@ -285,19 +358,27 @@ async function saveReceipt() {
     };
 
     try {
-        await db.collection("receipts").add(receiptData);
-        alert(`Receipt ${receiptId} saved!`);
+        const docRef = await db.collection("receipts").add(receiptData);
+        alert(`Receipt ${receiptId} saved successfully!`);
+        
+        receiptData.firestoreId = docRef.id;
         generateReceiptPDF(receiptData);
-        window.pendingReceiptRef = null; // Clear ref
+        
         document.getElementById('receipt-form').reset();
-        fetchReceipts();
+        document.getElementById('amountWords').value = '';
+        fetchReceipts(); // Refresh history
     } catch (error) {
-        alert("Error saving receipt: " + error.message);
+        console.error("Error saving receipt:", error);
+        alert("Failed to save receipt: " + error.message);
     }
 }
 
+/**
+ * Fetches and displays recent receipts.
+ */
 async function fetchReceipts() {
     const receiptList = document.getElementById('recent-receipts');
+    let html = ``;
     try {
         const snapshot = await db.collection("receipts").orderBy("createdAt", "desc").limit(10).get();
         if (snapshot.empty) {
@@ -305,27 +386,28 @@ async function fetchReceipts() {
             return;
         }
         
-        let html = `<ul class="space-y-3">`;
+        html = `<ul class="space-y-3">`;
         snapshot.forEach(doc => {
             const data = doc.data();
             const receiptDataJson = JSON.stringify({
-                ...data, firestoreId: doc.id,
+                ...data, 
+                firestoreId: doc.id,
+                // Ensure Timestamp is handled for JSON stringify
                 createdAt: data.createdAt ? data.createdAt.toDate().toISOString() : new Date().toISOString()
             });
 
-            html += `<li class="p-3 border rounded-lg bg-gray-50 flex flex-col justify-between items-start">
-                        <div class="w-full flex justify-between">
-                            <strong>${data.receiptId}</strong>
-                            <span class="text-sm font-bold text-primary-blue">${data.currency} ${data.amountReceived.toFixed(2)}</span>
+            html += `<li class="p-3 border rounded-lg bg-gray-50 flex flex-col sm:flex-row justify-between items-start sm:items-center">
+                        <div>
+                            <strong class="text-gray-800">${data.receiptId}</strong><br>
+                            <span class="text-sm text-gray-600">From: ${data.receivedFrom} | Amount: ${data.currency} ${data.amountReceived.toFixed(2)}</span>
                         </div>
-                        <span class="text-xs text-gray-600">From: ${data.receivedFrom}</span>
-                        <div class="mt-2 flex space-x-2">
+                        <div class="mt-2 sm:mt-0 space-x-2">
                             <button onclick='reDownloadReceipt(${receiptDataJson})' 
-                                    class="bg-secondary-red hover:bg-red-600 text-white text-[10px] py-1 px-3 rounded-full transition duration-150">
-                                PDF
+                                    class="bg-secondary-red hover:bg-red-600 text-white text-xs py-1 px-3 rounded-full transition duration-150">
+                                Re-Download PDF
                             </button>
-                            <button onclick='initAgreementFromReceipt(${receiptDataJson})' 
-                                    class="bg-primary-blue hover:bg-blue-600 text-white text-[10px] py-1 px-3 rounded-full transition duration-150">
+                            <button onclick='createAgreementFromReceipt(${receiptDataJson})' 
+                                    class="bg-primary-blue hover:bg-blue-600 text-white text-xs py-1 px-3 rounded-full transition duration-150">
                                 Create Agreement
                             </button>
                         </div>
@@ -334,87 +416,213 @@ async function fetchReceipts() {
         html += `</ul>`;
         receiptList.innerHTML = html;
     } catch (error) {
-        receiptList.innerHTML = `<p class="text-red-500">Error loading receipts.</p>`;
+        console.error("Error fetching receipts:", error);
+        receiptList.innerHTML = `<p class="text-red-500">Error loading receipts. Check console for details.</p>`;
     }
 }
 
+/**
+ * Creates a sales agreement from receipt data
+ */
+function createAgreementFromReceipt(receiptData) {
+    // Navigate to agreement form with receipt reference
+    renderAgreementForm();
+    
+    // You could auto-populate some fields here if needed
+    // For example, set the buyer name from receipt
+    setTimeout(() => {
+        const buyerNameField = document.getElementById('buyerName');
+        const beingPaidForField = document.getElementById('carMakeModel');
+        
+        if (buyerNameField) buyerNameField.value = receiptData.receivedFrom;
+        if (beingPaidForField) beingPaidForField.value = receiptData.beingPaidFor;
+    }, 100);
+}
+
+/**
+ * Re-downloads the PDF for a selected receipt document from history.
+ * @param {object} data - The receipt data object retrieved from Firestore.
+ */
 function reDownloadReceipt(data) {
-    if (!data.receiptDate) data.receiptDate = new Date().toLocaleDateString('en-US');
+    // Ensure data.receiptDate is set (should be from the save logic)
+    if (!data.receiptDate) {
+         data.receiptDate = new Date().toLocaleDateString('en-US'); // Fallback
+    }
     generateReceiptPDF(data);
 }
 
-function initAgreementFromReceipt(data) {
-    window.pendingAgreementRef = data.receiptId;
-    renderAgreementForm();
-    // Pre-fill Buyer and Vehicle from receipt data
-    document.getElementById('buyerName').value = data.receivedFrom;
-    document.getElementById('carMakeModel').value = data.beingPaidFor;
-}
-
+/**
+ * Generates and downloads a custom PDF for the comprehensive receipt. (SPACING ADJUSTED)
+ */
 function generateReceiptPDF(data) {
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF('p', 'mm', 'a4'); 
-    const primaryColor = '#183263';
-    const secondaryColor = '#D96359';
+
+    const primaryColor = '#183263'; // WanBite Blue
+    const secondaryColor = '#D96359'; // Red
+    
     const pageW = doc.internal.pageSize.getWidth();
+    let y = 10; 
     const margin = 10;
     const boxW = pageW - (2 * margin);
+    // Increased base line height for better spacing
+    const lineHeight = 7; 
+
+    // --- HELPER FUNCTION ---
     const drawText = (text, x, y, size, style = 'normal', color = primaryColor, align = 'left') => {
-        doc.setFontSize(size); doc.setFont("helvetica", style); doc.setTextColor(color);
+        doc.setFontSize(size);
+        doc.setFont("helvetica", style);
+        doc.setTextColor(color);
         doc.text(text, x, y, { align: align });
     };
-    doc.setFillColor(primaryColor); doc.rect(0, 0, pageW, 15, 'F');
+
+    // =================================================================
+    // HEADER SECTION
+    // =================================================================
+    
+    // Top Bar (Color #183263)
+    doc.setFillColor(primaryColor);
+    doc.rect(0, 0, pageW, 15, 'F');
+    
     drawText('WanBite Investments Co. Ltd.', pageW / 2, 8, 18, 'bold', '#FFFFFF', 'center');
     drawText('carskenya.co.ke', pageW / 2, 13, 10, 'normal', '#FFFFFF', 'center');
-    let y = 25; drawText("OFFICIAL RECEIPT", pageW / 2, y, 24, "bold", primaryColor, "center");
-    y += 12; doc.setDrawColor(primaryColor); doc.setLineWidth(0.5); doc.rect(margin, y, boxW, 15);
+    
+    y = 25;
+
+    // RECEIPT TITLE
+    doc.setTextColor(primaryColor);
+    doc.setFontSize(24);
+    doc.setFont("helvetica", "bold");
+    doc.text("OFFICIAL RECEIPT", pageW / 2, y, null, null, "center");
+    y += 12; // Increased space after title
+    
+    // Receipt Metadata Box (ID and Date)
+    doc.setDrawColor(primaryColor);
+    doc.setLineWidth(0.5);
+    doc.rect(margin, y, boxW, 15);
+    
     drawText('RECEIPT NO:', margin + 3, y + 5, 10, 'bold', secondaryColor);
     drawText(data.receiptId, margin + 3, y + 11, 14, 'bold', primaryColor);
+    
     drawText('DATE:', pageW - margin - 3, y + 5, 10, 'bold', secondaryColor, 'right');
     drawText(data.receiptDate, pageW - margin - 3, y + 11, 14, 'bold', primaryColor, 'right');
-    y += 20; drawText('RECEIVED FROM:', margin, y, 10, 'bold');
-    doc.setDrawColor(0); doc.line(margin + 35, y, pageW - margin, y);
+    y += 20; // Increased space below the box
+
+    // =================================================================
+    // MAIN BODY
+    // =================================================================
+
+    // Received From
+    doc.setTextColor(primaryColor);
+    drawText('RECEIVED FROM:', margin, y, 10, 'bold');
+    doc.setDrawColor(0);
+    doc.line(margin + 35, y, pageW - margin, y);
     drawText(data.receivedFrom, margin + 35, y - 0.5, 12, 'bold', 0);
-    y += 9; drawText('THE SUM OF:', margin, y + 3, 10, 'bold');
-    doc.setFillColor(240, 240, 240); doc.rect(margin + 35, y, boxW - 35, 17.5, 'F');
-    doc.setDrawColor(0); doc.setLineWidth(0.2); doc.rect(margin + 35, y, boxW - 35, 17.5);
-    doc.setTextColor(0); doc.setFontSize(11);
+    y += lineHeight + 2; // Increased space
+
+    // The Sum of Money (Words)
+    drawText('THE SUM OF:', margin, y + 3, 10, 'bold');
+    doc.setFillColor(240, 240, 240); 
+    doc.rect(margin + 35, y, boxW - 35, lineHeight * 2.5, 'F'); // Box for words
+    doc.setDrawColor(0);
+    doc.setLineWidth(0.2);
+    doc.rect(margin + 35, y, boxW - 35, lineHeight * 2.5);
+    
+    doc.setTextColor(0);
+    doc.setFontSize(11);
+    // Use splitTextToSize to wrap the words nicely within the box
     const wrappedWords = doc.splitTextToSize(data.amountWords, boxW - 37);
     doc.text(wrappedWords, margin + 36, y + 4);
-    y += 22; drawText('BEING PAID FOR:', margin, y, 10, 'bold', primaryColor);
+    y += lineHeight * 2.5 + 5; // Increased space below the box
+
+    // Being Paid For
+    drawText('BEING PAID FOR:', margin, y, 10, 'bold', primaryColor);
     doc.line(margin + 35, y, pageW - margin, y);
     drawText(data.beingPaidFor, margin + 35, y - 0.5, 12, 'bold', 0);
-    y += 11; drawText('PAYMENT DETAILS:', margin, y, 10, 'bold'); y += 4;
-    doc.setFontSize(10); doc.setTextColor(0); doc.rect(margin, y, boxW * 0.45, 7);
+    y += lineHeight + 4; // Increased space
+
+    // Payment References Section
+    doc.setTextColor(primaryColor);
+    drawText('PAYMENT DETAILS:', margin, y, 10, 'bold');
+    y += 4; // Increased space after title
+
+    doc.setFontSize(10);
+    doc.setTextColor(0);
+
+    // Row 1: Cheque and RTGS/TT
+    doc.rect(margin, y, boxW * 0.45, lineHeight); // Cheque Box
     doc.text(`Cheque No: ${data.paymentDetails.chequeNo || 'N/A'}`, margin + 2, y + 4.5);
-    doc.rect(margin + boxW * 0.55, y, boxW * 0.45, 7);
+    doc.rect(margin + boxW * 0.55, y, boxW * 0.45, lineHeight); // RTGS/TT Box
     doc.text(`RTGS/TT No: ${data.paymentDetails.rtgsTtNo || 'N/A'}`, margin + boxW * 0.55 + 2, y + 4.5);
-    y += 9; doc.rect(margin, y, boxW * 0.45, 7);
+    y += lineHeight + 2; // Increased space
+
+    // Row 2: Bank Used and Receipt Type
+    doc.rect(margin, y, boxW * 0.45, lineHeight); // Bank Used Box
     doc.text(`Bank Used: ${data.paymentDetails.bankUsed || 'N/A'}`, margin + 2, y + 4.5);
-    doc.rect(margin + boxW * 0.55, y, boxW * 0.45, 7);
+    doc.rect(margin + boxW * 0.55, y, boxW * 0.45, lineHeight); // Receipt Type Box
     doc.text(`Receipt Type: ${data.receiptType}`, margin + boxW * 0.55 + 2, y + 4.5);
-    y += 13; const amountBoxY = y + 5;
-    doc.setFillColor(secondaryColor); doc.rect(pageW - margin - 70, amountBoxY, 70, 15, 'F');
-    doc.setTextColor(255); drawText('AMOUNT FIGURE', pageW - margin - 65, amountBoxY + 4, 8, 'bold', 255);
+    y += lineHeight + 6; // Increased space
+
+    // =================================================================
+    // AMOUNT FIGURE (BIG BOX)
+    // =================================================================
+    const amountBoxH = 15;
+    const amountBoxY = y + 5;
+    
+    // Total Amount Box (Right Side)
+    doc.setFillColor(secondaryColor);
+    doc.rect(pageW - margin - 70, amountBoxY, 70, amountBoxH, 'F');
+    
+    doc.setTextColor(255);
+    drawText('AMOUNT FIGURE', pageW - margin - 65, amountBoxY + 4, 8, 'bold', 255);
     drawText(`${data.currency} ${data.amountReceived.toLocaleString('en-US', { minimumFractionDigits: 2 })}`, pageW - margin - 5, amountBoxY + 11, 18, 'bold', 255, 'right');
-    doc.setTextColor(primaryColor); drawText('BALANCE DETAILS', margin, amountBoxY + 4, 10, 'bold');
-    doc.setFontSize(12); doc.setTextColor(0);
-    const balanceText = data.balanceDetails.balanceRemaining > 0 ? `${data.currency} ${data.balanceDetails.balanceRemaining.toLocaleString('en-US', { minimumFractionDigits: 2 })}` : 'ZERO';
+    
+    // Balance Details (Left Side)
+    doc.setTextColor(primaryColor);
+    drawText('BALANCE DETAILS', margin, amountBoxY + 4, 10, 'bold');
+    doc.setFontSize(12);
+    doc.setTextColor(0);
+
+    const balanceText = data.balanceDetails.balanceRemaining > 0 
+        ? `${data.currency} ${data.balanceDetails.balanceRemaining.toLocaleString('en-US', { minimumFractionDigits: 2 })}` 
+        : 'ZERO';
+    
     drawText(`Balance Remaining: ${balanceText}`, margin, amountBoxY + 10, 10);
     drawText(`Due On/Before: ${data.balanceDetails.balanceDueDate || 'N/A'}`, margin, amountBoxY + 14, 10);
-    y = amountBoxY + 22; drawText('... With thanks', margin, y + 10, 12, 'italic', secondaryColor);
+    
+    y = amountBoxY + amountBoxH + 7; // Increased space after the box
+
+    // =================================================================
+    // FOOTER/SIGNATURES
+    // =================================================================
+
+    doc.setTextColor(primaryColor);
+    drawText('... With thanks', margin, y + 10, 12, 'italic', secondaryColor);
+    
     doc.line(pageW - margin - 50, y + 15, pageW - margin, y + 15);
     drawText('For WanBite Investment Co. LTD', pageW - margin - 50, y + 19, 10, 'normal', primaryColor);
-    doc.setFillColor(primaryColor); doc.rect(0, doc.internal.pageSize.getHeight() - 10, pageW, 10, 'F');
-    doc.setTextColor(255); doc.setFontSize(9);
-    doc.text(`Location: Ngong Road, Kilimani, Nairobi. | Email: sales@carskenya.co.ke | Phone: 0713147136`, pageW / 2, doc.internal.pageSize.getHeight() - 4, null, null, "center");
+    y += 25;
+
+
+    // --- Global Footer ---
+    doc.setFillColor(primaryColor);
+    doc.rect(0, doc.internal.pageSize.getHeight() - 10, pageW, 10, 'F');
+    
+    doc.setTextColor(255);
+    doc.setFontSize(9);
+    const footerText = `Location: Ngong Road, Kilimani, Nairobi. | Email: sales@carskenya.co.ke | Phone: 0713147136`;
+    doc.text(footerText, pageW / 2, doc.internal.pageSize.getHeight() - 4, null, null, "center");
+
     doc.save(`Receipt_${data.receiptId}.pdf`);
-}
+      }
 
 // =================================================================
-//                 7. BANK MANAGEMENT
+//                 7. BANK MANAGEMENT MODULE (NEW)
 // =================================================================
 
+/**
+ * Renders the interface for adding and managing bank accounts.
+ */
 function renderBankManagement() {
     const formArea = document.getElementById('document-form-area');
     formArea.innerHTML = `
@@ -422,81 +630,205 @@ function renderBankManagement() {
             <div class="md:col-span-1 p-6 border border-green-300 rounded-xl bg-green-50 shadow-md">
                 <h3 class="text-xl font-semibold mb-4 text-green-700">Add New Bank Account</h3>
                 <form id="add-bank-form" onsubmit="event.preventDefault(); addBankDetails()">
-                    <input type="text" id="bankName" required placeholder="Bank Name" class="mt-2 block w-full p-2 border rounded-md">
-                    <input type="text" id="bankBranch" required placeholder="Bank Branch" class="mt-2 block w-full p-2 border rounded-md">
-                    <input type="text" id="accountName" required value="WANBITE INVESTMENTS CO. LTD" class="mt-2 block w-full p-2 border rounded-md">
+                    <input type="text" id="bankName" required placeholder="Bank Name (e.g., KCB Bank)" class="mt-2 block w-full p-2 border rounded-md">
+                    <input type="text" id="bankBranch" required placeholder="Bank Branch (e.g., Kilimani Branch)" class="mt-2 block w-full p-2 border rounded-md">
+                    <input type="text" id="accountName" required placeholder="Account Name" value="WANBITE INVESTMENTS CO. LTD" class="mt-2 block w-full p-2 border rounded-md">
                     <input type="text" id="accountNumber" required placeholder="Account Number" class="mt-2 block w-full p-2 border rounded-md">
                     <input type="text" id="swiftCode" required placeholder="SWIFT/BIC Code" class="mt-2 block w-full p-2 border rounded-md">
                     <select id="currency" required class="mt-2 block w-full p-2 border rounded-md">
+                        <option value="" disabled selected>Select Currency</option>
                         <option value="USD">USD</option>
                         <option value="KES">KES</option>
                     </select>
-                    <button type="submit" class="mt-4 w-full bg-green-600 text-white font-bold py-2 rounded-md">Save Bank</button>
+                    <button type="submit" class="mt-4 w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 rounded-md transition duration-150">
+                        Save Bank Account
+                    </button>
                 </form>
             </div>
+
             <div class="md:col-span-2 p-6 border border-gray-300 rounded-xl bg-white shadow-md">
-                <h3 class="text-xl font-semibold mb-4 text-primary-blue">Saved Banks</h3>
-                <div id="saved-banks-list" class="space-y-3"></div>
+                <h3 class="text-xl font-semibold mb-4 text-primary-blue">Saved Bank Accounts</h3>
+                <div id="saved-banks-list" class="space-y-3">
+                    <p class="text-center text-gray-500">Loading banks...</p>
+                </div>
             </div>
         </div>
     `;
     fetchAndDisplayBankDetails();
 }
 
+/**
+ * Saves new bank details to the 'bankDetails' Firestore collection.
+ */
 async function addBankDetails() {
+    const bankName = document.getElementById('bankName').value;
+    const bankBranch = document.getElementById('bankBranch').value; // <-- NEW FIELD
+    const accountName = document.getElementById('accountName').value;
+    const accountNumber = document.getElementById('accountNumber').value;
+    const swiftCode = document.getElementById('swiftCode').value;
+    const currency = document.getElementById('currency').value;
+
     const newBank = {
-        name: document.getElementById('bankName').value,
-        branch: document.getElementById('bankBranch').value,
-        accountName: document.getElementById('accountName').value,
-        accountNumber: document.getElementById('accountNumber').value,
-        swiftCode: document.getElementById('swiftCode').value,
-        currency: document.getElementById('currency').value,
+        name: bankName,
+        branch: bankBranch, // <-- NEW FIELD SAVED TO FIRESTORE
+        accountName,
+        accountNumber,
+        swiftCode,
+        currency,
         createdAt: firebase.firestore.FieldValue.serverTimestamp()
     };
+
     try {
         await db.collection("bankDetails").add(newBank);
+        alert(`Bank account for ${bankName} (${bankBranch}) saved successfully!`);
         document.getElementById('add-bank-form').reset();
-        fetchAndDisplayBankDetails();
-    } catch (error) { alert(error.message); }
+        fetchAndDisplayBankDetails(); // Refresh the list
+    } catch (error) {
+        console.error("Error saving bank details:", error);
+        alert("Failed to save bank details: " + error.message);
+    }
 }
 
+/**
+ * Fetches and displays all saved bank details in the list.
+ * (Updated to display the branch)
+ */
 async function fetchAndDisplayBankDetails() {
     const listElement = document.getElementById('saved-banks-list');
+    if (!listElement) return;
+
+    listElement.innerHTML = `<p class="text-center text-gray-500">Fetching data...</p>`;
+    let html = ``;
+
     try {
         const snapshot = await db.collection("bankDetails").orderBy("createdAt", "desc").get();
-        if (snapshot.empty) { listElement.innerHTML = `<p class="text-center text-gray-500">No bank accounts.</p>`; return; }
-        let html = `<ul class="divide-y divide-gray-200">`;
+        if (snapshot.empty) {
+            listElement.innerHTML = `<p class="text-center text-gray-500">No bank accounts have been configured yet.</p>`;
+            return;
+        }
+
+        html = `<ul class="divide-y divide-gray-200">`;
         snapshot.forEach(doc => {
             const data = doc.data();
-            html += `<li class="p-4 flex flex-col">
-                        <div class="flex justify-between items-center">
-                            <strong class="text-primary-blue">${data.name} (${data.currency})</strong>
-                            <button onclick="deleteBank('${doc.id}')" class="text-red-500 text-sm">Delete</button>
-                        </div>
-                        <p class="text-xs text-gray-600">Acc: ${data.accountNumber} | Branch: ${data.branch}</p>
-                    </li>`;
+            html += `
+                <li class="p-4 flex flex-col">
+                    <div class="flex justify-between items-center">
+                        <strong class="text-lg text-primary-blue">${data.name} (${data.currency})</strong>
+                        <button onclick="deleteBank('${doc.id}')" class="text-red-500 hover:text-red-700 text-sm">Delete</button>
+                    </div>
+                    <p class="text-sm text-gray-700">Branch: ${data.branch || 'N/A'}</p>
+                    <p class="text-sm text-gray-700">Account: ${data.accountName}</p>
+                    <p class="text-sm text-gray-600">No: ${data.accountNumber} | SWIFT: ${data.swiftCode}</p>
+                </li>
+            `;
         });
-        listElement.innerHTML = html + `</ul>`;
-    } catch (error) { listElement.innerHTML = `<p class="text-red-500">Error.</p>`; }
+        html += `</ul>`;
+        listElement.innerHTML = html;
+
+    } catch (error) {
+        console.error("Error fetching banks:", error);
+        listElement.innerHTML = `<p class="text-red-500">Error loading bank accounts.</p>`;
+    }
+}
+/**
+ * Deletes a bank document from Firestore.
+ * @param {string} bankId - The Firestore document ID of the bank.
+ */
+async function deleteBank(bankId) {
+    if (!confirm("Are you sure you want to delete this bank account?")) {
+        return;
+    }
+    try {
+        await db.collection("bankDetails").doc(bankId).delete();
+        alert("Bank account deleted successfully!");
+        fetchAndDisplayBankDetails(); // Refresh the list
+    } catch (error) {
+        console.error("Error deleting bank:", error);
+        alert("Failed to delete bank: " + error.message);
+    }
 }
 
-async function deleteBank(id) { if (confirm("Delete?")) { await db.collection("bankDetails").doc(id).delete(); fetchAndDisplayBankDetails(); } }
-
 // =================================================================
-//                 8. INVOICE MODULE
+//                 6. INVOICE MODULE (UPDATED WITH SEQUENTIAL NUMBERING)
 // =================================================================
 
+let invoiceItemCounter = 1;
+
+/**
+ * Helper to fetch raw bank details from Firestore (for dropdown population).
+ * Uses the 'bankDetails' collection.
+ */
+async function _getBankDetailsData() {
+    try {
+        const snapshot = await db.collection("bankDetails").get();
+        const banks = [];
+        snapshot.forEach(doc => {
+            banks.push({ id: doc.id, ...doc.data() });
+        });
+        return banks;
+    } catch (error) {
+        console.error("Error fetching bank details:", error);
+        return [];
+    }
+}
+
+/**
+ * Generates a sequential invoice number that resets on the 1st of each month
+ */
+async function generateSequentialInvoiceNumber(clientName, carModel, carYear) {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = (now.getMonth() + 1).toString().padStart(2, '0');
+    
+    // Get the first day of current month
+    const firstDayOfMonth = new Date(year, now.getMonth(), 1);
+    
+    // Query invoices from this month
+    const monthStart = firebase.firestore.Timestamp.fromDate(firstDayOfMonth);
+    const snapshot = await db.collection("invoices")
+        .where("createdAt", ">=", monthStart)
+        .get();
+    
+    // Calculate next sequential number
+    const nextNumber = (snapshot.size + 1).toString().padStart(4, '0');
+    
+    // Get name and model parts for reference
+    const namePart = clientName.split(' ')[0].toUpperCase().substring(0, 3);
+    const modelPart = carModel.toUpperCase().substring(0, 3);
+    
+    return `${year}${month}-${nextNumber}-${namePart}-${modelPart}-${carYear}`;
+}
+
+/**
+ * Populates a bank account dropdown list with data from Firestore.
+ * @param {string} dropdownId - The ID of the select element to populate.
+ */
 async function populateBankDropdown(dropdownId) {
     const bankSelect = document.getElementById(dropdownId);
     if (!bankSelect) return;
-    const snapshot = await db.collection("bankDetails").get();
+
+    bankSelect.innerHTML = '<option value="" disabled selected>Loading...</option>';
+
+    const banks = await _getBankDetailsData();
     let options = '<option value="" disabled selected>Select Bank Account</option>';
-    snapshot.forEach(doc => {
-        options += `<option value='${JSON.stringify(doc.data())}'>${doc.data().name} (${doc.data().currency})</option>`;
+
+    if (banks.length === 0) {
+        bankSelect.innerHTML = '<option value="" disabled>No bank accounts configured.</option>';
+        return;
+    }
+
+    banks.forEach(data => {
+        // Include the ID for easy lookup, but store the whole object as JSON string in the value
+        const detailsJson = JSON.stringify(data);
+        options += `<option value='${detailsJson}'>${data.name} - ${data.branch || 'No Branch'} (${data.currency})</option>`;
     });
+
     bankSelect.innerHTML = options;
 }
 
+/**
+ * Renders the Invoice/Proforma form.
+ */
 function renderInvoiceForm() {
     const formArea = document.getElementById('document-form-area');
     formArea.innerHTML = `
@@ -504,256 +836,1171 @@ function renderInvoiceForm() {
             <h3 class="text-xl font-semibold mb-4 text-primary-blue">Create Sales Invoice/Proforma</h3>
             <form id="invoice-form" onsubmit="event.preventDefault(); saveInvoice(false);">
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 p-4 bg-blue-50 rounded-lg">
-                    <select id="docType" required class="p-2 border rounded-md">
-                        <option value="Invoice">Invoice</option>
-                        <option value="Proforma Invoice">Proforma Invoice</option>
-                    </select>
-                    <input type="number" id="exchangeRate" step="0.01" required value="130.00" class="p-2 border rounded-md">
-                    <input type="date" id="dueDate" required class="p-2 border rounded-md">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">Document Type</label>
+                        <select id="docType" required class="mt-1 block w-full p-2 border rounded-md">
+                            <option value="Invoice">Invoice</option>
+                            <option value="Proforma Invoice">Proforma Invoice</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="exchangeRate" class="block text-sm font-medium text-gray-700">USD 1 = KES</label>
+                        <input type="number" id="exchangeRate" step="0.01" required value="130.00" class="mt-1 block w-full p-2 border rounded-md">
+                    </div>
+                    <div>
+                        <label for="dueDate" class="block text-sm font-medium text-gray-700">Due Date</label>
+                        <input type="date" id="dueDate" required class="mt-1 block w-full p-2 border rounded-md">
+                    </div>
                 </div>
+                
                 <fieldset class="border p-4 rounded-lg mb-6">
                     <legend class="text-base font-semibold text-secondary-red px-2">Client Details</legend>
                     <div class="grid grid-cols-2 gap-4">
                         <input type="text" id="clientName" required placeholder="Client Full Name" class="p-2 border rounded-md">
-                        <input type="text" id="clientPhone" required placeholder="Phone Number" class="p-2 border rounded-md">
+                        <input type="text" id="clientPhone" required placeholder="Client Phone Number" class="p-2 border rounded-md">
                     </div>
                 </fieldset>
+
                 <fieldset class="border p-4 rounded-lg mb-6">
                     <legend class="text-base font-semibold text-primary-blue px-2">Vehicle Specification</legend>
                     <div class="grid grid-cols-4 gap-4">
-                        <input type="text" id="carMake" required placeholder="Make" class="p-2 border rounded-md">
-                        <input type="text" id="carModel" required placeholder="Model" class="p-2 border rounded-md">
+                        <input type="text" id="carMake" required placeholder="Make (e.g., Toyota)" class="p-2 border rounded-md">
+                        <input type="text" id="carModel" required placeholder="Model (e.g., Vitz)" class="p-2 border rounded-md">
                         <input type="number" id="carYear" required placeholder="Year" class="p-2 border rounded-md">
                         <input type="text" id="vinNumber" required placeholder="VIN Number" class="p-2 border rounded-md">
-                        <input type="number" id="engineCC" required placeholder="CC" class="p-2 border rounded-md">
-                        <select id="fuelType" required class="p-2 border rounded-md"><option value="Petrol">Petrol</option><option value="Diesel">Diesel</option></select>
-                        <select id="transmission" required class="p-2 border rounded-md"><option value="Automatic">Automatic</option><option value="Manual">Manual</option></select>
+                        <input type="number" id="engineCC" required placeholder="Engine CC" class="p-2 border rounded-md">
+                        <select id="fuelType" required class="p-2 border rounded-md">
+                            <option value="" disabled selected>Fuel Type</option>
+                            <option value="Petrol">Petrol</option>
+                            <option value="Diesel">Diesel</option>
+                            <option value="Hybrid">Hybrid</option>
+                        </select>
+                        <select id="transmission" required class="p-2 border rounded-md">
+                            <option value="" disabled selected>Transmission</option>
+                            <option value="Automatic">Automatic</option>
+                            <option value="Manual">Manual</option>
+                        </select>
                         <input type="text" id="color" required placeholder="Color" class="p-2 border rounded-md">
+                        <input type="number" id="mileage" required placeholder="Mileage (km)" class="p-2 border rounded-md">
                     </div>
-                    <textarea id="goodsDescription" placeholder="Description of Goods" rows="2" class="mt-3 block w-full p-2 border rounded-md"></textarea>
+                    <textarea id="goodsDescription" placeholder="Description of Goods (e.g., Accessories, specific features)" rows="2" class="mt-3 block w-full p-2 border rounded-md"></textarea>
                 </fieldset>
-                <div class="grid grid-cols-2 gap-4 mb-6">
-                    <input type="number" id="price" step="0.01" required placeholder="Price (USD)" class="p-2 border rounded-md">
-                    <select id="bankDetailsSelect" required class="p-2 border rounded-md"></select>
+
+                <fieldset class="border p-4 rounded-lg mb-6">
+                    <legend class="text-base font-semibold text-secondary-red px-2">Pricing</legend>
+                    <div class="grid grid-cols-2 gap-4">
+                        <input type="number" id="quantity" required value="1" min="1" placeholder="Quantity" class="p-2 border rounded-md">
+                        <input type="number" id="price" step="0.01" required placeholder="Unit Price (USD C&F MSA)" class="p-2 border rounded-md">
+                    </div>
+                </fieldset>
+
+                <fieldset class="border p-4 rounded-lg mb-6">
+                    <legend class="text-base font-semibold text-secondary-red px-2">Payment/Confirmation</legend>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700">Select Bank Account for Payment</label>
+                            <select id="bankDetailsSelect" required class="mt-1 block w-full p-2 border rounded-md"></select>
+                        </div>
+                        <div>
+                            <label for="buyerNameConfirmation" class="block text-sm font-medium text-gray-700">Accepted & Confirmed by Buyer (Full Name)</label>
+                            <input type="text" id="buyerNameConfirmation" required placeholder="Buyer's Full Name" class="mt-1 block w-full p-2 border rounded-md">
+                        </div>
+                    </div>
+                    <p class="mt-4 text-sm text-gray-500">Seller: WANBITE INVESTMENTS COMPANY LIMITED. This acts as a confirmation of acceptance.</p>
+                </fieldset>
+
+                <div class="flex space-x-4">
+                    <button type="submit" class="flex-1 bg-primary-blue hover:bg-blue-900 text-white font-bold py-3 rounded-lg transition duration-150">
+                        Generate & Save Invoice
+                    </button>
+                    <button type="button" onclick="saveInvoice(true)" class="flex-1 bg-gray-500 hover:bg-gray-700 text-white font-bold py-3 rounded-lg transition duration-150">
+                        Save Only (No PDF)
+                    </button>
                 </div>
-                <input type="text" id="buyerConfirm" required placeholder="Accepted by Buyer" class="w-full p-2 border rounded-md mb-6">
-                <button type="submit" class="w-full bg-primary-blue text-white font-bold py-3 rounded-lg">Save Invoice</button>
             </form>
         </div>
     `;
+
+    // Populate the bank dropdown when the form loads
     populateBankDropdown('bankDetailsSelect');
 }
 
+/**
+ * Saves the invoice data to Firestore and optionally generates a PDF.
+ * @param {boolean} onlySave - If true, only saves to Firestore without generating PDF.
+ */
 async function saveInvoice(onlySave) {
-    const clientName = document.getElementById('clientName').value;
-    const carModel = document.getElementById('carModel').value;
-    const invoiceId = await generateSequentialId("invoices", "INV");
-    const bankDetails = JSON.parse(document.getElementById('bankDetailsSelect').value);
-    const priceUSD = parseFloat(document.getElementById('price').value);
-    const exchangeRate = parseFloat(document.getElementById('exchangeRate').value);
+    const form = document.getElementById('invoice-form');
+    if (!form.checkValidity()) {
+        form.reportValidity();
+        return;
+    }
 
+    // 1. Collect Form Data
+    const docType = document.getElementById('docType').value;
+    const clientName = document.getElementById('clientName').value;
+    const clientPhone = document.getElementById('clientPhone').value;
+    const dueDate = document.getElementById('dueDate').value;
+    const exchangeRate = parseFloat(document.getElementById('exchangeRate').value);
+    
+    const carMake = document.getElementById('carMake').value;
+    const carModel = document.getElementById('carModel').value;
+    const carYear = document.getElementById('carYear').value;
+    const vinNumber = document.getElementById('vinNumber').value;
+    const engineCC = document.getElementById('engineCC').value;
+    const fuelType = document.getElementById('fuelType').value;
+    const transmission = document.getElementById('transmission').value;
+    const color = document.getElementById('color').value;
+    const mileage = document.getElementById('mileage').value;
+    const quantity = parseInt(document.getElementById('quantity').value);
+    const priceUSD = parseFloat(document.getElementById('price').value);
+    const goodsDescription = document.getElementById('goodsDescription').value;
+    
+    // Bank Details are stored as JSON string in the value, so we parse it
+    let bankDetails;
+    try {
+        bankDetails = JSON.parse(document.getElementById('bankDetailsSelect').value);
+    } catch (e) {
+        alert("Error reading selected bank details. Please re-select the bank account.");
+        console.error("Error parsing bank details:", e);
+        return;
+    }
+    
+    const buyerNameConfirmation = document.getElementById('buyerNameConfirmation').value;
+
+    // 2. Calculate Pricing
+    const totalPriceUSD = quantity * priceUSD;
+    const depositUSD = totalPriceUSD * 0.50;
+    const balanceUSD = totalPriceUSD * 0.50;
+    const depositKSH = depositUSD * exchangeRate;
+    
+    // 3. Generate sequential invoice number
+    const generatedInvoiceId = await generateSequentialInvoiceNumber(clientName, carModel, carYear);
+    
+    // 4. Construct Invoice Data Object
     const invoiceData = {
-        invoiceId,
-        docType: document.getElementById('docType').value,
+        docType,
         clientName,
-        clientPhone: document.getElementById('clientPhone').value,
+        clientPhone,
         issueDate: new Date().toLocaleDateString('en-US'),
-        dueDate: document.getElementById('dueDate').value,
-        exchangeRate: exchangeRate,
+        dueDate,
+        exchangeRate,
         carDetails: {
-            make: document.getElementById('carMake').value, model: carModel, year: document.getElementById('carYear').value,
-            vin: document.getElementById('vinNumber').value, cc: document.getElementById('engineCC').value,
-            fuel: document.getElementById('fuelType').value, transmission: document.getElementById('transmission').value,
-            color: document.getElementById('color').value, quantity: 1, priceUSD: priceUSD,
-            goodsDescription: document.getElementById('goodsDescription').value
+            make: carMake,
+            model: carModel,
+            vin: vinNumber,
+            cc: engineCC,
+            year: carYear,
+            fuel: fuelType,
+            transmission,
+            color,
+            mileage,
+            quantity,
+            priceUSD,
+            goodsDescription
         },
-        pricing: { totalUSD: priceUSD, depositUSD: priceUSD * 0.5, balanceUSD: priceUSD * 0.5, depositKSH: (priceUSD * 0.5 * exchangeRate).toFixed(2) },
-        bankDetails, buyerNameConfirmation: document.getElementById('buyerConfirm').value,
-        createdBy: currentUser.email, createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        pricing: {
+            totalUSD: totalPriceUSD,
+            depositUSD,
+            balanceUSD,
+            depositKSH: depositKSH.toFixed(2),
+        },
+        bankDetails, // Save the full object for easy reference
+        buyerNameConfirmation,
+        createdBy: currentUser.email,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+        invoiceId: generatedInvoiceId
     };
 
+    // 5. Save to Firestore
     try {
-        await db.collection("invoices").add(invoiceData);
-        alert(`Invoice ${invoiceId} saved!`);
-        generateInvoicePDF(invoiceData);
-        renderInvoiceHistory();
-    } catch (e) { alert(e.message); }
+        const docRef = await db.collection("invoices").add(invoiceData);
+        alert(`${docType} ${generatedInvoiceId} saved successfully!`);
+
+        // 6. Download PDF if requested
+        if (!onlySave) {
+            invoiceData.firestoreId = docRef.id;
+            generateInvoicePDF(invoiceData);
+        }
+    } catch (error) {
+        console.error("Error saving invoice:", error);
+        alert("Failed to save invoice: " + error.message);
+    }
 }
 
+/**
+ * Creates a receipt from invoice data
+ */
+function createReceiptFromInvoice(invoiceData) {
+    // Navigate to receipt form with invoice reference
+    renderReceiptForm(invoiceData.invoiceId);
+    
+    // Auto-populate fields from invoice data
+    setTimeout(() => {
+        const receivedFromField = document.getElementById('receivedFrom');
+        const beingPaidForField = document.getElementById('beingPaidFor');
+        
+        if (receivedFromField) receivedFromField.value = invoiceData.clientName;
+        if (beingPaidForField) beingPaidForField.value = `${invoiceData.carDetails.make} ${invoiceData.carDetails.model} ${invoiceData.carDetails.year}`;
+    }, 100);
+}
+
+/**
+ * Generates and downloads a custom PDF for the Invoice/Proforma.
+ */
 function generateInvoicePDF(data) {
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF('p', 'mm', 'a4'); 
-    const primaryColor = '#183263';
-    const secondaryColor = '#D96359';
+
+    const primaryColor = '#183263'; // WanBite Blue
+    const secondaryColor = '#D96359'; // Red
+    
     const pageW = doc.internal.pageSize.getWidth();
+    let y = 10; 
+    const margin = 10;
+    const lineHeight = 5; 
+    const termIndent = 5;
+
+    // --- HELPER FUNCTIONS ---
     const drawText = (text, x, y, size, style = 'normal', color = primaryColor, align = 'left') => {
-        doc.setFontSize(size); doc.setFont("helvetica", style); doc.setTextColor(color); doc.text(text, x, y, { align: align });
+        doc.setFontSize(size);
+        doc.setFont("helvetica", style);
+        doc.setTextColor(color);
+        doc.text(text, x, y, { align: align });
     };
-    doc.setFillColor(primaryColor); doc.rect(0, 0, pageW, 15, 'F');
+
+    // Advanced Text Wrapper for Terms & Conditions (handles bolding of prices)
+    const drawTerm = (doc, yStart, prefix, text, textWidth = 188 - termIndent) => {
+        doc.setFontSize(9);
+        doc.setTextColor(primaryColor);
+        doc.setFont("helvetica", "bold");
+        doc.text(prefix, margin, yStart);
+        
+        // Start text after prefix
+        let textX = margin + 5; 
+        
+        // Ensure standard text wrapping is used for the rest
+        const lines = doc.splitTextToSize(text, textWidth);
+        let currentY = yStart;
+        const lineSpacing = 4.5;
+        
+        lines.forEach((line, index) => {
+            let currentX = margin + termIndent; 
+            if (index === 0) {
+                // If the first line, draw it right after the prefix
+                currentX = textX; 
+            } else {
+                currentX = margin + termIndent;
+            }
+
+            // Calculate where the text should start on the first line after the prefix
+            if (index === 0) {
+                const prefixWidth = doc.getStringUnitWidth(prefix) * doc.getFontSize() / doc.internal.scaleFactor;
+                currentX = margin + prefixWidth + 1; // Start right after the bold prefix
+            } else {
+                currentX = margin + termIndent;
+            }
+
+            doc.setTextColor(primaryColor);
+            doc.setFont("helvetica", "normal");
+            doc.text(line, currentX, currentY);
+
+            currentY += lineSpacing;
+        });
+        
+        return currentY + 1; // Advance Y position by a little extra padding
+    };
+
+    // =================================================================
+    // HEADER SECTION
+    // =================================================================
+    
+    // Top Bar (Color #183263)
+    doc.setFillColor(primaryColor);
+    doc.rect(0, 0, pageW, 15, 'F');
+    
     drawText('WanBite Investments Co. Ltd.', pageW / 2, 8, 18, 'bold', '#FFFFFF', 'center');
     drawText('carskenya.co.ke', pageW / 2, 13, 10, 'normal', '#FFFFFF', 'center');
-    let y = 25; drawText(data.docType.toUpperCase(), pageW / 2, y, 24, "bold", secondaryColor, "center");
-    y += 10; doc.setDrawColor(primaryColor); doc.setLineWidth(0.5); doc.rect(10, y, 188, 15);
-    drawText('INVOICE NO:', 13, y + 5, 10, 'bold', secondaryColor); drawText(data.invoiceId, 13, y + 11, 14, 'bold', primaryColor);
-    drawText('DATE:', pageW - 60, y + 5, 10, 'bold', secondaryColor); drawText(data.issueDate, pageW - 60, y + 11, 10, 'bold', primaryColor);
-    y += 20; doc.setLineWidth(0.2); doc.rect(10, y, 90, 25);
-    drawText('BILL TO:', 13, y + 5, 10, 'bold', secondaryColor); drawText(data.clientName, 13, y + 10, 10, 'bold', 0); drawText(data.clientPhone, 13, y + 15, 10, 'normal', 0);
-    doc.rect(pageW / 2 + 5, y, 90, 25); drawText('FROM:', pageW / 2 + 8, y + 5, 10, 'bold', secondaryColor);
+    
+    y = 25;
+
+    // INVOICE TITLE
+    doc.setTextColor(secondaryColor);
+    doc.setFontSize(24);
+    doc.setFont("helvetica", "bold");
+    doc.text(data.docType.toUpperCase(), pageW / 2, y, null, null, "center");
+    y += 10;
+    
+    // Invoice/Date/Due Box
+    doc.setDrawColor(primaryColor);
+    doc.setLineWidth(0.5);
+    doc.rect(margin, y, 188, 15);
+    
+    drawText('INVOICE NO:', margin + 3, y + 5, 10, 'bold', secondaryColor);
+    drawText(data.invoiceId, margin + 3, y + 11, 14, 'bold', primaryColor);
+    
+    drawText('ISSUE DATE:', pageW - margin - 50, y + 5, 10, 'bold', secondaryColor);
+    drawText(data.issueDate, pageW - margin - 50, y + 11, 10, 'bold', primaryColor);
+    
+    drawText('DUE DATE:', pageW - margin - 15, y + 5, 10, 'bold', secondaryColor, 'right');
+    drawText(data.dueDate, pageW - margin - 15, y + 11, 10, 'bold', primaryColor, 'right');
+    y += 20;
+
+    // =================================================================
+    // BILLING & SELLER INFO
+    // =================================================================
+    
+    // Bill To Box (Left)
+    doc.setDrawColor(primaryColor);
+    doc.setLineWidth(0.2);
+    doc.rect(margin, y, 90, 25);
+    drawText('BILL TO:', margin + 3, y + 5, 10, 'bold', secondaryColor);
+    drawText(data.clientName, margin + 3, y + 10, 10, 'bold', 0);
+    drawText(data.clientPhone, margin + 3, y + 15, 10, 'normal', 0);
+    
+    // Seller Info Box (Right)
+    doc.rect(pageW / 2 + 5, y, 90, 25);
+    drawText('FROM:', pageW / 2 + 8, y + 5, 10, 'bold', secondaryColor);
     drawText('WANBITE INVESTMENTS COMPANY LIMITED', pageW / 2 + 8, y + 10, 10, 'bold', 0);
-    y += 30; doc.setFillColor(primaryColor); doc.rect(10, y, 188, 8, 'F');
-    drawText('MAKE & MODEL', 12, y + 5.5, 9, 'bold', 255); drawText('VIN', 50, y + 5.5, 9, 'bold', 255); drawText('PRICE (USD)', 185, y + 5.5, 9, 'bold', 255, 'right');
-    y += 8; doc.setTextColor(0); doc.text(`${data.carDetails.make} ${data.carDetails.model}`, 12, y + 6); doc.text(data.carDetails.vin, 50, y + 6);
-    drawText(data.pricing.totalUSD.toLocaleString(), 185, y + 6, 10, 'normal', 0, 'right');
-    doc.save(`${data.invoiceId}.pdf`);
-}
+    drawText('Ngong Road, Kilimani, Nairobi | sales@carskenya.co.ke', pageW / 2 + 8, y + 15, 8, 'normal', 0);
+    drawText('Phone: 0713147136', pageW / 2 + 8, y + 20, 8, 'normal', 0);
+    
+    y += 30;
 
-async function renderInvoiceHistory() {
-    const formArea = document.getElementById('document-form-area');
-    formArea.innerHTML = `<div class="p-6 border rounded-xl bg-white shadow-lg"><h3 class="text-xl font-semibold mb-6">Invoice History</h3><div id="inv-list"></div></div>`;
-    const snap = await db.collection("invoices").orderBy("createdAt", "desc").limit(10).get();
-    const list = document.getElementById('inv-list');
-    if (snap.empty) { list.innerHTML = `<p>No invoices.</p>`; return; }
-    let html = `<ul class="space-y-3">`;
-    snap.forEach(doc => {
-        const data = doc.data();
-        const json = JSON.stringify(data);
-        html += `<li class="p-3 bg-gray-50 flex justify-between items-center rounded border">
-                    <div><strong>${data.invoiceId}</strong><br><span class="text-xs">${data.clientName}</span></div>
-                    <div class="flex space-x-2">
-                        <button onclick='generateInvoicePDF(${json})' class="bg-primary-blue text-white text-[10px] py-1 px-3 rounded-full">PDF</button>
-                        <button onclick='initReceiptFromInvoice(${json})' class="bg-green-600 text-white text-[10px] py-1 px-3 rounded-full">Create Receipt</button>
-                    </div>
-                </li>`;
+    // =================================================================
+    // ITEM TABLE (Vehicle Details)
+    // =================================================================
+    
+    // Table Header
+    doc.setFillColor(primaryColor);
+    doc.rect(margin, y, 188, 8, 'F');
+    doc.setTextColor(255);
+    drawText('MAKE & MODEL', 12, y + 5.5, 9, 'bold', 255);
+    drawText('VIN / YEAR', 50, y + 5.5, 9, 'bold', 255);
+    drawText('Specs (CC/Fuel/Trans)', 85, y + 5.5, 9, 'bold', 255);
+    drawText('Mileage/Color', 135, y + 5.5, 9, 'bold', 255);
+    drawText('QTY', 160, y + 5.5, 9, 'bold', 255);
+    drawText('PRICE (USD)', 185, y + 5.5, 9, 'bold', 255, 'right');
+    y += 8;
+
+    // Table Row
+    doc.setFillColor(255);
+    doc.rect(margin, y, 188, 8, 'F');
+    doc.setTextColor(0);
+    drawText(`${data.carDetails.make} ${data.carDetails.model}`, 12, y + 5.5, 10);
+    drawText(`${data.carDetails.vin} / ${data.carDetails.year}`, 50, y + 5.5, 10);
+    drawText(`${data.carDetails.cc} CC / ${data.carDetails.fuel} / ${data.carDetails.transmission}`, 85, y + 5.5, 10);
+    drawText(`${data.carDetails.mileage}km / ${data.carDetails.color}`, 135, y + 5.5, 10);
+    drawText(`${data.carDetails.quantity}`, 160, y + 5.5, 10);
+    drawText(`${data.carDetails.priceUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })}`, 185, y + 5.5, 10, 'normal', 0, "right");
+    y += 8;
+
+    // Description of Goods
+    doc.setTextColor(primaryColor);
+    drawText('DESCRIPTION:', margin, y + 5, 9, 'bold');
+    doc.setTextColor(0);
+    doc.setFontSize(9);
+    const descriptionLines = doc.splitTextToSize(data.carDetails.goodsDescription || 'N/A', 188);
+    descriptionLines.forEach((line, index) => {
+        doc.text(line, margin, y + 5 + (index + 1) * 4);
     });
-    list.innerHTML = html + `</ul>`;
-}
+    y += descriptionLines.length * 4 + 7;
 
-function initReceiptFromInvoice(data) {
-    window.pendingReceiptRef = data.invoiceId;
-    renderReceiptForm();
-    document.getElementById('receivedFrom').value = data.clientName;
-    document.getElementById('beingPaidFor').value = `Payment for ${data.carDetails.model} (Invoice ${data.invoiceId})`;
+    // =================================================================
+    // TOTALS & PAYMENTS (Bottom Right)
+    // =================================================================
+    const totalBoxW = 60;
+    const totalsX = pageW - margin - totalBoxW;
+
+    // Line 1: Subtotal
+    doc.setDrawColor(200);
+    doc.setLineWidth(0.1);
+    doc.rect(totalsX, y, totalBoxW, lineHeight);
+    drawText('SUBTOTAL (USD)', totalsX + 2, y + 3.5, 9, 'normal', 0);
+    drawText(data.pricing.totalUSD.toLocaleString('en-US', { minimumFractionDigits: 2 }), totalsX + totalBoxW - 2, y + 3.5, 9, 'bold', 0, 'right');
+    y += lineHeight;
+
+    // Line 2: Deposit
+    doc.rect(totalsX, y, totalBoxW, lineHeight);
+    drawText('DEPOSIT (50% USD)', totalsX + 2, y + 3.5, 9, 'normal', 0);
+    drawText(data.pricing.depositUSD.toLocaleString('en-US', { minimumFractionDigits: 2 }), totalsX + totalBoxW - 2, y + 3.5, 9, 'bold', secondaryColor, 'right');
+    y += lineHeight;
+
+    // Line 3: Balance
+    doc.rect(totalsX, y, totalBoxW, lineHeight);
+    drawText('BALANCE DUE (USD)', totalsX + 2, y + 3.5, 9, 'normal', 0);
+    drawText(data.pricing.balanceUSD.toLocaleString('en-US', { minimumFractionDigits: 2 }), totalsX + totalBoxW - 2, y + 3.5, 9, 'bold', primaryColor, 'right');
+    y += lineHeight;
+
+    // Line 4: Deposit KES Equivalent
+    doc.setFillColor(230, 240, 255);
+    doc.rect(totalsX, y, totalBoxW, lineHeight, 'F');
+    doc.rect(totalsX, y, totalBoxW, lineHeight);
+    drawText('DEPOSIT (KES EQUIV)', totalsX + 2, y + 3.5, 9, 'bold', primaryColor);
+    drawText(parseFloat(data.pricing.depositKSH).toLocaleString('en-US', { minimumFractionDigits: 2 }), totalsX + totalBoxW - 2, y + 3.5, 9, 'bold', primaryColor, 'right');
+    y += lineHeight;
+    y += 5; // Extra space
+
+    // =================================================================
+    // TERMS & CONDITIONS (Left)
+    // =================================================================
+    drawText('TERMS & CONDITIONS', margin, y, 12, 'bold', primaryColor);
+    y += lineHeight;
+    
+    // Term 1: Total Price
+    const totalPriceText = `The total price of the vehicle is USD ${data.pricing.totalUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+    y = drawTerm(doc, y, '1.', totalPriceText, 188 - termIndent);
+
+    // Term 2: Payment Schedule
+    const depositText = `A deposit of USD ${data.pricing.depositUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })} (KES ${data.pricing.depositKSH.toLocaleString('en-US', { minimumFractionDigits: 2 })} equivalent) is required to secure the vehicle and begin shipping/clearing. The balance of USD ${data.pricing.balanceUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })} is due on or before ${data.dueDate} or upon production of the Bill of Lading. The seller shall promptly notify the buyer of the date for due compliance.`;
+    y = drawTerm(doc, y, '2.', depositText);
+
+    // Term 3: BOL Release
+    y = drawTerm(doc, y, '3.', 'The original Bill of Lading will be issued to the buyer upon confirmation of full receipt of the purchase price.');
+
+    // Term 4: Cancellation/Forfeiture
+    y = drawTerm(doc, y, '4.', 'If you cancel to buy before or after shipment after purchase is confirmed, your deposit is to be forfeited.');
+
+    // Term 5: As Is Condition
+    y = drawTerm(doc, y, '5.', 'All the vehicles are subject to AS IS CONDITION.');
+
+    // Term 6: Third Party Payment
+    y = drawTerm(doc, y, '6.', 'Payment will be made by the invoiced person. If a third party makes a payment, please kindly inform us the relationship due to security reasons.');
+    
+    y += 5;
+
+    // =================================================================
+    // PAYMENT INSTRUCTIONS 
+    // =================================================================
+    doc.setFillColor(255, 245, 230);
+    doc.rect(margin, y, 188, 40, 'F'); // Increased height for more lines
+    doc.setDrawColor(secondaryColor);
+    doc.setLineWidth(0.5);
+    doc.rect(margin, y, 188, 40);
+    let currentY_bank = y + 5;
+    
+    // Title
+    drawText('KINDLY PAY USD / KSH TO THE FOLLOWING BANK ACCOUNT:', 15, currentY_bank, 11, 'bold', primaryColor);
+    currentY_bank += 5; // Move down after the title
+    
+    // Exchange Rate Note - far right
+    doc.setFontSize(8);
+    doc.setTextColor(primaryColor);
+    doc.text(`Exchange rate used USD 1 = KES ${data.exchangeRate.toFixed(2)}`, 190 - margin, currentY_bank - 2, null, null, "right");
+    
+    // Bank Details
+    doc.setFontSize(10);
+    doc.setTextColor(0);
+    const bank = data.bankDetails;
+    const branchText = bank.branch ? `(Branch: ${bank.branch})` : '';
+
+    doc.text(`Bank Name: ${bank.name || 'N/A'} ${branchText}`, margin + 5, currentY_bank);
+    currentY_bank += 4;
+    doc.text(`Account Name: ${bank.accountName || 'N/A'}`, margin + 5, currentY_bank);
+    currentY_bank += 4;
+    doc.text(`Account Number: ${bank.accountNumber || 'N/A'}`, margin + 5, currentY_bank);
+    currentY_bank += 4;
+    doc.text(`SWIFT/BIC Code: ${bank.swiftCode || 'N/A'} | Currency: ${bank.currency || 'N/A'}`, margin + 5, currentY_bank);
+
+    drawText('**NOTE: Buyer Should bear the cost of Bank Charge when remitting T/T', margin, y + 40 - 5, 9, 'bold', secondaryColor);
+    y += 45;
+
+    // =================================================================
+    // CONFIRMATION SIGNATURES
+    // =================================================================
+    doc.setDrawColor(primaryColor);
+    
+    // Buyer Signature
+    doc.line(margin, y + 15, 90, y + 15);
+    drawText(`Accepted and Confirmed by Buyer: ${data.buyerNameConfirmation}`, margin, y + 19, 10);
+    
+    // Seller Signature
+    doc.line(110, y + 15, 190, y + 15);
+    drawText('Seller: WANBITE INVESTMENTS COMPANY LIMITED', 110, y + 19, 10);
+    y += 30;
+
+    // =================================================================
+    // FOOTER
+    // =================================================================
+    doc.setFillColor(primaryColor);
+    doc.rect(0, doc.internal.pageSize.getHeight() - 10, pageW, 10, 'F');
+    doc.setTextColor(255);
+    doc.setFontSize(9);
+    const footerText = `Location: Ngong Road, Kilimani, Nairobi. | Email: sales@carskenya.co.ke | Phone: 0713147136`;
+    doc.text(footerText, pageW / 2, doc.internal.pageSize.getHeight() - 4, null, null, "center");
+
+    doc.save(`${data.docType}_${data.invoiceId}.pdf`);
 }
 
 // =================================================================
-//                 10. CAR SALES AGREEMENT MODULE
+//                 8. INVOICE HISTORY MODULE (UPDATED)
 // =================================================================
 
-function renderAgreementForm() {
+/**
+ * Renders the container for the Invoice History list.
+ */
+function renderInvoiceHistory() {
     const formArea = document.getElementById('document-form-area');
-    const displayRef = window.pendingAgreementRef || "";
+    formArea.innerHTML = `
+        <div class="p-6 border border-gray-300 rounded-xl bg-white shadow-lg">
+            <h3 class="text-xl font-semibold mb-6 text-primary-blue">Previously Saved Invoices</h3>
+            <div id="invoice-history-list">
+                <p class="text-center text-gray-500">Loading invoice history...</p>
+            </div>
+        </div>
+    `;
+    fetchInvoices();
+}
 
+/**
+ * Fetches and displays recent invoices.
+ */
+async function fetchInvoices() {
+    const listElement = document.getElementById('invoice-history-list');
+    let html = ``;
+    try {
+        const snapshot = await db.collection("invoices").orderBy("createdAt", "desc").limit(10).get();
+        if (snapshot.empty) {
+            listElement.innerHTML = `<p class="text-gray-500">No recent invoices found.</p>`;
+            return;
+        }
+        
+        html = `<ul class="space-y-3 divide-y divide-gray-200">`;
+        snapshot.forEach(doc => {
+            const data = doc.data();
+            const invoiceDataJson = JSON.stringify({
+                ...data, 
+                firestoreId: doc.id,
+                createdAt: data.createdAt ? data.createdAt.toDate().toISOString() : new Date().toISOString()
+            });
+
+            html += `<li class="p-3 bg-gray-50 flex flex-col sm:flex-row justify-between items-start sm:items-center">
+                        <div>
+                            <strong class="text-primary-blue">${data.docType} ${data.invoiceId}</strong><br>
+                            <span class="text-sm text-gray-700">Client: ${data.clientName} | Vehicle: ${data.carDetails.make} ${data.carDetails.model}</span>
+                        </div>
+                        <div class="mt-2 sm:mt-0 space-x-2">
+                            <button onclick='reDownloadInvoice(${invoiceDataJson})' 
+                                    class="bg-primary-blue hover:bg-blue-600 text-white text-xs py-1 px-3 rounded-full transition duration-150">
+                                Re-Download PDF
+                            </button>
+                            <button onclick='createReceiptFromInvoice(${invoiceDataJson})' 
+                                    class="bg-secondary-red hover:bg-red-700 text-white text-xs py-1 px-3 rounded-full transition duration-150">
+                                Create Receipt
+                            </button>
+                        </div>
+                    </li>`;
+        });
+        html += `</ul>`;
+        listElement.innerHTML = html;
+    } catch (error) {
+        console.error("Error fetching invoices:", error);
+        listElement.innerHTML = `<p class="text-red-500">Error loading invoice history. Check console for details.</p>`;
+    }
+}
+
+/**
+ * Re-downloads the PDF for a selected invoice document.
+ * @param {object} data - The invoice data object retrieved from Firestore.
+ */
+function reDownloadInvoice(data) {
+    // The issueDate is stored as a string in Firestore and should be available directly in data.
+    // If it was stored as a date object in the history fetch, it needs conversion back to a string for consistency
+    if (data.issueDate) {
+        // Assume it's already a formatted string from the original save/history fetch
+    } else if (data.createdAt && typeof data.createdAt === 'string') {
+        // If we serialized the Firestore Timestamp as ISO string, use that date
+        data.issueDate = new Date(data.createdAt).toLocaleDateString('en-US');
+    }
+    generateInvoicePDF(data);
+}
+
+// =================================================================
+//                 9. CAR SALES AGREEMENT BANK HELPER (FROM bankDetails)
+// =================================================================
+
+// (The _getBankDetailsData function is reused from Section 6)
+
+// =================================================================
+//                 10. CAR SALES AGREEMENT MODULE (UPDATED - REMOVED ADD PAYMENT)
+// =================================================================
+
+let agreementPaymentCounter = 1;
+
+/**
+ * Renders the Car Sales Agreement form.
+ */
+function renderAgreementForm(receiptReference = '') {
+    const formArea = document.getElementById('document-form-area');
     formArea.innerHTML = `
         <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div class="p-6 border border-gray-300 rounded-xl bg-white shadow-md">
                 <h3 class="text-xl font-semibold mb-4 text-primary-blue">New Car Sales Agreement</h3>
                 <form id="agreement-form" onsubmit="event.preventDefault(); saveAgreement()">
+                    
                     <fieldset class="border p-4 rounded-lg mb-4 bg-blue-50">
-                        <legend class="text-base font-semibold text-primary-blue px-2">Parties & Date</legend>
+                        <legend class="text-base font-semibold text-primary-blue px-2">Agreement Parties & Date</legend>
+                        
+                        <label for="agreementDateInput" class="block text-sm font-medium text-gray-700 mb-2">Agreement Date:</label>
                         <input type="date" id="agreementDateInput" required value="${new Date().toISOString().slice(0, 10)}" class="mb-4 block w-full p-2 border rounded-md">
-                        <input type="text" id="buyerName" required placeholder="Buyer Name" class="mb-2 block w-full p-2 border rounded-md">
-                        <input type="text" id="buyerPhone" required placeholder="Buyer Phone" class="mb-2 block w-full p-2 border rounded-md">
-                        <input type="text" id="buyerAddress" required placeholder="Buyer Address" class="block w-full p-2 border rounded-md">
+                        
+                        <h4 class="font-bold text-sm mt-2 text-secondary-red">SELLER: WanBite Investments Company Limited</h4>
+                        <div class="grid grid-cols-2 gap-3 mt-1 mb-4">
+                            <input type="text" id="sellerAddress" value="Ngong Road, Kilimani, Nairobi" required placeholder="Seller Address" class="p-2 border rounded-md text-sm">
+                            <input type="text" id="sellerPhone" value="0713147136" required placeholder="Seller Phone" class="p-2 border rounded-md text-sm">
+                        </div>
+                        
+                        <h4 class="font-bold text-sm mt-2 text-primary-blue">BUYER:</h4>
+                        <div class="grid grid-cols-2 gap-3 mt-1">
+                            <input type="text" id="buyerName" required placeholder="Buyer Name" class="p-2 border rounded-md">
+                            <input type="text" id="buyerPhone" required placeholder="Buyer Phone" class="p-2 border rounded-md">
+                            <input type="text" id="buyerAddress" required placeholder="Buyer Address" class="p-2 border rounded-md col-span-2">
+                        </div>
                     </fieldset>
+                    
                     <fieldset class="border p-4 rounded-lg mb-4">
-                        <legend class="text-base font-semibold text-primary-blue px-2">Vehicle</legend>
-                        <input type="text" id="carMakeModel" required placeholder="Make and Model" class="mb-2 block w-full p-2 border rounded-md">
-                        <input type="text" id="carVIN" required placeholder="VIN/Chassis No" class="block w-full p-2 border rounded-md">
-                    </fieldset>
-                    <fieldset class="border p-4 rounded-lg mb-4 bg-yellow-50">
-                        <legend class="text-base font-semibold text-secondary-red px-2">Payments</legend>
-                        <select id="currencySelect" class="w-full p-2 border rounded-md mb-2">
-                            <option value="KES">KES</option><option value="USD">USD</option>
+                        <legend class="text-base font-semibold text-primary-blue px-2">Vehicle Details</legend>
+                        <div class="grid grid-cols-2 gap-3">
+                            <input type="text" id="carMakeModel" required placeholder="Make and Model (e.g., Toyota Vitz)" class="p-2 border rounded-md">
+                            <input type="number" id="carYear" required placeholder="Year of Manufacture" class="p-2 border rounded-md">
+                            <input type="text" id="carColor" required placeholder="Color" class="p-2 border rounded-md">
+                            <input type="text" id="carVIN" required placeholder="VIN Number" class="p-2 border rounded-md">
+                        </div>
+                        <select id="carFuelType" required class="block w-full p-2 border rounded-md mt-3">
+                            <option value="" disabled selected>Select Fuel Type</option>
+                            <option value="Petrol">Petrol</option>
+                            <option value="Diesel">Diesel</option>
+                            <option value="Hybrid">Hybrid</option>
                         </select>
-                        <div id="payment-schedule-rows" class="space-y-2">
-                            <div class="grid grid-cols-3 gap-2 payment-row">
-                                <input type="text" required value="Deposit" class="p-2 border rounded-md text-xs">
-                                <input type="number" step="0.01" required placeholder="Amount" class="p-2 border rounded-md text-xs payment-amount">
-                                <input type="date" required class="p-2 border rounded-md text-xs">
+                    </fieldset>
+
+                    <fieldset class="border p-4 rounded-lg mb-4 bg-yellow-50">
+                        <legend class="text-base font-semibold text-secondary-red px-2">Payment Details</legend>
+                        <div class="mb-3">
+                            <label for="currencySelect" class="block text-sm font-medium text-gray-700">Currency</label>
+                            <select id="currencySelect" required class="block w-full p-2 border rounded-md" onchange="calculatePaymentTotal()">
+                                <option value="KES">KES - Kenya Shillings</option>
+                                <option value="USD">USD - US Dollars</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label for="agreementBankDetailsSelect" class="block text-sm font-medium text-gray-700">Select Bank Account for Payment</label>
+                            <select id="agreementBankDetailsSelect" required class="mt-1 block w-full p-2 border rounded-md"></select>
+                        </div>
+                        
+                        <div class="flex justify-between items-center mb-2">
+                            <strong class="text-md text-gray-700">Payment Schedule</strong>
+                            <button type="button" onclick="addPaymentRow()" class="text-primary-blue hover:text-blue-700 font-bold text-sm">+ Add Payment</button>
+                        </div>
+                        
+                        <div id="payment-schedule-rows" class="space-y-2 mb-3">
+                            <div class="grid grid-cols-4 gap-2 payment-row" data-id="1">
+                                <input type="text" required placeholder="e.g. Deposit" value="Deposit" class="p-2 border rounded-md col-span-2 text-sm">
+                                <input type="number" step="0.01" required placeholder="Amount" oninput="calculatePaymentTotal()" class="payment-amount p-2 border rounded-md text-sm">
+                                <input type="date" required class="payment-date p-2 border rounded-md text-sm">
                             </div>
                         </div>
-                        <button type="button" onclick="addAgreementRow()" class="mt-2 text-xs font-bold text-blue-600">+ Add Row</button>
+
+                        <div class="mt-4 p-2 bg-yellow-200 rounded-md">
+                            <strong class="text-secondary-red">Total Price: </strong> 
+                            <span id="total-amount" class="font-bold text-lg text-secondary-red">0.00 KES</span>
+                        </div>
                     </fieldset>
-                    <p class="text-xs text-blue-600 mb-2">${displayRef ? 'Agreement Reference: ' + displayRef : ''}</p>
-                    <button type="submit" class="w-full bg-primary-blue text-white font-bold py-3 rounded-lg">Save Agreement</button>
+
+                    <fieldset class="border p-4 rounded-lg mb-6">
+                        <legend class="text-base font-semibold text-primary-blue px-2">Witnesses</legend>
+                        <input type="text" id="sellerWitness" required placeholder="Seller Witness Name" class="mt-2 block w-full p-2 border rounded-md">
+                        <input type="text" id="buyerWitness" required placeholder="Buyer Witness Name" class="mt-2 block w-full p-2 border rounded-md">
+                    </fieldset>
+
+                    <button type="submit" class="w-full bg-primary-blue hover:bg-blue-900 text-white font-bold py-3 rounded-lg transition duration-150">
+                        Generate & Save Agreement
+                    </button>
                 </form>
             </div>
             <div class="p-6 border border-gray-300 rounded-xl bg-white shadow-md">
-                <h3 class="text-xl font-semibold mb-4 text-primary-blue">History</h3>
-                <div id="ag-list"></div>
+                <h3 class="text-xl font-semibold mb-4 text-primary-blue">Recent Sales Agreements</h3>
+                <div id="recent-agreements">
+                    <p class="text-center text-gray-500">Loading agreements...</p>
+                </div>
             </div>
         </div>
-    `;
+    `; 
+    
+    // Populate the dropdown
+    populateBankDropdown('agreementBankDetailsSelect'); 
+    calculatePaymentTotal();
     fetchAgreements();
 }
 
-function addAgreementRow() {
-    const row = document.createElement('div');
-    row.className = 'grid grid-cols-3 gap-2 payment-row mt-2';
-    row.innerHTML = `<input type="text" required placeholder="Description" class="p-2 border rounded-md text-xs">
-                     <input type="number" step="0.01" required placeholder="Amount" class="p-2 border rounded-md text-xs payment-amount">
-                     <input type="date" required class="p-2 border rounded-md text-xs">`;
-    document.getElementById('payment-schedule-rows').appendChild(row);
+/**
+ * Adds a new payment row to the schedule table.
+ */
+function addPaymentRow() {
+    agreementPaymentCounter++;
+    const container = document.getElementById('payment-schedule-rows');
+    const newRow = document.createElement('div');
+    newRow.className = 'grid grid-cols-4 gap-2 payment-row';
+    newRow.dataset.id = agreementPaymentCounter;
+    newRow.innerHTML = `
+        <input type="text" required placeholder="e.g. Balance" class="p-2 border rounded-md col-span-2 text-sm">
+        <input type="number" step="0.01" required placeholder="Amount" oninput="calculatePaymentTotal()" class="payment-amount p-2 border rounded-md text-sm">
+        <input type="date" required class="payment-date p-2 border rounded-md text-sm">
+        <button type="button" onclick="deletePaymentRow(${agreementPaymentCounter})" class="text-red-500 hover:text-red-700 text-sm">X</button>
+    `;
+    container.appendChild(newRow);
 }
 
-async function saveAgreement() {
-    const buyerName = document.getElementById('buyerName').value;
-    const agreementId = window.pendingAgreementRef || await generateSequentialId("sales_agreements", "AGR");
+/**
+ * Deletes a specific or the last payment row from the schedule table.
+ */
+function deletePaymentRow(idToDelete) {
+    const container = document.getElementById('payment-schedule-rows');
+    const rows = container.querySelectorAll('.payment-row');
+    if (rows.length === 1) {
+        alert("The agreement must have at least one payment row.");
+        return;
+    }
+    let rowToRemove;
+    if (idToDelete) {
+        rowToRemove = container.querySelector(`.payment-row[data-id="${idToDelete}"]`);
+    } else {
+        rowToRemove = rows[rows.length - 1];
+    }
+    if (rowToRemove) {
+        rowToRemove.remove();
+        calculatePaymentTotal();
+    }
+}
+
+/**
+ * Calculates and updates the total amount of the payment schedule.
+ */
+function calculatePaymentTotal() {
+    const paymentAmounts = document.querySelectorAll('.payment-amount');
+    const currency = document.getElementById('currencySelect').value;
+    const totalSpan = document.getElementById('total-amount');
     
-    const schedule = [];
-    document.querySelectorAll('.payment-row').forEach(row => {
-        const inputs = row.querySelectorAll('input');
-        schedule.push({ description: inputs[0].value, amount: parseFloat(inputs[1].value), date: inputs[2].value });
+    let total = 0;
+    paymentAmounts.forEach(input => {
+        total += parseFloat(input.value) || 0;
     });
 
-    const data = {
-        agreementId,
-        buyer: { name: buyerName, phone: document.getElementById('buyerPhone').value, address: document.getElementById('buyerAddress').value },
-        seller: { address: "Ngong Road, Nairobi", phone: "0713147136" },
-        vehicle: { makeModel: document.getElementById('carMakeModel').value, vin: document.getElementById('carVIN').value },
-        salesTerms: { currency: document.getElementById('currencySelect').value, paymentSchedule: schedule, price: schedule.reduce((s,p) => s+p.amount,0) },
-        agreementDate: document.getElementById('agreementDateInput').value,
+    totalSpan.textContent = `${total.toLocaleString('en-US', { minimumFractionDigits: 2 })} ${currency}`;
+}
+
+
+/**
+ * Handles form submission and saves the sales agreement to Firestore.
+ */
+async function saveAgreement() {
+    const form = document.getElementById('agreement-form');
+    if (!form.checkValidity()) {
+        form.reportValidity();
+        return;
+    }
+
+    // --- CORRECTION 1: READ THE DATE INPUT VALUE ---
+    const agreementDate = document.getElementById('agreementDateInput').value; // Get YYYY-MM-DD format
+
+    // 1. Collect Buyer Details
+    const buyerName = document.getElementById('buyerName').value;
+    const buyerPhone = document.getElementById('buyerPhone').value;
+    
+    // 2. Collect Vehicle Details
+    const carMakeModel = document.getElementById('carMakeModel').value;
+    const carYear = document.getElementById('carYear').value;
+    const carColor = document.getElementById('carColor').value;
+    const carVIN = document.getElementById('carVIN').value;
+    const carFuelType = document.getElementById('carFuelType').value;
+
+    // 3. Collect Payment Schedule
+    const paymentSchedule = [];
+    let totalAmount = 0;
+    document.querySelectorAll('#payment-schedule-rows .payment-row').forEach(row => {
+        const inputs = row.querySelectorAll('input[type="text"], input[type="number"], input[type="date"]');
+        const description = inputs[0].value;
+        const amount = parseFloat(inputs[1].value);
+        const date = inputs[2].value;
+
+        paymentSchedule.push({ description, amount, date });
+        totalAmount += amount;
+    });
+
+    // 4. Collect other details
+    const selectedBankValue = document.getElementById('agreementBankDetailsSelect').value;
+    const currency = document.getElementById('currencySelect').value;
+
+    // --- CORRECTION 2: Parse the full bank details from the dropdown value ---
+    let bankDetails = {};
+    let bankId = '';
+
+    try {
+        bankDetails = JSON.parse(selectedBankValue);
+        bankId = bankDetails.id;
+    } catch (e) {
+        console.error("Error parsing bank details from dropdown:", e);
+        alert("Please select a valid bank account.");
+        return;
+    }
+
+    // 5. Construct Agreement Data Object
+    const agreementData = {
+        // --- Use the date from the input ---
+        agreementDate: agreementDate, 
+        buyer: {
+            name: buyerName,
+            phone: buyerPhone,
+            address: document.getElementById('buyerAddress').value
+        },
+        seller: {
+            address: document.getElementById('sellerAddress').value,
+            phone: document.getElementById('sellerPhone').value
+        },
+        vehicle: {
+            makeModel: carMakeModel,
+            year: carYear,
+            color: carColor,
+            vin: carVIN,
+            fuelType: carFuelType,
+        },
+        salesTerms: {
+            price: totalAmount,
+            currency: currency,
+            bankId: bankId, // <<< Correctly save only the ID
+            paymentSchedule: paymentSchedule,
+        },
+        signatures: {
+            sellerWitness: document.getElementById('sellerWitness').value,
+            buyerWitness: document.getElementById('buyerWitness').value,
+            // Signatures and Dates will be added manually on the printed copy
+        },
+        createdBy: currentUser.email,
         createdAt: firebase.firestore.FieldValue.serverTimestamp()
     };
 
-    await db.collection("sales_agreements").add(data);
-    generateAgreementPDF(data);
-    window.pendingAgreementRef = null;
-    fetchAgreements();
+    try {
+        const docRef = await db.collection("sales_agreements").add(agreementData);
+        alert(`Sales Agreement for ${agreementData.buyer.name} saved successfully!`);
+
+        // Use the parsed bank details object for immediate PDF generation
+        agreementData.firestoreId = docRef.id;
+        agreementData.bankDetails = bankDetails; // <<< Attach full details for PDF
+        generateAgreementPDF(agreementData);
+
+        form.reset();
+        calculatePaymentTotal();
+        fetchAgreements(); // Refresh history
+    } catch (error) {
+        console.error("Error saving sales agreement:", error);
+        alert("Failed to save sales agreement: " + error.message);
+    }
 }
 
+/**
+ * Fetches and displays recent sales agreements.
+ */
 async function fetchAgreements() {
-    const list = document.getElementById('ag-list');
-    const snap = await db.collection("sales_agreements").orderBy("createdAt", "desc").limit(10).get();
-    let html = `<ul class="space-y-3">`;
-    snap.forEach(doc => {
-        const d = doc.data();
-        html += `<li class="p-3 border rounded bg-gray-50 flex justify-between items-center">
-                    <div><strong>${d.agreementId}</strong><br><span class="text-xs">${d.buyer.name}</span></div>
-                    <button onclick='generateAgreementPDF(${JSON.stringify(d)})' class="bg-primary-blue text-white text-[10px] py-1 px-3 rounded-full">PDF</button>
-                </li>`;
-    });
-    list.innerHTML = html + "</ul>";
+    const agreementList = document.getElementById('recent-agreements');
+    let html = ``;
+    try {
+        const snapshot = await db.collection("sales_agreements").orderBy("createdAt", "desc").limit(10).get();
+        if (snapshot.empty) {
+            agreementList.innerHTML = `<p class="text-gray-500">No recent agreements found.</p>`;
+            return;
+        }
+        
+        html = `<ul class="space-y-3">`;
+        snapshot.forEach(doc => {
+            const data = doc.data();
+            const agreementDataJson = JSON.stringify({
+                ...data, 
+                firestoreId: doc.id,
+                createdAt: data.createdAt ? data.createdAt.toDate().toISOString() : new Date().toISOString()
+            });
+
+            html += `<li class="p-3 border rounded-lg bg-gray-50 flex flex-col sm:flex-row justify-between items-start sm:items-center">
+                        <div>
+                            <strong class="text-primary-blue">Agreement ID: ${doc.id.substring(0, 8)}...</strong><br>
+                            <span class="text-sm text-gray-700">Buyer: ${data.buyer.name} | Vehicle: ${data.vehicle.makeModel}</span>
+                        </div>
+                        <div class="mt-2 sm:mt-0 space-x-2">
+                            <button onclick='reDownloadAgreement(${agreementDataJson})' 
+                                    class="bg-gray-700 hover:bg-gray-600 text-white text-xs py-1 px-3 rounded-full transition duration-150">
+                                Re-Download PDF
+                            </button>
+                        </div>
+                    </li>`;
+        });
+        html += `</ul>`;
+        agreementList.innerHTML = html;
+    } catch (error) {
+        console.error("Error fetching agreements:", error);
+        agreementList.innerHTML = `<p class="text-red-500">Error loading agreements. Check console for details.</p>`;
+    }
 }
 
+/**
+ * Re-downloads the PDF for a selected sales agreement document.
+ * @param {object} data - The agreement data object retrieved from Firestore.
+ */
+async function reDownloadAgreement(data) {
+    // 1. Check if bankDetails are already present
+    if (data.bankDetails && data.bankDetails.name) {
+        return generateAgreementPDF(data);
+    }
+
+    let bankDetails = null;
+    const bankIdValue = data.salesTerms?.bankId;
+
+    if (bankIdValue) {
+        // Check if the value is a stringified JSON object (to support old, bugged data)
+        if (bankIdValue.startsWith('{') && bankIdValue.endsWith('}')) {
+            try {
+                // If it's the bugged full JSON string, parse it
+                bankDetails = JSON.parse(bankIdValue);
+            } catch (e) {
+                console.warn("Could not parse old bankId JSON string. Falling back to ID fetch.");
+            }
+        }
+        
+        // If bankDetails is still null, assume it's the correct new format (just the ID) or the fallback failed
+        if (!bankDetails) {
+            const banks = await _getBankDetailsData();
+            bankDetails = banks.find(b => b.id === bankIdValue);
+        }
+    }
+    
+    // Attach the fetched/parsed details to the data object
+    data.bankDetails = bankDetails || {}; 
+    generateAgreementPDF(data);
+}
+
+
+/**
+ * Generates and downloads the PDF for the Car Sales Agreement.
+ */
 function generateAgreementPDF(data) {
     const { jsPDF } = window.jspdf;
-    const doc = new jsPDF();
-    const primaryColor = '#183263';
-    doc.setFillColor(primaryColor); doc.rect(0, 0, 210, 15, 'F');
-    doc.setTextColor(255); doc.setFontSize(18); doc.text("WANBITE CAR SALES AGREEMENT", 105, 10, {align: 'center'});
-    doc.setTextColor(0); doc.setFontSize(10);
-    doc.text(`Agreement Ref: ${data.agreementId}`, 10, 25);
-    doc.text(`Buyer: ${data.buyer.name}`, 10, 35);
-    doc.text(`Vehicle: ${data.vehicle.makeModel}`, 10, 45);
-    doc.text(`Total Price: ${data.salesTerms.currency} ${data.salesTerms.price.toLocaleString()}`, 10, 55);
-    let y = 70; doc.text("Payment Schedule:", 10, y);
-    data.salesTerms.paymentSchedule.forEach(p => {
-        y += 7; doc.text(`${p.description}: ${data.salesTerms.currency} ${p.amount.toLocaleString()} (Due: ${p.date})`, 15, y);
+    const doc = new jsPDF('p', 'mm', 'a4'); 
+
+    const primaryColor = '#183263'; // WanBite Blue
+    const secondaryColor = '#D96359'; // Red
+    
+    const pageW = doc.internal.pageSize.getWidth();
+    let y = 10; 
+    const margin = 10;
+    const lineSpacing = 6;
+    const textIndent = 5;
+
+    // --- HELPER FUNCTION ---
+    const drawText = (text, x, y, size, style = 'normal', color = primaryColor, align = 'left') => {
+        doc.setFontSize(size);
+        doc.setFont("helvetica", style);
+        doc.setTextColor(color);
+        doc.text(text, x, y, { align: align });
+    };
+
+    // =================================================================
+    // HEADER SECTION
+    // =================================================================
+    doc.setFillColor(primaryColor);
+    doc.rect(0, 0, pageW, 15, 'F');
+    
+    drawText('WanBite Investments Co. Ltd.', pageW / 2, 8, 18, 'bold', '#FFFFFF', 'center');
+    drawText('carskenya.co.ke', pageW / 2, 13, 10, 'normal', '#FFFFFF', 'center');
+    
+    y = 25;
+
+    // TITLE
+    doc.setTextColor(primaryColor);
+    doc.setFontSize(18);
+    doc.setFont("helvetica", "bold");
+    doc.text("CAR SALES AGREEMENT", pageW / 2, y, null, null, "center");
+    y += 10;
+
+    // =================================================================
+    // PARTIES DETAILS
+    // =================================================================
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(primaryColor);
+    // Use the collected date
+    doc.text(`This Car Sales Agreement is made on the ${data.agreementDate}, between;`, margin, y);
+    y += lineSpacing;
+
+    // Seller Info
+    doc.setFont("helvetica", "bold");
+    doc.text("THE SELLER:", margin, y);
+    doc.setFont("helvetica", "normal");
+    doc.text("WANBITE INVESTMENTS COMPANY LIMITED", margin + 25, y);
+    y += lineSpacing;
+    doc.text(`Address: ${data.seller.address}`, margin + 5, y);
+    doc.text(`Phone: ${data.seller.phone}`, margin + 100, y);
+    y += lineSpacing + 2;
+
+    // Buyer Info
+    doc.setFont("helvetica", "bold");
+    doc.text("THE BUYER:", margin, y);
+    doc.setFont("helvetica", "normal");
+    doc.text(data.buyer.name, margin + 25, y);
+    y += lineSpacing;
+    doc.text(`Address: ${data.buyer.address}`, margin + 5, y);
+    doc.text(`Phone: ${data.buyer.phone}`, margin + 100, y);
+    y += lineSpacing + 4;
+
+    // =================================================================
+    // VEHICLE DETAILS
+    // =================================================================
+    drawText('VEHICLE DETAILS', margin, y, 12, 'bold', primaryColor);
+    y += lineSpacing;
+    doc.setFontSize(10);
+    doc.setTextColor(0);
+
+    doc.text(`Make & Model: ${data.vehicle.makeModel}`, margin + textIndent, y);
+    doc.text(`Year of Manufacture: ${data.vehicle.year}`, margin + 90, y);
+    y += lineSpacing;
+    doc.text(`VIN/Chassis No: ${data.vehicle.vin}`, margin + textIndent, y);
+    doc.text(`Color: ${data.vehicle.color}`, margin + 90, y);
+    y += lineSpacing;
+    doc.text(`Fuel Type: ${data.vehicle.fuelType}`, margin + textIndent, y);
+    y += lineSpacing + 4;
+
+    // =================================================================
+    // PAYMENT DETAILS & SCHEDULE
+    // =================================================================
+    drawText('SALES AGREEMENT & PAYMENT TERMS', margin, y, 12, 'bold', primaryColor);
+    y += lineSpacing;
+
+    // Purchase Price
+    doc.setFontSize(10);
+    doc.setTextColor(0);
+    doc.text("The Purchase Price of ", margin, y);
+    doc.setFont("helvetica", "bold");
+    let totalText = `${data.salesTerms.currency} ${data.salesTerms.price.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+    doc.text(totalText, margin + doc.getStringUnitWidth("The Purchase Price of ") * doc.getFontSize() / doc.internal.scaleFactor, y);
+    doc.setTextColor(0);
+    doc.setFont("helvetica", "normal");
+    const trailingText = ` is to be paid to the bank account below:`;
+    doc.text(trailingText, margin + doc.getStringUnitWidth("The Purchase Price of " + totalText) * doc.getFontSize() / doc.internal.scaleFactor, y);
+    y += lineSpacing;
+
+    // Bank Details Box
+    doc.setFillColor(255, 245, 230);
+    doc.rect(margin, y, pageW - 20, 20, 'F');
+    doc.setDrawColor(secondaryColor);
+    doc.setLineWidth(0.5);
+    doc.rect(margin, y, pageW - 20, 20);
+    doc.setFontSize(9);
+    doc.setTextColor(primaryColor);
+    
+    // Safely access bank details (will show 'N/A' if object is missing or empty)
+    const bank = data.bankDetails || {};
+    const branchText = bank.branch ? `(Branch: ${bank.branch})` : '';
+
+    doc.text(`Bank Name: ${bank.name || 'N/A'} ${branchText}`, margin + 3, y + 4);
+    doc.text(`Account Name: ${bank.accountName || 'N/A'}`, margin + 90, y + 4);
+    doc.text(`Account No: ${bank.accountNumber || 'N/A'}`, margin + 3, y + 9);
+    doc.text(`SWIFT/BIC: ${bank.swiftCode || 'N/A'}`, margin + 90, y + 9);
+    doc.text(`Branch: ${bank.branch || 'N/A'} | Currency: ${data.salesTerms.currency}`, margin + 3, y + 14);
+    y += 25;
+
+    // Payment Schedule Table
+    drawText('Payment Schedule:', margin, y, 10, 'bold', primaryColor);
+    y += 4;
+    
+    doc.setFillColor(230);
+    doc.rect(margin, y, pageW - 20, 6, 'F');
+    doc.setDrawColor(0);
+    doc.rect(margin, y, pageW - 20, 6);
+    drawText('Description', margin + 2, y + 4, 9, 'bold', 0);
+    drawText('Amount', margin + 110, y + 4, 9, 'bold', 0);
+    drawText('Due Date', margin + 160, y + 4, 9, 'bold', 0);
+    y += 6;
+
+    doc.setFontSize(9);
+    data.salesTerms.paymentSchedule.forEach(payment => {
+        doc.rect(margin, y, pageW - 20, 5);
+        doc.text(payment.description, margin + 2, y + 3.5);
+        doc.text(`${data.salesTerms.currency} ${payment.amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}`, margin + 110, y + 3.5);
+        doc.text(payment.date, margin + 160, y + 3.5);
+        y += 5;
     });
-    doc.save(`Agreement_${data.agreementId}.pdf`);
+
+    y += 4;
+    
+    // Additional Terms
+    drawText('GENERAL TERMS', margin, y, 12, 'bold', primaryColor);
+    y += lineSpacing;
+
+    doc.setFontSize(10);
+    doc.setTextColor(0);
+    doc.text('• The Buyer agrees to purchase the vehicle in its current condition.', margin + textIndent, y);
+    y += lineSpacing;
+    doc.text('• The sale is as-is, and the Seller does not provide any warranty unless otherwise agreed in writing.', margin + textIndent, y);
+    y += lineSpacing + 6;
+
+    // =================================================================
+    // SIGNATURES
+    // =================================================================
+    drawText('AGREED AND ACCEPTED', margin, y, 12, 'bold', primaryColor);
+    y += lineSpacing;
+
+    const sigY = y + 10;
+    const sigDateY = sigY + 5;
+    const sigNameY = sigY + 10;
+    
+    // Buyer
+    doc.line(margin, sigY, margin + 70, sigY);
+    drawText('Buyer Signature', margin + 35, sigY + 2, 8, 'normal', 0, 'center');
+    doc.line(margin, sigDateY + 1, margin + 70, sigDateY + 1);
+    drawText('Date', margin + 35, sigDateY + 3, 8, 'normal', 0, 'center');
+    drawText(`Buyer Name: ${data.buyer.name}`, margin, sigNameY + 3, 10, 'bold', primaryColor);
+    drawText(`Witness: ${data.signatures.buyerWitness}`, margin, sigNameY + 7, 10, 'normal', 0);
+
+    // Seller
+    const sellerX = pageW - margin - 70;
+    doc.line(sellerX, sigY, pageW - margin, sigY);
+    drawText('Seller Signature', sellerX + 35, sigY + 2, 8, 'normal', 0, 'center');
+    doc.line(sellerX, sigDateY + 1, pageW - margin, sigDateY + 1);
+    drawText('Date', sellerX + 35, sigDateY + 3, 8, 'normal', 0, 'center');
+    drawText(`Seller: WANBITE INVESTMENTS CO. LTD`, sellerX, sigNameY + 3, 10, 'bold', primaryColor);
+    drawText(`Witness: ${data.signatures.sellerWitness}`, sellerX, sigNameY + 7, 10, 'normal', 0);
+    y += 30;
+    
+    // --- Global Footer ---
+    doc.setFillColor(primaryColor);
+    doc.rect(0, doc.internal.pageSize.getHeight() - 10, pageW, 10, 'F');
+    
+    doc.setTextColor(255);
+    doc.setFontSize(9);
+    const footerText = `Location: Ngong Road, Kilimani, Nairobi. | Email: sales@carskenya.co.ke | Phone: 0713147136`;
+    doc.text(footerText, pageW / 2, doc.internal.pageSize.getHeight() - 4, null, null, "center");
+
+    doc.save(`Car_Sales_Agreement_${data.buyer.name.replace(/\s/g, '_')}.pdf`);
 }
 
-// STUBS FOR HR/FLEET (Removed from dashboard as requested)
-function handleHRManagement() { renderDashboard(); }
-function handleFleetManagement() { renderDashboard(); }
+// =================================================================
+//                 11. FLEET MANAGEMENT MODULE (SIMPLIFIED)
+// =================================================================
+
+function handleFleetManagement() {
+    appContent.innerHTML = `
+        <h2 class="text-3xl font-bold mb-8 text-primary-blue">Fleet Management Dashboard</h2>
+        <div class="p-6 bg-yellow-50 rounded-xl border border-yellow-400">
+            <p class="text-gray-800 font-semibold mb-4">Fleet Management Features:</p>
+            <ul class="list-disc pl-5 space-y-2 text-gray-700">
+                <li>Track vehicles from shipment to delivery</li>
+                <li>Monitor ETA (Estimated Time of Arrival)</li>
+                <li>Update status and add comments for each stage</li>
+                <li>View status history for each vehicle</li>
+                <li>Real-time updates using Firestore</li>
+            </ul>
+            <p class="mt-4 text-sm text-gray-600">Use the navigation to manage your fleet operations.</p>
+        </div>
+    `;
+}
+
+// =================================================================
+//                 12. REMOVED HR MANAGEMENT MODULE
+// =================================================================
