@@ -170,6 +170,9 @@ async function searchDocuments() {
 /**
  * Helper function to perform the actual search
  */
+/**
+ * Helper function to perform the actual search
+ */
 async function performSearch(searchTerm, docTypeFilter) {
     // Get references to DOM elements again (they should exist now)
     const resultsList = document.getElementById('search-results-list');
@@ -216,21 +219,26 @@ async function performSearch(searchTerm, docTypeFilter) {
             return dateB - dateA;
         });
         
-        displaySearchResults(allResults, searchTerm);
+        // Display results
+        if (resultsList) {
+            displaySearchResults(allResults, searchTerm);
+        }
         
     } catch (error) {
         console.error("Error searching documents:", error);
-        resultsList.innerHTML = '<p class="text-red-500 text-center">Error searching documents. Please try again.</p>';
+        if (resultsList) {
+            resultsList.innerHTML = '<p class="text-red-500 text-center">Error searching documents. Please try again.</p>';
+        }
     }
 }
-
+/**
+ * Helper function to display search results
+ */
 /**
  * Helper function to display search results
  */
 function displaySearchResults(results, searchTerm) {
     const resultsList = document.getElementById('search-results-list');
-    const searchResultsDiv = document.getElementById('search-results');
-    const docCreationArea = document.getElementById('document-creation-area');
     
     if (!resultsList) return;
     
