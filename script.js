@@ -1091,7 +1091,24 @@ async function saveReceipt() {
         alert(`Receipt ${receiptId} saved successfully!`);
         
         receiptData.firestoreId = docRef.id;
-        generateReceiptPDF(receiptData);
+        // In saveReceipt() function, find this line:
+generateReceiptPDF(receiptData);
+
+// Change it to add payment history:
+receiptData.firestoreId = docRef.id;
+receiptData.totalPaidUSD = amountReceivedUSD;
+receiptData.totalPaidKSH = amountReceivedKSH;
+receiptData.paymentCount = 1;
+receiptData.paymentHistory = [{
+    paymentDate: receiptDate,
+    amount: amountReceived,
+    currency: currency,
+    amountUSD: amountReceivedUSD,
+    amountKSH: amountReceivedKSH,
+    paymentMethod: bankUsed !== 'Cash' ? `Bank: ${bankUsed}` : (chequeNo ? `Cheque: ${chequeNo}` : (rtgsTtNo ? `RTGS/TT: ${rtgsTtNo}` : "Cash")),
+    description: "Initial Payment"
+}];
+generateReceiptPDF(receiptData);
         
         document.getElementById('receipt-form').reset();
         document.getElementById('amountWords').value = '';
@@ -1314,6 +1331,7 @@ async function viewReceiptPaymentDetails(receiptDocId, receiptNumber, clientName
 }
 
 /**
+/**
  * Downloads receipt PDF with full payment history
  */
 async function downloadReceiptWithHistory(receiptDocId) {
@@ -1326,18 +1344,19 @@ async function downloadReceiptWithHistory(receiptDocId) {
         }
         
         const receiptData = receiptDoc.data();
+        receiptData.firestoreId = receiptDocId;
         
         // Get payment history
         const balances = await calculateReceiptBalances(receiptDocId);
         
         // Add payment history to receipt data for PDF generation
-        receiptData.paymentHistory = balances.payments;
-        receiptData.totalPayments = balances.payments.length;
         receiptData.totalPaidUSD = balances.totalPaidUSD;
         receiptData.totalPaidKSH = balances.totalPaidKSH;
+        receiptData.paymentCount = balances.payments.length;
+        receiptData.paymentHistory = balances.payments;
         
         // Generate enhanced PDF
-        generateReceiptWithHistoryPDF(receiptData);
+        generateReceiptPDF(receiptData);
         
     } catch (error) {
         console.error("Error downloading receipt with history:", error);
@@ -1345,29 +1364,6 @@ async function downloadReceiptWithHistory(receiptDocId) {
     }
 }
 
-/**
- * Generates and downloads a custom PDF for the receipt with payment history.
- */
-function generateReceiptWithHistoryPDF(data) {
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF('p', 'mm', 'a4'); 
-
-    const primaryColor = '#183263'; // WanBite Blue
-    const secondaryColor = '#D96359'; // Red
-    
-    const pageW = doc.internal.pageSize.getWidth();
-    let y = 10; 
-    const margin = 10;
-    const boxW = pageW - (2 * margin);
-    const lineHeight = 7; 
-
-    // --- HELPER FUNCTION ---
-    const drawText = (text, x, y, size, style = 'normal', color = primaryColor, align = 'left') => {
-        doc.setFontSize(size);
-        doc.setFont("helvetica", style);
-        doc.setTextColor(color);
-        doc.text(text, x, y, { align: align });
-    };
 
     // =================================================================
     // HEADER SECTION
@@ -1960,25 +1956,30 @@ function createAgreementFromReceipt(receiptData) {
 }
 
 /**
+/**
  * Re-downloads the PDF for a selected receipt document from history.
  * @param {object} data - The receipt data object retrieved from Firestore.
  */
-function reDownloadReceipt(data) {
+async function reDownloadReceipt(data) {
     // Ensure data.receiptDate is set (should be from the save logic)
     if (!data.receiptDate) {
          data.receiptDate = new Date().toLocaleDateString('en-US'); // Fallback
     }
-  // If we have the firestoreId, fetch payment history
+    
+    // If we have the firestoreId, fetch payment history
     if (data.firestoreId) {
         try {
             const balances = await calculateReceiptBalances(data.firestoreId);
             data.totalPaidUSD = balances.totalPaidUSD;
             data.totalPaidKSH = balances.totalPaidKSH;
             data.paymentCount = balances.paymentCount;
+            data.paymentHistory = balances.payments;
         } catch (error) {
             console.error("Error fetching payment history for PDF:", error);
         }
     }
+    
+    // Now generate the PDF with all the data
     generateReceiptPDF(data);
 }
 
@@ -2042,7 +2043,7 @@ function addPaymentToReceipt(receiptData) {
 /**
  * Generates and downloads a custom PDF for the comprehensive receipt. (WITH PAYMENT HISTORY)
  */
-async function generateReceiptPDF(data) {
+function generateReceiptPDF(data) {
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF('p', 'mm', 'a4'); 
 
@@ -2129,9 +2130,6 @@ async function generateReceiptPDF(data) {
     drawText(data.beingPaidFor, margin + 35, y - 0.5, 12, 'bold', 0);
     y += lineHeight + 4;
 
-// In the generateReceiptWithHistoryPDF function, find the Payment References Section
-// and update it like this:
-
     // =================================================================
     // PAYMENT REFERENCES SECTION (UPDATED BANK DISPLAY)
     // =================================================================
@@ -2185,21 +2183,11 @@ async function generateReceiptPDF(data) {
     const amountBoxH = 15;
     const amountBoxY = y + 5;
     
-    // Get payment history if available
-    let totalPaidUSD = data.amountReceivedUSD || 0;
-    let totalPaidKSH = data.amountReceivedKSH || 0;
-    let paymentCount = 1;
-    
-    if (data.firestoreId) {
-        try {
-            const balances = await calculateReceiptBalances(data.firestoreId);
-            totalPaidUSD = balances.totalPaidUSD;
-            totalPaidKSH = balances.totalPaidKSH;
-            paymentCount = balances.paymentCount;
-        } catch (error) {
-            console.error("Error fetching payment history:", error);
-        }
-    }
+    // Use pre-fetched payment history if available
+    let totalPaidUSD = data.totalPaidUSD || data.amountReceivedUSD || 0;
+    let totalPaidKSH = data.totalPaidKSH || data.amountReceivedKSH || 0;
+    let paymentCount = data.paymentCount || 1;
+    let paymentHistory = data.paymentHistory || [];
     
     // Total Amount Box (Right Side)
     doc.setFillColor(secondaryColor);
@@ -2227,86 +2215,78 @@ async function generateReceiptPDF(data) {
     // =================================================================
     // PAYMENT HISTORY SECTION (NEW)
     // =================================================================
-    if (data.firestoreId && paymentCount > 1) {
-        try {
-            const balances = await calculateReceiptBalances(data.firestoreId);
-            
-            if (balances.payments.length > 0) {
-                y += 5;
-                drawText('PAYMENT HISTORY', margin, y, 12, 'bold', primaryColor);
-                y += 8;
-                
-                // Summary Box
-                doc.setFillColor(240, 240, 240);
-                doc.rect(margin, y, boxW, 10, 'F');
-                doc.setDrawColor(primaryColor);
-                doc.setLineWidth(0.3);
-                doc.rect(margin, y, boxW, 10);
-                
-                doc.setFontSize(9);
-                doc.setTextColor(primaryColor);
-                doc.setFont("helvetica", "bold");
-                doc.text(`Total Payments: ${balances.paymentCount}`, margin + 5, y + 6);
-                doc.text(`Total Paid (USD): ${balances.totalPaidUSD.toFixed(2)}`, margin + 60, y + 6);
-                doc.text(`Total Paid (KES): ${balances.totalPaidKSH.toFixed(2)}`, margin + 120, y + 6);
-                y += 12;
-                
-                // Table Header
-                doc.setFillColor(primaryColor);
-                doc.rect(margin, y, boxW, 6, 'F');
-                doc.setTextColor(255);
-                drawText('#', margin + 2, y + 4, 8, 'bold', 255);
-                drawText('Date', margin + 10, y + 4, 8, 'bold', 255);
-                drawText('Amount', margin + 40, y + 4, 8, 'bold', 255);
-                drawText('USD', margin + 75, y + 4, 8, 'bold', 255);
-                drawText('KES', margin + 105, y + 4, 8, 'bold', 255);
-                drawText('Method', margin + 135, y + 4, 8, 'bold', 255);
-                drawText('Description', margin + 170, y + 4, 8, 'bold', 255);
-                y += 6;
-                
-                // Payment Rows
-                doc.setFontSize(8);
-                doc.setTextColor(0);
-                
-                balances.payments.forEach((payment, index) => {
-                    // Check if we need a new page
-                    if (y > doc.internal.pageSize.getHeight() - 20) {
-                        doc.addPage();
-                        y = 10;
-                    }
-                    
-                    // Alternate row colors
-                    if (index % 2 === 0) {
-                        doc.setFillColor(250, 250, 250);
-                        doc.rect(margin, y, boxW, 5, 'F');
-                    }
-                    
-                    doc.rect(margin, y, boxW, 5);
-                    drawText(`${index + 1}`, margin + 2, y + 3.5, 8);
-                    drawText(payment.paymentDate || 'N/A', margin + 10, y + 3.5, 8);
-                    drawText(`${payment.currency} ${payment.amount.toFixed(2)}`, margin + 40, y + 3.5, 8);
-                    drawText(`USD ${payment.amountUSD?.toFixed(2) || (payment.currency === 'USD' ? payment.amount.toFixed(2) : (payment.amount / (payment.exchangeRate || data.exchangeRate || 130)).toFixed(2))}`, margin + 75, y + 3.5, 8);
-                    drawText(`KES ${payment.amountKSH?.toFixed(2) || (payment.currency === 'KSH' ? payment.amount.toFixed(2) : (payment.amount * (payment.exchangeRate || data.exchangeRate || 130)).toFixed(2))}`, margin + 105, y + 3.5, 8);
-                    
-                    // Truncate method if too long
-                    const method = payment.paymentMethod || 'N/A';
-                    const shortMethod = method.length > 15 ? method.substring(0, 12) + '...' : method;
-                    drawText(shortMethod, margin + 135, y + 3.5, 8);
-                    
-                    // Truncate description if too long
-                    const description = payment.description || 'Payment';
-                    const shortDesc = description.length > 20 ? description.substring(0, 17) + '...' : description;
-                    drawText(shortDesc, margin + 170, y + 3.5, 8);
-                    
-                    y += 5;
-                });
-                
-                y += 3;
+    if (paymentCount > 1 && paymentHistory.length > 0) {
+        y += 5;
+        drawText('PAYMENT HISTORY', margin, y, 12, 'bold', primaryColor);
+        y += 8;
+        
+        // Summary Box
+        doc.setFillColor(240, 240, 240);
+        doc.rect(margin, y, boxW, 10, 'F');
+        doc.setDrawColor(primaryColor);
+        doc.setLineWidth(0.3);
+        doc.rect(margin, y, boxW, 10);
+        
+        doc.setFontSize(9);
+        doc.setTextColor(primaryColor);
+        doc.setFont("helvetica", "bold");
+        doc.text(`Total Payments: ${paymentCount}`, margin + 5, y + 6);
+        doc.text(`Total Paid (USD): ${totalPaidUSD.toFixed(2)}`, margin + 60, y + 6);
+        doc.text(`Total Paid (KES): ${totalPaidKSH.toFixed(2)}`, margin + 120, y + 6);
+        y += 12;
+        
+        // Table Header
+        doc.setFillColor(primaryColor);
+        doc.rect(margin, y, boxW, 6, 'F');
+        doc.setTextColor(255);
+        drawText('#', margin + 2, y + 4, 8, 'bold', 255);
+        drawText('Date', margin + 10, y + 4, 8, 'bold', 255);
+        drawText('Amount', margin + 40, y + 4, 8, 'bold', 255);
+        drawText('USD', margin + 75, y + 4, 8, 'bold', 255);
+        drawText('KES', margin + 105, y + 4, 8, 'bold', 255);
+        drawText('Method', margin + 135, y + 4, 8, 'bold', 255);
+        drawText('Description', margin + 170, y + 4, 8, 'bold', 255);
+        y += 6;
+        
+        // Payment Rows
+        doc.setFontSize(8);
+        doc.setTextColor(0);
+        
+        paymentHistory.forEach((payment, index) => {
+            // Check if we need a new page
+            if (y > doc.internal.pageSize.getHeight() - 20) {
+                doc.addPage();
+                y = 10;
             }
-        } catch (error) {
-            console.error("Error adding payment history to PDF:", error);
-        }
-    } else if (data.firestoreId) {
+            
+            // Alternate row colors
+            if (index % 2 === 0) {
+                doc.setFillColor(250, 250, 250);
+                doc.rect(margin, y, boxW, 5, 'F');
+            }
+            
+            doc.rect(margin, y, boxW, 5);
+            drawText(`${index + 1}`, margin + 2, y + 3.5, 8);
+            drawText(payment.paymentDate || 'N/A', margin + 10, y + 3.5, 8);
+            drawText(`${payment.currency} ${payment.amount.toFixed(2)}`, margin + 40, y + 3.5, 8);
+            drawText(`USD ${payment.amountUSD?.toFixed(2) || (payment.currency === 'USD' ? payment.amount.toFixed(2) : (payment.amount / (payment.exchangeRate || data.exchangeRate || 130)).toFixed(2))}`, margin + 75, y + 3.5, 8);
+            drawText(`KES ${payment.amountKSH?.toFixed(2) || (payment.currency === 'KSH' ? payment.amount.toFixed(2) : (payment.amount * (payment.exchangeRate || data.exchangeRate || 130)).toFixed(2))}`, margin + 105, y + 3.5, 8);
+            
+            // Truncate method if too long
+            const method = payment.paymentMethod || 'N/A';
+            const shortMethod = method.length > 15 ? method.substring(0, 12) + '...' : method;
+            drawText(shortMethod, margin + 135, y + 3.5, 8);
+            
+            // Truncate description if too long
+            const description = payment.description || 'Payment';
+            const shortDesc = description.length > 20 ? description.substring(0, 17) + '...' : description;
+            drawText(shortDesc, margin + 170, y + 3.5, 8);
+            
+            y += 5;
+        });
+        
+        y += 3;
+    } else if (paymentCount === 1) {
         // Single payment note
         y += 5;
         doc.setFontSize(9);
