@@ -77,6 +77,43 @@ function handleLogout() {
     auth.signOut();
 }
 
+// Add this function at the top level (after the authentication section)
+// =================================================================
+//                 GLOBAL SEARCH FUNCTION (NEW)
+// =================================================================
+
+/**
+ * Global search function that can be called from any page
+ */
+function performGlobalSearch(searchTerm = '', filter = 'all') {
+    // Navigate to document generator first
+    handleDocumentGenerator();
+    
+    // Wait for DOM to update, then set search values
+    setTimeout(() => {
+        const searchInput = document.getElementById('document-search');
+        const filterSelect = document.getElementById('document-type-filter');
+        
+        if (searchInput && searchTerm) {
+            searchInput.value = searchTerm;
+        }
+        
+        if (filterSelect && filter) {
+            filterSelect.value = filter;
+        }
+        
+        // If search term was provided, perform the search
+        if (searchTerm) {
+            setTimeout(() => {
+                const searchButton = document.querySelector('button[onclick="searchDocuments()"]');
+                if (searchButton) {
+                    searchButton.click();
+                }
+            }, 200);
+        }
+    }, 100);
+}
+
 // =================================================================
 //                 3. DASHBOARD & NAVIGATION (UPDATED)
 // =================================================================
@@ -205,20 +242,69 @@ function handleDocumentGenerator() {
 /**
  * Searches across all document types
  */
+/**
+ * Searches across all document types
+ */
 async function searchDocuments() {
-    const searchTerm = document.getElementById('document-search').value.trim().toLowerCase();
-    const docTypeFilter = document.getElementById('document-type-filter').value;
+    const searchTerm = document.getElementById('document-search')?.value.trim().toLowerCase();
+    const docTypeFilter = document.getElementById('document-type-filter')?.value;
     
     if (!searchTerm) {
         alert("Please enter a search term");
         return;
     }
     
-    // Show loading state
+    // Get references to DOM elements
     const resultsList = document.getElementById('search-results-list');
     const searchResultsDiv = document.getElementById('search-results');
     const docCreationArea = document.getElementById('document-creation-area');
     
+    // If we're not on the document generator page, navigate to it first
+    if (!resultsList || !searchResultsDiv || !docCreationArea) {
+        // Navigate to document generator first
+        handleDocumentGenerator();
+        
+        // Wait for DOM to update, then search again
+        setTimeout(() => {
+            // Set the search term in the input
+            const searchInput = document.getElementById('document-search');
+            if (searchInput) {
+                searchInput.value = searchTerm;
+            }
+            
+            // Set the filter if it was specified
+            const filterSelect = document.getElementById('document-type-filter');
+            if (filterSelect && docTypeFilter) {
+                filterSelect.value = docTypeFilter;
+            }
+            
+            // Perform the search
+            performSearch(searchTerm, docTypeFilter || 'all');
+        }, 100);
+        return;
+    }
+    
+    // We're already on the document generator page, perform search
+    await performSearch(searchTerm, docTypeFilter || 'all');
+}
+
+/**
+ * Helper function to perform the actual search
+ */
+async function performSearch(searchTerm, docTypeFilter) {
+    // Get references to DOM elements again (they should exist now)
+    const resultsList = document.getElementById('search-results-list');
+    const searchResultsDiv = document.getElementById('search-results');
+    const docCreationArea = document.getElementById('document-creation-area');
+    
+    // Double-check elements exist
+    if (!resultsList || !searchResultsDiv || !docCreationArea) {
+        console.error("Required DOM elements not found");
+        alert("Error: Unable to perform search. Please try again.");
+        return;
+    }
+    
+    // Show loading state
     resultsList.innerHTML = '<p class="text-center text-gray-500">Searching documents...</p>';
     searchResultsDiv.classList.remove('hidden');
     docCreationArea.classList.add('hidden');
@@ -260,233 +346,14 @@ async function searchDocuments() {
 }
 
 /**
- * Searches receipts based on various criteria
- */
-async function searchReceipts(searchTerm) {
-    const results = [];
-    
-    try {
-        // Search by receipt ID
-        const receiptIdQuery = await db.collection("receipts")
-            .where("receiptId", ">=", searchTerm.toUpperCase())
-            .where("receiptId", "<=", searchTerm.toUpperCase() + '\uf8ff')
-            .limit(20)
-            .get();
-        
-        receiptIdQuery.forEach(doc => {
-            if (!results.some(r => r.id === doc.id)) {
-                results.push({id: doc.id, ...doc.data()});
-            }
-        });
-        
-        // Search by client name
-        const clientNameQuery = await db.collection("receipts")
-            .where("receivedFrom", ">=", searchTerm)
-            .where("receivedFrom", "<=", searchTerm + '\uf8ff')
-            .limit(20)
-            .get();
-        
-        clientNameQuery.forEach(doc => {
-            if (!results.some(r => r.id === doc.id)) {
-                results.push({id: doc.id, ...doc.data()});
-            }
-        });
-        
-        // Search by being paid for (car make/model)
-        const carQuery = await db.collection("receipts")
-            .where("beingPaidFor", ">=", searchTerm)
-            .where("beingPaidFor", "<=", searchTerm + '\uf8ff')
-            .limit(20)
-            .get();
-        
-        carQuery.forEach(doc => {
-            if (!results.some(r => r.id === doc.id)) {
-                results.push({id: doc.id, ...doc.data()});
-            }
-        });
-        
-        // Search by invoice reference
-        const invoiceRefQuery = await db.collection("receipts")
-            .where("invoiceReference", ">=", searchTerm)
-            .where("invoiceReference", "<=", searchTerm + '\uf8ff')
-            .limit(20)
-            .get();
-        
-        invoiceRefQuery.forEach(doc => {
-            if (!results.some(r => r.id === doc.id)) {
-                results.push({id: doc.id, ...doc.data()});
-            }
-        });
-        
-    } catch (error) {
-        console.error("Error searching receipts:", error);
-    }
-    
-    return results;
-}
-
-/**
- * Searches invoices based on various criteria
- */
-async function searchInvoices(searchTerm) {
-    const results = [];
-    
-    try {
-        // Search by invoice ID
-        const invoiceIdQuery = await db.collection("invoices")
-            .where("invoiceId", ">=", searchTerm.toUpperCase())
-            .where("invoiceId", "<=", searchTerm.toUpperCase() + '\uf8ff')
-            .limit(20)
-            .get();
-        
-        invoiceIdQuery.forEach(doc => {
-            if (!results.some(r => r.id === doc.id)) {
-                results.push({id: doc.id, ...doc.data()});
-            }
-        });
-        
-        // Search by client name
-        const clientNameQuery = await db.collection("invoices")
-            .where("clientName", ">=", searchTerm)
-            .where("clientName", "<=", searchTerm + '\uf8ff')
-            .limit(20)
-            .get();
-        
-        clientNameQuery.forEach(doc => {
-            if (!results.some(r => r.id === doc.id)) {
-                results.push({id: doc.id, ...doc.data()});
-            }
-        });
-        
-        // Search by client phone
-        const phoneQuery = await db.collection("invoices")
-            .where("clientPhone", ">=", searchTerm)
-            .where("clientPhone", "<=", searchTerm + '\uf8ff')
-            .limit(20)
-            .get();
-        
-        phoneQuery.forEach(doc => {
-            if (!results.some(r => r.id === doc.id)) {
-                results.push({id: doc.id, ...doc.data()});
-            }
-        });
-        
-        // Search by car make/model
-        const carMakeQuery = await db.collection("invoices")
-            .where("carDetails.make", ">=", searchTerm)
-            .where("carDetails.make", "<=", searchTerm + '\uf8ff')
-            .limit(20)
-            .get();
-        
-        carMakeQuery.forEach(doc => {
-            if (!results.some(r => r.id === doc.id)) {
-                results.push({id: doc.id, ...doc.data()});
-            }
-        });
-        
-        const carModelQuery = await db.collection("invoices")
-            .where("carDetails.model", ">=", searchTerm)
-            .where("carDetails.model", "<=", searchTerm + '\uf8ff')
-            .limit(20)
-            .get();
-        
-        carModelQuery.forEach(doc => {
-            if (!results.some(r => r.id === doc.id)) {
-                results.push({id: doc.id, ...doc.data()});
-            }
-        });
-        
-        // Search by VIN
-        const vinQuery = await db.collection("invoices")
-            .where("carDetails.vin", ">=", searchTerm.toUpperCase())
-            .where("carDetails.vin", "<=", searchTerm.toUpperCase() + '\uf8ff')
-            .limit(20)
-            .get();
-        
-        vinQuery.forEach(doc => {
-            if (!results.some(r => r.id === doc.id)) {
-                results.push({id: doc.id, ...doc.data()});
-            }
-        });
-        
-    } catch (error) {
-        console.error("Error searching invoices:", error);
-    }
-    
-    return results;
-}
-
-/**
- * Searches sales agreements based on various criteria
- */
-async function searchAgreements(searchTerm) {
-    const results = [];
-    
-    try {
-        // Search by buyer name
-        const buyerNameQuery = await db.collection("sales_agreements")
-            .where("buyer.name", ">=", searchTerm)
-            .where("buyer.name", "<=", searchTerm + '\uf8ff')
-            .limit(20)
-            .get();
-        
-        buyerNameQuery.forEach(doc => {
-            if (!results.some(r => r.id === doc.id)) {
-                results.push({id: doc.id, ...doc.data()});
-            }
-        });
-        
-        // Search by buyer phone
-        const buyerPhoneQuery = await db.collection("sales_agreements")
-            .where("buyer.phone", ">=", searchTerm)
-            .where("buyer.phone", "<=", searchTerm + '\uf8ff')
-            .limit(20)
-            .get();
-        
-        buyerPhoneQuery.forEach(doc => {
-            if (!results.some(r => r.id === doc.id)) {
-                results.push({id: doc.id, ...doc.data()});
-            }
-        });
-        
-        // Search by vehicle make/model
-        const vehicleQuery = await db.collection("sales_agreements")
-            .where("vehicle.makeModel", ">=", searchTerm)
-            .where("vehicle.makeModel", "<=", searchTerm + '\uf8ff')
-            .limit(20)
-            .get();
-        
-        vehicleQuery.forEach(doc => {
-            if (!results.some(r => r.id === doc.id)) {
-                results.push({id: doc.id, ...doc.data()});
-            }
-        });
-        
-        // Search by VIN
-        const vinQuery = await db.collection("sales_agreements")
-            .where("vehicle.vin", ">=", searchTerm.toUpperCase())
-            .where("vehicle.vin", "<=", searchTerm.toUpperCase() + '\uf8ff')
-            .limit(20)
-            .get();
-        
-        vinQuery.forEach(doc => {
-            if (!results.some(r => r.id === doc.id)) {
-                results.push({id: doc.id, ...doc.data()});
-            }
-        });
-        
-    } catch (error) {
-        console.error("Error searching agreements:", error);
-    }
-    
-    return results;
-}
-
-/**
- * Displays search results
+ * Helper function to display search results
  */
 function displaySearchResults(results, searchTerm) {
     const resultsList = document.getElementById('search-results-list');
+    const searchResultsDiv = document.getElementById('search-results');
+    const docCreationArea = document.getElementById('document-creation-area');
+    
+    if (!resultsList) return;
     
     if (results.length === 0) {
         resultsList.innerHTML = `
@@ -522,7 +389,6 @@ function displaySearchResults(results, searchTerm) {
     
     resultsList.innerHTML = html;
 }
-
 /**
  * Renders a receipt search result card
  */
@@ -631,15 +497,21 @@ function renderAgreementSearchResult(doc, docJson) {
 /**
  * Clears search and shows the default view
  */
+/**
+ * Clears search and shows the default view
+ */
 function clearSearch() {
-    document.getElementById('document-search').value = '';
-    document.getElementById('document-type-filter').value = 'all';
-    
+    // Get elements with null checks
+    const searchInput = document.getElementById('document-search');
+    const filterSelect = document.getElementById('document-type-filter');
     const searchResultsDiv = document.getElementById('search-results');
     const docCreationArea = document.getElementById('document-creation-area');
     
-    searchResultsDiv.classList.add('hidden');
-    docCreationArea.classList.remove('hidden');
+    if (searchInput) searchInput.value = '';
+    if (filterSelect) filterSelect.value = 'all';
+    
+    if (searchResultsDiv) searchResultsDiv.classList.add('hidden');
+    if (docCreationArea) docCreationArea.classList.remove('hidden');
 }
 
 // Add event listener for Enter key in search
