@@ -2645,6 +2645,102 @@ function createReceiptFromInvoice(invoiceData) {
 }
 
 /**
+ * Creates a car sales agreement from invoice data
+ */
+function createAgreementFromInvoice(invoiceData) {
+    // Navigate to agreement form
+    renderAgreementForm();
+    
+    // Auto-populate fields from invoice data
+    setTimeout(() => {
+        const buyerNameField = document.getElementById('buyerName');
+        const buyerPhoneField = document.getElementById('buyerPhone');
+        const carMakeModelField = document.getElementById('carMakeModel');
+        const carYearField = document.getElementById('carYear');
+        const carColorField = document.getElementById('carColor');
+        const carVINField = document.getElementById('carVIN');
+        const carFuelTypeField = document.getElementById('carFuelType');
+        const agreementDateInput = document.getElementById('agreementDateInput');
+        
+        // Set basic information
+        if (buyerNameField) buyerNameField.value = invoiceData.clientName;
+        if (buyerPhoneField) buyerPhoneField.value = invoiceData.clientPhone || '';
+        
+        // Set vehicle details
+        if (carMakeModelField) carMakeModelField.value = `${invoiceData.carDetails.make} ${invoiceData.carDetails.model}`;
+        if (carYearField) carYearField.value = invoiceData.carDetails.year || '';
+        if (carColorField) carColorField.value = invoiceData.carDetails.color || '';
+        if (carVINField) carVINField.value = invoiceData.carDetails.vin || '';
+        if (carFuelTypeField) carFuelTypeField.value = invoiceData.carDetails.fuel || '';
+        
+        // Set agreement date to today
+        if (agreementDateInput) agreementDateInput.value = new Date().toISOString().slice(0, 10);
+        
+        // Set payment details based on invoice pricing
+        const totalAmount = invoiceData.pricing.totalUSD || 0;
+        const depositAmount = invoiceData.pricing.depositUSD || (totalAmount * 0.5);
+        const balanceAmount = invoiceData.pricing.balanceUSD || (totalAmount * 0.5);
+        
+        // Set currency to USD (since invoice is in USD)
+        const currencySelect = document.getElementById('currencySelect');
+        if (currencySelect) currencySelect.value = 'USD';
+        
+        // Clear existing payment rows
+        const paymentRows = document.getElementById('payment-schedule-rows');
+        if (paymentRows) {
+            paymentRows.innerHTML = '';
+            
+            // Add deposit payment row
+            const depositRow = document.createElement('div');
+            depositRow.className = 'grid grid-cols-4 gap-2 payment-row';
+            depositRow.dataset.id = '1';
+            depositRow.innerHTML = `
+                <input type="text" required placeholder="e.g. Deposit" value="Deposit" class="p-2 border rounded-md col-span-2 text-sm">
+                <input type="number" step="0.01" required placeholder="Amount" value="${depositAmount.toFixed(2)}" oninput="calculatePaymentTotal()" class="payment-amount p-2 border rounded-md text-sm">
+                <input type="date" required value="${new Date().toISOString().slice(0, 10)}" class="payment-date p-2 border rounded-md text-sm">
+            `;
+            paymentRows.appendChild(depositRow);
+            
+            // Add balance payment row
+            if (balanceAmount > 0) {
+                const dueDate = invoiceData.dueDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+                const balanceRow = document.createElement('div');
+                balanceRow.className = 'grid grid-cols-4 gap-2 payment-row';
+                balanceRow.dataset.id = '2';
+                balanceRow.innerHTML = `
+                    <input type="text" required placeholder="e.g. Balance" value="Balance" class="p-2 border rounded-md col-span-2 text-sm">
+                    <input type="number" step="0.01" required placeholder="Amount" value="${balanceAmount.toFixed(2)}" oninput="calculatePaymentTotal()" class="payment-amount p-2 border rounded-md text-sm">
+                    <input type="date" required value="${dueDate}" class="payment-date p-2 border rounded-md text-sm">
+                    <button type="button" onclick="deletePaymentRow(2)" class="text-red-500 hover:text-red-700 text-sm">X</button>
+                `;
+                paymentRows.appendChild(balanceRow);
+            }
+        }
+        
+        // Update the total
+        calculatePaymentTotal();
+        
+        // Store the invoice reference in a hidden field or data attribute
+        const agreementForm = document.getElementById('agreement-form');
+        if (agreementForm) {
+            agreementForm.dataset.invoiceReference = invoiceData.invoiceId;
+            agreementForm.dataset.invoiceId = invoiceData.firestoreId;
+        }
+        
+        // Show notification
+        setTimeout(() => {
+            alert(`Invoice ${invoiceData.invoiceId} data has been loaded into the agreement form. The invoice number will be used as the agreement reference.`);
+        }, 300);
+        
+    }, 100);
+}
+
+/**
+ * Modified saveAgreement function to include invoice reference
+ * Find the existing saveAgreement function and add invoice reference handling
+ */
+
+/**
  * Generates and downloads a custom PDF for the Invoice/Proforma.
  */
 function generateInvoicePDF(data) {
@@ -2954,6 +3050,9 @@ function renderInvoiceHistory() {
 /**
  * Fetches and displays recent invoices.
  */
+/**
+ * Fetches and displays recent invoices.
+ */
 async function fetchInvoices() {
     const listElement = document.getElementById('invoice-history-list');
     let html = ``;
@@ -2976,7 +3075,8 @@ async function fetchInvoices() {
             html += `<li class="p-3 bg-gray-50 flex flex-col sm:flex-row justify-between items-start sm:items-center">
                         <div>
                             <strong class="text-primary-blue">${data.docType} ${data.invoiceId}</strong><br>
-                            <span class="text-sm text-gray-700">Client: ${data.clientName} | Vehicle: ${data.carDetails.make} ${data.carDetails.model}</span>
+                            <span class="text-sm text-gray-700">Client: ${data.clientName} | Vehicle: ${data.carDetails.make} ${data.carDetails.model}</span><br>
+                            <span class="text-xs text-gray-600">Total: USD ${data.pricing.totalUSD.toFixed(2)}</span>
                         </div>
                         <div class="mt-2 sm:mt-0 space-x-2">
                             <button onclick='reDownloadInvoice(${invoiceDataJson})' 
@@ -2986,6 +3086,10 @@ async function fetchInvoices() {
                             <button onclick='createReceiptFromInvoice(${invoiceDataJson})' 
                                     class="bg-secondary-red hover:bg-red-700 text-white text-xs py-1 px-3 rounded-full transition duration-150">
                                 Create Receipt
+                            </button>
+                            <button onclick='createAgreementFromInvoice(${invoiceDataJson})' 
+                                    class="bg-green-600 hover:bg-green-800 text-white text-xs py-1 px-3 rounded-full transition duration-150">
+                                Create Agreement
                             </button>
                         </div>
                     </li>`;
@@ -3243,7 +3347,7 @@ async function saveAgreement() {
         return;
     }
 
-    // 5. Construct Agreement Data Object
+     // 5. Construct Agreement Data Object
     const agreementData = {
         // --- Use the date from the input ---
         agreementDate: agreementDate, 
@@ -3274,6 +3378,10 @@ async function saveAgreement() {
             buyerWitness: document.getElementById('buyerWitness').value,
             // Signatures and Dates will be added manually on the printed copy
         },
+        // ADD THESE LINES FOR INVOICE REFERENCE
+        invoiceReference: document.getElementById('agreement-form')?.dataset.invoiceReference || '',
+        invoiceId: document.getElementById('agreement-form')?.dataset.invoiceId || '',
+        // END OF ADDED LINES
         createdBy: currentUser.email,
         createdAt: firebase.firestore.FieldValue.serverTimestamp()
     };
@@ -3296,6 +3404,7 @@ async function saveAgreement() {
     }
 }
 
+/**
 /**
  * Fetches and displays recent sales agreements.
  */
@@ -3322,6 +3431,7 @@ async function fetchAgreements() {
                         <div>
                             <strong class="text-primary-blue">Agreement ID: ${doc.id.substring(0, 8)}...</strong><br>
                             <span class="text-sm text-gray-700">Buyer: ${data.buyer.name} | Vehicle: ${data.vehicle.makeModel}</span>
+                            ${data.invoiceReference ? `<br><span class="text-xs text-green-600">Invoice Ref: ${data.invoiceReference}</span>` : ''}
                         </div>
                         <div class="mt-2 sm:mt-0 space-x-2">
                             <button onclick='reDownloadAgreement(${agreementDataJson})' 
@@ -3448,7 +3558,7 @@ function generateAgreementPDF(data) {
     doc.text(`Phone: ${data.buyer.phone}`, margin + 100, y);
     y += lineSpacing + 4;
 
-    // =================================================================
+       // =================================================================
     // VEHICLE DETAILS
     // =================================================================
     drawText('VEHICLE DETAILS', margin, y, 12, 'bold', primaryColor);
@@ -3463,6 +3573,14 @@ function generateAgreementPDF(data) {
     doc.text(`Color: ${data.vehicle.color}`, margin + 90, y);
     y += lineSpacing;
     doc.text(`Fuel Type: ${data.vehicle.fuelType}`, margin + textIndent, y);
+    
+    // ADD THESE LINES FOR INVOICE REFERENCE
+    if (data.invoiceReference) {
+        y += lineSpacing;
+        doc.text(`Invoice Reference: ${data.invoiceReference}`, margin + textIndent, y);
+    }
+    // END OF ADDED LINES
+    
     y += lineSpacing + 4;
 
     // =================================================================
