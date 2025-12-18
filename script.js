@@ -178,7 +178,7 @@ function numberToWords(n) {
     const numToWords = (num) => {
         if (num < 20) return a[num];
         if (num < 100) return b[Math.floor(num / 10)] + (num % 10 === 0 ? '' : ' ' + a[num % 10]);
-        if (num < 1000) return a[Math.floor(num / 100)] + ' hundred' + (num % 100 === 0 ? '' : ' and ' + numToWords(num % 100));
+        if (num < 1000) return a[Math.floor(num / 100)] + ' hundred' + (num % 100 === 0 ? '' : ' ' + numToWords(num % 100));
         if (num < 1000000) return numToWords(Math.floor(num / 1000)) + ' thousand' + (num % 1000 === 0 ? '' : ' ' + numToWords(num % 1000));
         if (num < 1000000000) return numToWords(Math.floor(num / 1000000)) + ' million' + (num % 1000000 === 0 ? '' : ' ' + numToWords(num % 1000000));
         return numToWords(Math.floor(num / 1000000000)) + ' billion' + (num % 1000000000 === 0 ? '' : ' ' + numToWords(num % 1000000000));
@@ -193,10 +193,83 @@ function numberToWords(n) {
     return result.charAt(0).toUpperCase() + result.slice(1) + ' only.';
 }
 
-// Add this helper function to handle the "Add Payment" action for Receipts
-async function handleReceiptAddPayment(receiptData) {
-    // This re-uses your existing renderAddPaymentModal logic but targets the 'receipts' collection
-    renderAddPaymentModal(receiptData, "receipts");
+// NEW FUNCTION: Fetch invoice amount based on invoice number
+async function fetchInvoiceAmount(invoiceNumber) {
+    try {
+        const snapshot = await db.collection("invoices")
+            .where("invoiceId", "==", invoiceNumber)
+            .limit(1)
+            .get();
+        
+        if (snapshot.empty) {
+            return null;
+        }
+        
+        const invoiceDoc = snapshot.docs[0];
+        const invoiceData = invoiceDoc.data();
+        
+        return {
+            totalUSD: invoiceData.pricing.totalUSD,
+            depositUSD: invoiceData.pricing.depositUSD,
+            balanceUSD: invoiceData.pricing.balanceUSD,
+            depositKSH: invoiceData.pricing.depositKSH,
+            exchangeRate: invoiceData.exchangeRate,
+            clientName: invoiceData.clientName,
+            vehicleInfo: `${invoiceData.carDetails.make} ${invoiceData.carDetails.model} ${invoiceData.carDetails.year}`
+        };
+    } catch (error) {
+        console.error("Error fetching invoice:", error);
+        return null;
+    }
+}
+
+// NEW FUNCTION: Calculate payment history and balances
+async function calculateReceiptBalances(receiptId) {
+    try {
+        // Get all payments for this receipt (including additional payments)
+        const snapshot = await db.collection("receipt_payments")
+            .where("receiptId", "==", receiptId)
+            .orderBy("paymentDate", "asc")
+            .get();
+        
+        let totalPaidUSD = 0;
+        let totalPaidKSH = 0;
+        const payments = [];
+        
+        snapshot.forEach(doc => {
+            const payment = doc.data();
+            payments.push(payment);
+            
+            if (payment.currency === 'USD') {
+                totalPaidUSD += payment.amount;
+                // Convert to KSH using the invoice exchange rate if available
+                if (payment.exchangeRate) {
+                    totalPaidKSH += payment.amount * payment.exchangeRate;
+                }
+            } else if (payment.currency === 'KSH') {
+                totalPaidKSH += payment.amount;
+                // Convert to USD using the invoice exchange rate if available
+                if (payment.exchangeRate) {
+                    totalPaidUSD += payment.amount / payment.exchangeRate;
+                }
+            }
+        });
+        
+        return {
+            payments,
+            totalPaidUSD,
+            totalPaidKSH,
+            paymentCount: payments.length
+        };
+    } catch (error) {
+        console.error("Error calculating receipt balances:", error);
+        return {
+            payments: [],
+            totalPaidUSD: 0,
+            totalPaidKSH: 0,
+            paymentCount: 0
+        };
+    }
 }
 
 /**
@@ -219,6 +292,26 @@ function renderReceiptForm(invoiceReference = '') {
                             <option value="Other">Other</option>
                         </select>
                         <input type="text" id="receivedFrom" required placeholder="Received From (Customer Name)" class="block w-full p-2 border rounded-md">
+                    </div>
+
+                    <div class="mb-4">
+                        <label for="invoiceReference" class="block text-gray-700 font-medium mb-1">Invoice Reference (Optional)</label>
+                        <div class="flex gap-2">
+                            <input type="text" id="invoiceReference" placeholder="Enter Invoice Number" value="${invoiceReference}" class="flex-1 p-2 border rounded-md">
+                            <button type="button" onclick="fetchInvoiceDetails()" class="bg-primary-blue hover:bg-blue-900 text-white px-3 py-2 rounded-md text-sm">
+                                Fetch Invoice
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="invoice-details" class="hidden mb-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
+                        <h4 class="font-bold text-primary-blue mb-2">Invoice Details:</h4>
+                        <p id="invoice-client" class="text-sm"></p>
+                        <p id="invoice-vehicle" class="text-sm"></p>
+                        <p id="invoice-total" class="text-sm"></p>
+                        <p id="invoice-deposit" class="text-sm"></p>
+                        <p id="invoice-balance" class="text-sm"></p>
+                        <p id="invoice-rate" class="text-sm"></p>
                     </div>
 
                     <fieldset class="border p-4 rounded-lg mb-4">
@@ -248,8 +341,14 @@ function renderReceiptForm(invoiceReference = '') {
                     </fieldset>
 
                     <div class="grid grid-cols-2 gap-3 mb-6">
-                        <input type="number" id="balanceRemaining" step="0.01" placeholder="Balance Remaining (Optional)" class="block w-full p-2 border rounded-md">
+                        <input type="number" id="balanceRemaining" step="0.01" placeholder="Balance Remaining (Auto-calculated)" readonly class="block w-full p-2 border rounded-md bg-gray-100">
                         <input type="date" id="balanceDueDate" placeholder="To be paid on or before" class="block w-full p-2 border rounded-md">
+                    </div>
+
+                    <div class="mb-4 p-3 bg-yellow-50 rounded-lg border border-yellow-200">
+                        <h4 class="font-bold text-secondary-red mb-2">Auto-Calculated Balances:</h4>
+                        <p id="calculated-balance-kes" class="text-sm">KES Balance: --</p>
+                        <p id="calculated-balance-usd" class="text-sm">USD Balance: --</p>
                     </div>
 
                     <button type="submit" class="w-full bg-secondary-red hover:bg-red-700 text-white font-bold py-3 rounded-lg transition duration-150">
@@ -260,13 +359,67 @@ function renderReceiptForm(invoiceReference = '') {
 
             <div class="p-6 border border-gray-300 rounded-xl bg-white shadow-md">
                 <h3 class="text-xl font-semibold mb-4 text-primary-blue">Recent Receipts</h3>
+                <div class="mb-4">
+                    <button onclick="renderReceiptBalancesView()" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-md text-sm transition duration-150">
+                        View All Receipt Balances
+                    </button>
+                </div>
                 <div id="recent-receipts">
                     <p class="text-center text-gray-500">Loading payments...</p>
                 </div>
             </div>
         </div>
     `;
+    
+    // If invoice reference was provided, try to fetch details automatically
+    if (invoiceReference) {
+        setTimeout(() => {
+            fetchInvoiceDetails();
+        }, 500);
+    }
+    
     fetchReceipts();
+}
+
+/**
+ * Fetches invoice details and auto-populates receipt form
+ */
+async function fetchInvoiceDetails() {
+    const invoiceRef = document.getElementById('invoiceReference').value;
+    if (!invoiceRef) {
+        alert("Please enter an invoice reference number");
+        return;
+    }
+    
+    const invoiceDetails = await fetchInvoiceAmount(invoiceRef);
+    if (!invoiceDetails) {
+        alert("Invoice not found. Please check the invoice number.");
+        return;
+    }
+    
+    // Show invoice details section
+    const detailsDiv = document.getElementById('invoice-details');
+    detailsDiv.classList.remove('hidden');
+    
+    // Populate invoice details
+    document.getElementById('invoice-client').textContent = `Client: ${invoiceDetails.clientName}`;
+    document.getElementById('invoice-vehicle').textContent = `Vehicle: ${invoiceDetails.vehicleInfo}`;
+    document.getElementById('invoice-total').textContent = `Total Price: USD ${invoiceDetails.totalUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+    document.getElementById('invoice-deposit').textContent = `Deposit Required: USD ${invoiceDetails.depositUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })} (KES ${parseFloat(invoiceDetails.depositKSH).toLocaleString('en-US', { minimumFractionDigits: 2 })})`;
+    document.getElementById('invoice-balance').textContent = `Balance Due: USD ${invoiceDetails.balanceUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+    document.getElementById('invoice-rate').textContent = `Exchange Rate: USD 1 = KES ${invoiceDetails.exchangeRate}`;
+    
+    // Auto-populate receipt form
+    document.getElementById('receivedFrom').value = invoiceDetails.clientName;
+    document.getElementById('beingPaidFor').value = `${invoiceDetails.vehicleInfo} Deposit`;
+    
+    // Store exchange rate in hidden field for calculations
+    document.getElementById('invoiceReference').dataset.exchangeRate = invoiceDetails.exchangeRate;
+    document.getElementById('invoiceReference').dataset.totalUSD = invoiceDetails.totalUSD;
+    document.getElementById('invoiceReference').dataset.balanceUSD = invoiceDetails.balanceUSD;
+    
+    // Calculate initial balances
+    updateReceiptCalculations();
 }
 
 /**
@@ -293,6 +446,52 @@ function updateAmountInWords() {
     }
 
     wordsField.value = words;
+    updateReceiptCalculations();
+}
+
+/**
+ * Updates receipt calculations based on amount entered and invoice details
+ */
+function updateReceiptCalculations() {
+    const amountReceived = parseFloat(document.getElementById('amountReceived').value) || 0;
+    const currency = document.getElementById('currency').value;
+    const invoiceRef = document.getElementById('invoiceReference');
+    const exchangeRate = parseFloat(invoiceRef.dataset.exchangeRate) || 130;
+    const totalUSD = parseFloat(invoiceRef.dataset.totalUSD) || 0;
+    const initialBalanceUSD = parseFloat(invoiceRef.dataset.balanceUSD) || 0;
+    
+    // Calculate amounts in different currencies
+    let amountReceivedUSD = amountReceived;
+    let amountReceivedKSH = amountReceived;
+    
+    if (currency === 'KSH') {
+        amountReceivedUSD = amountReceived / exchangeRate;
+        amountReceivedKSH = amountReceived;
+    } else if (currency === 'USD') {
+        amountReceivedUSD = amountReceived;
+        amountReceivedKSH = amountReceived * exchangeRate;
+    }
+    
+    // Calculate remaining balances
+    const remainingUSD = Math.max(0, initialBalanceUSD - amountReceivedUSD);
+    const remainingKSH = remainingUSD * exchangeRate;
+    
+    // Update display fields
+    document.getElementById('balanceRemaining').value = remainingUSD.toFixed(2);
+    
+    const balanceKES = document.getElementById('calculated-balance-kes');
+    const balanceUSD = document.getElementById('calculated-balance-usd');
+    
+    if (totalUSD > 0) {
+        const totalPaidUSD = totalUSD - remainingUSD;
+        const totalPaidKSH = totalPaidUSD * exchangeRate;
+        
+        balanceKES.textContent = `KES Balance: ${remainingKSH.toLocaleString('en-US', { minimumFractionDigits: 2 })} (Paid: ${totalPaidKSH.toLocaleString('en-US', { minimumFractionDigits: 2 })})`;
+        balanceUSD.textContent = `USD Balance: ${remainingUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })} (Paid: ${totalPaidUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })})`;
+    } else {
+        balanceKES.textContent = `KES Balance: ${remainingKSH.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+        balanceUSD.textContent = `USD Balance: ${remainingUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+    }
 }
 
 /**
@@ -326,6 +525,8 @@ async function saveReceipt() {
     const bankUsed = document.getElementById('bankUsed').value;
     const balanceRemaining = parseFloat(document.getElementById('balanceRemaining').value) || 0;
     const balanceDueDate = document.getElementById('balanceDueDate').value;
+    const invoiceReference = document.getElementById('invoiceReference').value;
+    const exchangeRate = parseFloat(document.getElementById('invoiceReference').dataset.exchangeRate) || 130;
 
     if (isNaN(amountReceived) || amountReceived <= 0) {
         alert("Please enter a valid amount received.");
@@ -335,12 +536,26 @@ async function saveReceipt() {
     const receiptId = generateReceiptId(receiptType, receivedFrom);
     const receiptDate = new Date().toLocaleDateString('en-US');
 
+    // Calculate amounts in both currencies
+    let amountReceivedUSD = amountReceived;
+    let amountReceivedKSH = amountReceived;
+    
+    if (currency === 'KSH') {
+        amountReceivedUSD = amountReceived / exchangeRate;
+        amountReceivedKSH = amountReceived;
+    } else if (currency === 'USD') {
+        amountReceivedUSD = amountReceived;
+        amountReceivedKSH = amountReceived * exchangeRate;
+    }
+
     const receiptData = {
         receiptId,
         receiptType,
         receivedFrom,
         currency,
         amountReceived,
+        amountReceivedUSD,
+        amountReceivedKSH,
         amountWords,
         beingPaidFor,
         paymentDetails: {
@@ -350,8 +565,12 @@ async function saveReceipt() {
         },
         balanceDetails: {
             balanceRemaining,
-            balanceDueDate
+            balanceDueDate,
+            balanceRemainingUSD: balanceRemaining,
+            balanceRemainingKSH: balanceRemaining * exchangeRate
         },
+        invoiceReference,
+        exchangeRate,
         receiptDate,
         createdBy: currentUser.email,
         createdAt: firebase.firestore.FieldValue.serverTimestamp()
@@ -359,6 +578,26 @@ async function saveReceipt() {
 
     try {
         const docRef = await db.collection("receipts").add(receiptData);
+        
+        // Also save as first payment in receipt_payments collection
+        const paymentData = {
+            receiptId: docRef.id,
+            receiptNumber: receiptId,
+            paymentNumber: 1,
+            paymentDate: receiptDate,
+            amount: amountReceived,
+            currency: currency,
+            amountUSD: amountReceivedUSD,
+            amountKSH: amountReceivedKSH,
+            exchangeRate: exchangeRate,
+            description: "Initial Payment",
+            paymentMethod: bankUsed ? `Bank: ${bankUsed}` : (chequeNo ? `Cheque: ${chequeNo}` : (rtgsTtNo ? `RTGS/TT: ${rtgsTtNo}` : "Cash")),
+            createdBy: currentUser.email,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
+        
+        await db.collection("receipt_payments").add(paymentData);
+        
         alert(`Receipt ${receiptId} saved successfully!`);
         
         receiptData.firestoreId = docRef.id;
@@ -366,6 +605,7 @@ async function saveReceipt() {
         
         document.getElementById('receipt-form').reset();
         document.getElementById('amountWords').value = '';
+        document.getElementById('invoice-details').classList.add('hidden');
         fetchReceipts(); // Refresh history
     } catch (error) {
         console.error("Error saving receipt:", error);
@@ -387,37 +627,427 @@ async function fetchReceipts() {
         }
         
         html = `<ul class="space-y-3">`;
-        snapshot.forEach(doc => {
+        
+        for (const doc of snapshot.docs) {
             const data = doc.data();
+            
+            // Calculate balances for this receipt
+            const balances = await calculateReceiptBalances(doc.id);
+            const totalPaidUSD = balances.totalPaidUSD;
+            const totalPaidKSH = balances.totalPaidKSH;
+            
             const receiptDataJson = JSON.stringify({
                 ...data, 
                 firestoreId: doc.id,
+                totalPaidUSD: totalPaidUSD,
+                totalPaidKSH: totalPaidKSH,
+                paymentCount: balances.paymentCount,
                 // Ensure Timestamp is handled for JSON stringify
                 createdAt: data.createdAt ? data.createdAt.toDate().toISOString() : new Date().toISOString()
             });
 
             html += `<li class="p-3 border rounded-lg bg-gray-50 flex flex-col sm:flex-row justify-between items-start sm:items-center">
-                        <div>
+                        <div class="flex-1">
                             <strong class="text-gray-800">${data.receiptId}</strong><br>
-                            <span class="text-sm text-gray-600">From: ${data.receivedFrom} | Amount: ${data.currency} ${data.amountReceived.toFixed(2)}</span>
+                            <span class="text-sm text-gray-600">From: ${data.receivedFrom}</span><br>
+                            <span class="text-sm text-gray-600">Amount: ${data.currency} ${data.amountReceived.toFixed(2)}</span><br>
+                            <span class="text-xs text-secondary-red">Payments: ${balances.paymentCount} | Total Paid: USD ${totalPaidUSD.toFixed(2)} / KES ${totalPaidKSH.toFixed(2)}</span>
                         </div>
                         <div class="mt-2 sm:mt-0 space-x-2">
                             <button onclick='reDownloadReceipt(${receiptDataJson})' 
                                     class="bg-secondary-red hover:bg-red-600 text-white text-xs py-1 px-3 rounded-full transition duration-150">
                                 Re-Download PDF
                             </button>
-                            <button onclick='createAgreementFromReceipt(${receiptDataJson})' 
+                            <button onclick='addPaymentToReceipt(${receiptDataJson})' 
                                     class="bg-primary-blue hover:bg-blue-600 text-white text-xs py-1 px-3 rounded-full transition duration-150">
-                                Create Agreement
+                                Add Payment
+                            </button>
+                            <button onclick='viewReceiptBalances(${receiptDataJson})' 
+                                    class="bg-green-600 hover:bg-green-700 text-white text-xs py-1 px-3 rounded-full transition duration-150">
+                                View Balances
                             </button>
                         </div>
                     </li>`;
-        });
+        }
         html += `</ul>`;
         receiptList.innerHTML = html;
     } catch (error) {
         console.error("Error fetching receipts:", error);
         receiptList.innerHTML = `<p class="text-red-500">Error loading receipts. Check console for details.</p>`;
+    }
+}
+
+/**
+ * Renders a view of all receipt balances
+ */
+async function renderReceiptBalancesView() {
+    const formArea = document.getElementById('document-form-area');
+    formArea.innerHTML = `
+        <div class="p-6 border border-gray-300 rounded-xl bg-white shadow-lg">
+            <h3 class="text-xl font-semibold mb-6 text-primary-blue">Receipt Balances & Payments</h3>
+            
+            <div class="mb-6">
+                <div class="flex flex-wrap gap-4 mb-4">
+                    <input type="text" id="searchClient" placeholder="Search by client name..." class="p-2 border rounded-md flex-1">
+                    <input type="date" id="filterDateFrom" class="p-2 border rounded-md">
+                    <input type="date" id="filterDateTo" class="p-2 border rounded-md">
+                    <button onclick="filterReceiptBalances()" class="bg-primary-blue hover:bg-blue-900 text-white font-bold py-2 px-4 rounded-md">
+                        Filter
+                    </button>
+                    <button onclick="renderReceiptForm()" class="bg-gray-500 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-md">
+                        Back to Receipts
+                    </button>
+                </div>
+            </div>
+            
+            <div id="receipt-balances-list">
+                <p class="text-center text-gray-500">Loading receipt balances...</p>
+            </div>
+        </div>
+    `;
+    
+    fetchAllReceiptBalances();
+}
+
+/**
+ * Fetches and displays all receipt balances with filtering
+ */
+async function fetchAllReceiptBalances(filters = {}) {
+    const listElement = document.getElementById('receipt-balances-list');
+    let html = ``;
+    
+    try {
+        let query = db.collection("receipts").orderBy("createdAt", "desc");
+        
+        // Apply filters if provided
+        if (filters.clientName) {
+            query = query.where("receivedFrom", ">=", filters.clientName)
+                        .where("receivedFrom", "<=", filters.clientName + '\uf8ff');
+        }
+        
+        const snapshot = await query.get();
+        
+        if (snapshot.empty) {
+            listElement.innerHTML = `<p class="text-gray-500">No receipts found.</p>`;
+            return;
+        }
+        
+        html = `<div class="overflow-x-auto">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Receipt ID</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Client</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total Paid</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Balances</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Payments</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody class="bg-white divide-y divide-gray-200">`;
+        
+        for (const doc of snapshot.docs) {
+            const data = doc.data();
+            
+            // Calculate balances for this receipt
+            const balances = await calculateReceiptBalances(doc.id);
+            const totalPaidUSD = balances.totalPaidUSD;
+            const totalPaidKSH = balances.totalPaidKSH;
+            
+            // Calculate remaining balances
+            const remainingUSD = data.balanceDetails?.balanceRemainingUSD || 0;
+            const remainingKSH = data.balanceDetails?.balanceRemainingKSH || 0;
+            
+            // Apply date filter if provided
+            if (filters.dateFrom || filters.dateTo) {
+                const receiptDate = data.createdAt?.toDate ? data.createdAt.toDate() : new Date();
+                if (filters.dateFrom && receiptDate < new Date(filters.dateFrom)) continue;
+                if (filters.dateTo && receiptDate > new Date(filters.dateTo)) continue;
+            }
+            
+            html += `<tr>
+                        <td class="px-4 py-3 whitespace-nowrap">
+                            <div class="text-sm font-medium text-primary-blue">${data.receiptId}</div>
+                            <div class="text-xs text-gray-500">${data.receiptDate}</div>
+                        </td>
+                        <td class="px-4 py-3 whitespace-nowrap">
+                            <div class="text-sm text-gray-900">${data.receivedFrom}</div>
+                            <div class="text-xs text-gray-500">${data.beingPaidFor || 'N/A'}</div>
+                        </td>
+                        <td class="px-4 py-3 whitespace-nowrap">
+                            <div class="text-sm font-bold text-green-600">USD ${totalPaidUSD.toFixed(2)}</div>
+                            <div class="text-xs text-gray-600">KES ${totalPaidKSH.toFixed(2)}</div>
+                        </td>
+                        <td class="px-4 py-3 whitespace-nowrap">
+                            <div class="text-sm font-bold ${remainingUSD > 0 ? 'text-secondary-red' : 'text-green-600'}">
+                                USD ${remainingUSD.toFixed(2)}
+                            </div>
+                            <div class="text-xs text-gray-600">
+                                KES ${remainingKSH.toFixed(2)}
+                            </div>
+                        </td>
+                        <td class="px-4 py-3 whitespace-nowrap">
+                            <div class="text-sm text-gray-900">${balances.paymentCount} payment(s)</div>
+                            <div class="text-xs text-gray-500">Last: ${balances.payments.length > 0 ? balances.payments[balances.payments.length-1].paymentDate : 'N/A'}</div>
+                        </td>
+                        <td class="px-4 py-3 whitespace-nowrap text-sm font-medium">
+                            <button onclick='viewReceiptPaymentDetails("${doc.id}", "${data.receiptId}", "${data.receivedFrom}")' 
+                                    class="text-primary-blue hover:text-blue-900 mr-3">
+                                Details
+                            </button>
+                            <button onclick='addPaymentToExistingReceipt("${doc.id}", "${data.receiptId}", "${data.receivedFrom}", ${data.exchangeRate || 130})' 
+                                    class="text-green-600 hover:text-green-900">
+                                Add Payment
+                            </button>
+                        </td>
+                    </tr>`;
+        }
+        
+        html += `</tbody></table></div>`;
+        listElement.innerHTML = html;
+        
+    } catch (error) {
+        console.error("Error fetching receipt balances:", error);
+        listElement.innerHTML = `<p class="text-red-500">Error loading receipt balances. Check console for details.</p>`;
+    }
+}
+
+/**
+ * Filters receipt balances based on search criteria
+ */
+function filterReceiptBalances() {
+    const clientName = document.getElementById('searchClient').value;
+    const dateFrom = document.getElementById('filterDateFrom').value;
+    const dateTo = document.getElementById('filterDateTo').value;
+    
+    const filters = {};
+    if (clientName) filters.clientName = clientName;
+    if (dateFrom) filters.dateFrom = dateFrom;
+    if (dateTo) filters.dateTo = dateTo;
+    
+    fetchAllReceiptBalances(filters);
+}
+
+/**
+ * Views detailed payment history for a specific receipt
+ */
+async function viewReceiptPaymentDetails(receiptDocId, receiptNumber, clientName) {
+    const balances = await calculateReceiptBalances(receiptDocId);
+    
+    let paymentDetailsHtml = `<h4 class="font-bold text-primary-blue mb-3">Payment History for ${receiptNumber}</h4>`;
+    paymentDetailsHtml += `<p class="text-sm text-gray-600 mb-4">Client: ${clientName}</p>`;
+    
+    if (balances.payments.length === 0) {
+        paymentDetailsHtml += `<p class="text-gray-500">No payment history found.</p>`;
+    } else {
+        paymentDetailsHtml += `<div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Payment #</th>
+                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Date</th>
+                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Amount</th>
+                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">USD Equivalent</th>
+                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">KES Equivalent</th>
+                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Method</th>
+                    </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-200">`;
+        
+        balances.payments.forEach((payment, index) => {
+            paymentDetailsHtml += `<tr>
+                <td class="px-4 py-2 text-sm">${index + 1}</td>
+                <td class="px-4 py-2 text-sm">${payment.paymentDate || 'N/A'}</td>
+                <td class="px-4 py-2 text-sm font-bold">${payment.currency} ${payment.amount.toFixed(2)}</td>
+                <td class="px-4 py-2 text-sm">USD ${payment.amountUSD?.toFixed(2) || (payment.currency === 'USD' ? payment.amount.toFixed(2) : (payment.amount / (payment.exchangeRate || 130)).toFixed(2))}</td>
+                <td class="px-4 py-2 text-sm">KES ${payment.amountKSH?.toFixed(2) || (payment.currency === 'KSH' ? payment.amount.toFixed(2) : (payment.amount * (payment.exchangeRate || 130)).toFixed(2))}</td>
+                <td class="px-4 py-2 text-sm">${payment.paymentMethod || 'N/A'}</td>
+            </tr>`;
+        });
+        
+        paymentDetailsHtml += `</tbody></table>`;
+        
+        // Add summary
+        paymentDetailsHtml += `<div class="mt-4 p-3 bg-blue-50 rounded-lg">
+            <h5 class="font-bold text-primary-blue mb-2">Payment Summary</h5>
+            <p class="text-sm">Total Payments: ${balances.payments.length}</p>
+            <p class="text-sm">Total Paid (USD): <span class="font-bold">${balances.totalPaidUSD.toFixed(2)}</span></p>
+            <p class="text-sm">Total Paid (KES): <span class="font-bold">${balances.totalPaidKSH.toFixed(2)}</span></p>
+        </div>`;
+    }
+    
+    const modalHtml = `
+        <div id="payment-details-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+            <div class="relative top-20 mx-auto p-5 border w-3/4 shadow-lg rounded-md bg-white">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-lg font-semibold text-primary-blue">Payment Details</h3>
+                    <button onclick="document.getElementById('payment-details-modal').remove()" class="text-gray-500 hover:text-gray-700">
+                        &times;
+                    </button>
+                </div>
+                ${paymentDetailsHtml}
+                <div class="mt-4 flex justify-end">
+                    <button onclick="document.getElementById('payment-details-modal').remove()" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-md">
+                        Close
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+}
+
+/**
+ * Adds a payment to an existing receipt
+ */
+function addPaymentToExistingReceipt(receiptDocId, receiptNumber, clientName, exchangeRate = 130) {
+    const modalHtml = `
+        <div id="add-payment-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+            <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+                <h3 class="text-lg font-semibold text-primary-blue mb-4">Add Payment to Receipt</h3>
+                <p class="text-sm mb-3">
+                    <strong>Receipt:</strong> ${receiptNumber}<br>
+                    <strong>Client:</strong> ${clientName}<br>
+                    <strong>Exchange Rate:</strong> USD 1 = KES ${exchangeRate}
+                </p>
+                <form id="add-payment-form" onsubmit="event.preventDefault(); saveAdditionalPayment('${receiptDocId}', '${receiptNumber}', ${exchangeRate})">
+                    <div class="mb-3">
+                        <label class="block text-sm font-medium text-gray-700">Payment Date</label>
+                        <input type="date" id="paymentDate" required value="${new Date().toISOString().slice(0, 10)}" class="mt-1 block w-full p-2 border rounded-md">
+                    </div>
+                    <div class="mb-3">
+                        <label class="block text-sm font-medium text-gray-700">Amount</label>
+                        <div class="grid grid-cols-3 gap-2">
+                            <select id="paymentCurrency" required class="p-2 border rounded-md">
+                                <option value="KSH">KSH</option>
+                                <option value="USD">USD</option>
+                            </select>
+                            <input type="number" id="paymentAmount" step="0.01" required placeholder="Amount" class="col-span-2 p-2 border rounded-md">
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="block text-sm font-medium text-gray-700">Payment Method</label>
+                        <select id="paymentMethod" required class="mt-1 block w-full p-2 border rounded-md">
+                            <option value="Bank Transfer">Bank Transfer</option>
+                            <option value="Cheque">Cheque</option>
+                            <option value="Cash">Cash</option>
+                            <option value="RTGS/TT">RTGS/TT</option>
+                            <option value="Other">Other</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="block text-sm font-medium text-gray-700">Reference/Description</label>
+                        <input type="text" id="paymentDescription" required placeholder="e.g., Balance Payment, Additional Payment" class="mt-1 block w-full p-2 border rounded-md">
+                    </div>
+                    <div class="mb-4 p-2 bg-yellow-50 rounded">
+                        <p class="text-xs text-gray-600">
+                            <strong>Note:</strong> Amount will be auto-converted using exchange rate: USD 1 = KES ${exchangeRate}
+                        </p>
+                    </div>
+                    <div class="flex justify-end space-x-3">
+                        <button type="button" onclick="document.getElementById('add-payment-modal').remove()" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-md">
+                            Cancel
+                        </button>
+                        <button type="submit" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-md">
+                            Add Payment
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+}
+
+/**
+ * Saves an additional payment to an existing receipt
+ */
+async function saveAdditionalPayment(receiptDocId, receiptNumber, exchangeRate) {
+    const form = document.getElementById('add-payment-form');
+    if (!form.checkValidity()) {
+        form.reportValidity();
+        return;
+    }
+    
+    const paymentDate = document.getElementById('paymentDate').value;
+    const paymentCurrency = document.getElementById('paymentCurrency').value;
+    const paymentAmount = parseFloat(document.getElementById('paymentAmount').value);
+    const paymentMethod = document.getElementById('paymentMethod').value;
+    const paymentDescription = document.getElementById('paymentDescription').value;
+    
+    if (isNaN(paymentAmount) || paymentAmount <= 0) {
+        alert("Please enter a valid payment amount.");
+        return;
+    }
+    
+    // Calculate amounts in both currencies
+    let amountUSD = paymentAmount;
+    let amountKSH = paymentAmount;
+    
+    if (paymentCurrency === 'KSH') {
+        amountUSD = paymentAmount / exchangeRate;
+        amountKSH = paymentAmount;
+    } else if (paymentCurrency === 'USD') {
+        amountUSD = paymentAmount;
+        amountKSH = paymentAmount * exchangeRate;
+    }
+    
+    // Get next payment number
+    const paymentsSnapshot = await db.collection("receipt_payments")
+        .where("receiptId", "==", receiptDocId)
+        .get();
+    
+    const nextPaymentNumber = paymentsSnapshot.size + 1;
+    
+    // Save payment record
+    const paymentData = {
+        receiptId: receiptDocId,
+        receiptNumber: receiptNumber,
+        paymentNumber: nextPaymentNumber,
+        paymentDate: paymentDate,
+        amount: paymentAmount,
+        currency: paymentCurrency,
+        amountUSD: amountUSD,
+        amountKSH: amountKSH,
+        exchangeRate: exchangeRate,
+        description: paymentDescription,
+        paymentMethod: paymentMethod,
+        createdBy: currentUser.email,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    };
+    
+    try {
+        await db.collection("receipt_payments").add(paymentData);
+        
+        // Update receipt balance
+        const receiptDoc = await db.collection("receipts").doc(receiptDocId).get();
+        const receiptData = receiptDoc.data();
+        
+        const currentBalanceUSD = receiptData.balanceDetails?.balanceRemainingUSD || 0;
+        const newBalanceUSD = Math.max(0, currentBalanceUSD - amountUSD);
+        const newBalanceKSH = newBalanceUSD * exchangeRate;
+        
+        await db.collection("receipts").doc(receiptDocId).update({
+            "balanceDetails.balanceRemaining": newBalanceUSD,
+            "balanceDetails.balanceRemainingUSD": newBalanceUSD,
+            "balanceDetails.balanceRemainingKSH": newBalanceKSH
+        });
+        
+        document.getElementById('add-payment-modal').remove();
+        alert(`Additional payment of ${paymentCurrency} ${paymentAmount.toFixed(2)} added successfully!`);
+        
+        // Refresh the view
+        if (document.getElementById('receipt-balances-list')) {
+            fetchAllReceiptBalances();
+        } else {
+            fetchReceipts();
+        }
+        
+    } catch (error) {
+        console.error("Error saving additional payment:", error);
+        alert("Failed to save payment: " + error.message);
     }
 }
 
@@ -449,6 +1079,62 @@ function reDownloadReceipt(data) {
          data.receiptDate = new Date().toLocaleDateString('en-US'); // Fallback
     }
     generateReceiptPDF(data);
+}
+
+/**
+ * View balances for a specific receipt
+ */
+function viewReceiptBalances(data) {
+    const modalHtml = `
+        <div id="balances-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+            <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+                <h3 class="text-lg font-semibold text-primary-blue mb-4">Receipt Balances</h3>
+                <p class="text-sm mb-3">
+                    <strong>Receipt:</strong> ${data.receiptId}<br>
+                    <strong>Client:</strong> ${data.receivedFrom}<br>
+                    <strong>Exchange Rate:</strong> USD 1 = KES ${data.exchangeRate || 130}
+                </p>
+                <div class="mb-4 p-3 bg-blue-50 rounded-lg">
+                    <h4 class="font-bold text-primary-blue mb-2">Payment Summary</h4>
+                    <p class="text-sm"><strong>Total Payments:</strong> ${data.paymentCount || 1}</p>
+                    <p class="text-sm"><strong>Total Paid (USD):</strong> <span class="font-bold text-green-600">${data.totalPaidUSD?.toFixed(2) || data.amountReceivedUSD?.toFixed(2) || (data.currency === 'USD' ? data.amountReceived.toFixed(2) : (data.amountReceived / (data.exchangeRate || 130)).toFixed(2))}</span></p>
+                    <p class="text-sm"><strong>Total Paid (KES):</strong> <span class="font-bold text-green-600">${data.totalPaidKSH?.toFixed(2) || data.amountReceivedKSH?.toFixed(2) || (data.currency === 'KSH' ? data.amountReceived.toFixed(2) : (data.amountReceived * (data.exchangeRate || 130)).toFixed(2))}</span></p>
+                </div>
+                <div class="mb-4 p-3 ${data.balanceDetails?.balanceRemaining > 0 ? 'bg-red-50' : 'bg-green-50'} rounded-lg">
+                    <h4 class="font-bold ${data.balanceDetails?.balanceRemaining > 0 ? 'text-secondary-red' : 'text-green-600'} mb-2">
+                        ${data.balanceDetails?.balanceRemaining > 0 ? 'Remaining Balance' : 'Fully Paid'}
+                    </h4>
+                    <p class="text-sm"><strong>USD Balance:</strong> <span class="font-bold">${data.balanceDetails?.balanceRemainingUSD?.toFixed(2) || data.balanceDetails?.balanceRemaining?.toFixed(2) || '0.00'}</span></p>
+                    <p class="text-sm"><strong>KES Balance:</strong> <span class="font-bold">${data.balanceDetails?.balanceRemainingKSH?.toFixed(2) || (data.balanceDetails?.balanceRemaining * (data.exchangeRate || 130)).toFixed(2) || '0.00'}</span></p>
+                    ${data.balanceDetails?.balanceDueDate ? `<p class="text-sm"><strong>Due Date:</strong> ${data.balanceDetails.balanceDueDate}</p>` : ''}
+                </div>
+                <div class="flex justify-end space-x-3">
+                    <button onclick="addPaymentToReceipt(${JSON.stringify(data)})" 
+                            class="bg-primary-blue hover:bg-blue-900 text-white font-bold py-2 px-4 rounded-md">
+                        Add Payment
+                    </button>
+                    <button onclick="document.getElementById('balances-modal').remove()" 
+                            class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-md">
+                        Close
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+}
+
+/**
+ * Add payment to receipt from receipt history
+ */
+function addPaymentToReceipt(receiptData) {
+    addPaymentToExistingReceipt(
+        receiptData.firestoreId,
+        receiptData.receiptId,
+        receiptData.receivedFrom,
+        receiptData.exchangeRate || 130
+    );
 }
 
 /**
@@ -614,7 +1300,7 @@ function generateReceiptPDF(data) {
     doc.text(footerText, pageW / 2, doc.internal.pageSize.getHeight() - 4, null, null, "center");
 
     doc.save(`Receipt_${data.receiptId}.pdf`);
-      }
+}
 
 // =================================================================
 //                 7. BANK MANAGEMENT MODULE (NEW)
@@ -1039,9 +1725,20 @@ function createReceiptFromInvoice(invoiceData) {
     setTimeout(() => {
         const receivedFromField = document.getElementById('receivedFrom');
         const beingPaidForField = document.getElementById('beingPaidFor');
+        const invoiceRefField = document.getElementById('invoiceReference');
         
         if (receivedFromField) receivedFromField.value = invoiceData.clientName;
         if (beingPaidForField) beingPaidForField.value = `${invoiceData.carDetails.make} ${invoiceData.carDetails.model} ${invoiceData.carDetails.year}`;
+        if (invoiceRefField) {
+            invoiceRefField.value = invoiceData.invoiceId;
+            // Store exchange rate for calculations
+            invoiceRefField.dataset.exchangeRate = invoiceData.exchangeRate;
+            invoiceRefField.dataset.totalUSD = invoiceData.pricing.totalUSD;
+            invoiceRefField.dataset.balanceUSD = invoiceData.pricing.balanceUSD;
+        }
+        
+        // Trigger fetch invoice details
+        fetchInvoiceDetails();
     }, 100);
 }
 
