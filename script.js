@@ -1968,6 +1968,17 @@ function reDownloadReceipt(data) {
     if (!data.receiptDate) {
          data.receiptDate = new Date().toLocaleDateString('en-US'); // Fallback
     }
+  // If we have the firestoreId, fetch payment history
+    if (data.firestoreId) {
+        try {
+            const balances = await calculateReceiptBalances(data.firestoreId);
+            data.totalPaidUSD = balances.totalPaidUSD;
+            data.totalPaidKSH = balances.totalPaidKSH;
+            data.paymentCount = balances.paymentCount;
+        } catch (error) {
+            console.error("Error fetching payment history for PDF:", error);
+        }
+    }
     generateReceiptPDF(data);
 }
 
@@ -2028,9 +2039,10 @@ function addPaymentToReceipt(receiptData) {
 }
 
 /**
- * Generates and downloads a custom PDF for the comprehensive receipt. (SPACING ADJUSTED)
+/**
+ * Generates and downloads a custom PDF for the comprehensive receipt. (WITH PAYMENT HISTORY)
  */
-function generateReceiptPDF(data) {
+async function generateReceiptPDF(data) {
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF('p', 'mm', 'a4'); 
 
@@ -2082,7 +2094,7 @@ function generateReceiptPDF(data) {
     
     drawText('DATE:', pageW - margin - 3, y + 5, 10, 'bold', secondaryColor, 'right');
     drawText(data.receiptDate, pageW - margin - 3, y + 11, 14, 'bold', primaryColor, 'right');
-    y += 20; // Increased space below the box
+    y += 20;
 
     // =================================================================
     // MAIN BODY
@@ -2094,7 +2106,7 @@ function generateReceiptPDF(data) {
     doc.setDrawColor(0);
     doc.line(margin + 35, y, pageW - margin, y);
     drawText(data.receivedFrom, margin + 35, y - 0.5, 12, 'bold', 0);
-    y += lineHeight + 2; // Increased space
+    y += lineHeight + 2;
 
     // The Sum of Money (Words)
     drawText('THE SUM OF:', margin, y + 3, 10, 'bold');
@@ -2109,41 +2121,85 @@ function generateReceiptPDF(data) {
     // Use splitTextToSize to wrap the words nicely within the box
     const wrappedWords = doc.splitTextToSize(data.amountWords, boxW - 37);
     doc.text(wrappedWords, margin + 36, y + 4);
-    y += lineHeight * 2.5 + 5; // Increased space below the box
+    y += lineHeight * 2.5 + 5;
 
     // Being Paid For
     drawText('BEING PAID FOR:', margin, y, 10, 'bold', primaryColor);
     doc.line(margin + 35, y, pageW - margin, y);
     drawText(data.beingPaidFor, margin + 35, y - 0.5, 12, 'bold', 0);
-    y += lineHeight + 4; // Increased space
+    y += lineHeight + 4;
 
-    // Payment References Section
+// In the generateReceiptWithHistoryPDF function, find the Payment References Section
+// and update it like this:
+
+    // =================================================================
+    // PAYMENT REFERENCES SECTION (UPDATED BANK DISPLAY)
+    // =================================================================
     doc.setTextColor(primaryColor);
     drawText('PAYMENT DETAILS:', margin, y, 10, 'bold');
-    y += 4; // Increased space after title
+    y += 4;
 
     doc.setFontSize(10);
     doc.setTextColor(0);
+
+    // Parse bank details from the bankUsed field
+    let bankName = data.paymentDetails.bankUsed || 'N/A';
+    let branchName = '';
+    
+    // Extract branch if it exists in the format "Bank Name - Branch Name (Currency)"
+    if (bankName.includes(' - ')) {
+        const parts = bankName.split(' - ');
+        bankName = parts[0];
+        if (parts[1]) {
+            // Remove currency from branch if present
+            branchName = parts[1].replace(/\s*\([^)]*\)$/, '');
+        }
+    }
 
     // Row 1: Cheque and RTGS/TT
     doc.rect(margin, y, boxW * 0.45, lineHeight); // Cheque Box
     doc.text(`Cheque No: ${data.paymentDetails.chequeNo || 'N/A'}`, margin + 2, y + 4.5);
     doc.rect(margin + boxW * 0.55, y, boxW * 0.45, lineHeight); // RTGS/TT Box
     doc.text(`RTGS/TT No: ${data.paymentDetails.rtgsTtNo || 'N/A'}`, margin + boxW * 0.55 + 2, y + 4.5);
-    y += lineHeight + 2; // Increased space
+    y += lineHeight + 2;
 
-    // Row 2: Bank Used and Receipt Type
-    doc.rect(margin, y, boxW * 0.45, lineHeight); // Bank Used Box
-    doc.text(`Bank Used: ${data.paymentDetails.bankUsed || 'N/A'}`, margin + 2, y + 4.5);
+    // Row 2: Bank Name Only
+    doc.rect(margin, y, boxW * 0.45, lineHeight); // Bank Name Box
+    doc.text(`Bank Name: ${bankName}`, margin + 2, y + 4.5);
+    
+    // Row 2: Receipt Type
     doc.rect(margin + boxW * 0.55, y, boxW * 0.45, lineHeight); // Receipt Type Box
     doc.text(`Receipt Type: ${data.receiptType}`, margin + boxW * 0.55 + 2, y + 4.5);
-    y += lineHeight + 6; // Increased space
+    y += lineHeight + 2;
+
+    // Row 3: Bank Branch (if exists)
+    if (branchName) {
+        doc.rect(margin, y, boxW * 0.45, lineHeight); // Bank Branch Box
+        doc.text(`Bank Branch: ${branchName}`, margin + 2, y + 4.5);
+        y += lineHeight + 2;
+    }
 
     // =================================================================
-    // AMOUNT FIGURE (BIG BOX)
+    // AMOUNT FIGURE (BIG BOX) - UPDATED WITH TOTAL PAID
     // =================================================================
     const amountBoxH = 15;
     const amountBoxY = y + 5;
+    
+    // Get payment history if available
+    let totalPaidUSD = data.amountReceivedUSD || 0;
+    let totalPaidKSH = data.amountReceivedKSH || 0;
+    let paymentCount = 1;
+    
+    if (data.firestoreId) {
+        try {
+            const balances = await calculateReceiptBalances(data.firestoreId);
+            totalPaidUSD = balances.totalPaidUSD;
+            totalPaidKSH = balances.totalPaidKSH;
+            paymentCount = balances.paymentCount;
+        } catch (error) {
+            console.error("Error fetching payment history:", error);
+        }
+    }
     
     // Total Amount Box (Right Side)
     doc.setFillColor(secondaryColor);
@@ -2166,7 +2222,100 @@ function generateReceiptPDF(data) {
     drawText(`Balance Remaining: ${balanceText}`, margin, amountBoxY + 10, 10);
     drawText(`Due On/Before: ${data.balanceDetails.balanceDueDate || 'N/A'}`, margin, amountBoxY + 14, 10);
     
-    y = amountBoxY + amountBoxH + 7; // Increased space after the box
+    y = amountBoxY + amountBoxH + 7;
+
+    // =================================================================
+    // PAYMENT HISTORY SECTION (NEW)
+    // =================================================================
+    if (data.firestoreId && paymentCount > 1) {
+        try {
+            const balances = await calculateReceiptBalances(data.firestoreId);
+            
+            if (balances.payments.length > 0) {
+                y += 5;
+                drawText('PAYMENT HISTORY', margin, y, 12, 'bold', primaryColor);
+                y += 8;
+                
+                // Summary Box
+                doc.setFillColor(240, 240, 240);
+                doc.rect(margin, y, boxW, 10, 'F');
+                doc.setDrawColor(primaryColor);
+                doc.setLineWidth(0.3);
+                doc.rect(margin, y, boxW, 10);
+                
+                doc.setFontSize(9);
+                doc.setTextColor(primaryColor);
+                doc.setFont("helvetica", "bold");
+                doc.text(`Total Payments: ${balances.paymentCount}`, margin + 5, y + 6);
+                doc.text(`Total Paid (USD): ${balances.totalPaidUSD.toFixed(2)}`, margin + 60, y + 6);
+                doc.text(`Total Paid (KES): ${balances.totalPaidKSH.toFixed(2)}`, margin + 120, y + 6);
+                y += 12;
+                
+                // Table Header
+                doc.setFillColor(primaryColor);
+                doc.rect(margin, y, boxW, 6, 'F');
+                doc.setTextColor(255);
+                drawText('#', margin + 2, y + 4, 8, 'bold', 255);
+                drawText('Date', margin + 10, y + 4, 8, 'bold', 255);
+                drawText('Amount', margin + 40, y + 4, 8, 'bold', 255);
+                drawText('USD', margin + 75, y + 4, 8, 'bold', 255);
+                drawText('KES', margin + 105, y + 4, 8, 'bold', 255);
+                drawText('Method', margin + 135, y + 4, 8, 'bold', 255);
+                drawText('Description', margin + 170, y + 4, 8, 'bold', 255);
+                y += 6;
+                
+                // Payment Rows
+                doc.setFontSize(8);
+                doc.setTextColor(0);
+                
+                balances.payments.forEach((payment, index) => {
+                    // Check if we need a new page
+                    if (y > doc.internal.pageSize.getHeight() - 20) {
+                        doc.addPage();
+                        y = 10;
+                    }
+                    
+                    // Alternate row colors
+                    if (index % 2 === 0) {
+                        doc.setFillColor(250, 250, 250);
+                        doc.rect(margin, y, boxW, 5, 'F');
+                    }
+                    
+                    doc.rect(margin, y, boxW, 5);
+                    drawText(`${index + 1}`, margin + 2, y + 3.5, 8);
+                    drawText(payment.paymentDate || 'N/A', margin + 10, y + 3.5, 8);
+                    drawText(`${payment.currency} ${payment.amount.toFixed(2)}`, margin + 40, y + 3.5, 8);
+                    drawText(`USD ${payment.amountUSD?.toFixed(2) || (payment.currency === 'USD' ? payment.amount.toFixed(2) : (payment.amount / (payment.exchangeRate || data.exchangeRate || 130)).toFixed(2))}`, margin + 75, y + 3.5, 8);
+                    drawText(`KES ${payment.amountKSH?.toFixed(2) || (payment.currency === 'KSH' ? payment.amount.toFixed(2) : (payment.amount * (payment.exchangeRate || data.exchangeRate || 130)).toFixed(2))}`, margin + 105, y + 3.5, 8);
+                    
+                    // Truncate method if too long
+                    const method = payment.paymentMethod || 'N/A';
+                    const shortMethod = method.length > 15 ? method.substring(0, 12) + '...' : method;
+                    drawText(shortMethod, margin + 135, y + 3.5, 8);
+                    
+                    // Truncate description if too long
+                    const description = payment.description || 'Payment';
+                    const shortDesc = description.length > 20 ? description.substring(0, 17) + '...' : description;
+                    drawText(shortDesc, margin + 170, y + 3.5, 8);
+                    
+                    y += 5;
+                });
+                
+                y += 3;
+            }
+        } catch (error) {
+            console.error("Error adding payment history to PDF:", error);
+        }
+    } else if (data.firestoreId) {
+        // Single payment note
+        y += 5;
+        doc.setFontSize(9);
+        doc.setTextColor(secondaryColor);
+        doc.setFont("helvetica", "italic");
+        doc.text(`Note: This is the initial payment for this receipt.`, margin, y);
+        doc.setTextColor(0);
+        y += 5;
+    }
 
     // =================================================================
     // FOOTER/SIGNATURES
@@ -2179,7 +2328,6 @@ function generateReceiptPDF(data) {
     drawText('For WanBite Investment Co. LTD', pageW - margin - 50, y + 19, 10, 'normal', primaryColor);
     y += 25;
 
-
     // --- Global Footer ---
     doc.setFillColor(primaryColor);
     doc.rect(0, doc.internal.pageSize.getHeight() - 10, pageW, 10, 'F');
@@ -2191,7 +2339,6 @@ function generateReceiptPDF(data) {
 
     doc.save(`Receipt_${data.receiptId}.pdf`);
 }
-
 // =================================================================
 //                 7. BANK MANAGEMENT MODULE (NEW)
 // =================================================================
