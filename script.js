@@ -337,6 +337,10 @@ function renderInvoiceSearchResult(doc, docJson) {
                             class="bg-secondary-red hover:bg-red-700 text-white text-xs py-1 px-3 rounded-full transition duration-150">
                         Create Receipt
                     </button>
+                    <button onclick='markInvoiceDepositPaid(${docJson})' 
+                            class="bg-green-600 hover:bg-green-700 text-white text-xs py-1 px-3 rounded-full transition duration-150">
+                        Deposit Paid
+                    </button>
                 </div>
             </div>
         </div>
@@ -703,14 +707,21 @@ function renderReceiptForm(invoiceReference = '') {
                     <input type="text" id="beingPaidFor" required placeholder="Being Paid For (e.g., Toyota Vitz 2018 Deposit)" value="${invoiceReference}" class="mb-4 block w-full p-2 border rounded-md">
 
                     <fieldset class="border p-4 rounded-lg mb-4">
-                        <legend class="text-base font-semibold text-primary-blue px-2">Payment References</legend>
-                        <div class="grid grid-cols-3 gap-3">
-                            <input type="text" id="chequeNo" placeholder="Cheque No. (Optional)" class="p-2 border rounded-md">
-                            <input type="text" id="rtgsTtNo" placeholder="RTGS/TT No. (Optional)" class="p-2 border rounded-md">
-                            <select id="bankUsed" required class="p-2 border rounded-md">
-                                <option value="" disabled selected>Select Bank Used</option>
+                        <legend class="text-base font-semibold text-primary-blue px-2">Payment Details</legend>
+                        <div class="mb-3">
+                            <label for="exchangeRate" class="block text-sm font-medium text-gray-700">Exchange Rate (USD 1 = KES)</label>
+                            <input type="number" id="exchangeRate" step="0.01" value="130.00" required class="w-full p-2 border rounded-md">
+                        </div>
+                        <div class="mb-3">
+                            <label for="bankUsed" class="block text-sm font-medium text-gray-700">Bank Used</label>
+                            <select id="bankUsed" required class="w-full p-2 border rounded-md">
+                                <option value="" disabled selected>Select Bank</option>
                                 <option value="Cash">Cash</option>
                             </select>
+                        </div>
+                        <div class="grid grid-cols-2 gap-3">
+                            <input type="text" id="chequeNo" placeholder="Cheque No. (Optional)" class="p-2 border rounded-md">
+                            <input type="text" id="rtgsTtNo" placeholder="RTGS/TT No. (Optional)" class="p-2 border rounded-md">
                         </div>
                     </fieldset>
 
@@ -833,6 +844,7 @@ async function fetchInvoiceDetails() {
     // Auto-populate receipt form
     document.getElementById('receivedFrom').value = invoiceDetails.clientName;
     document.getElementById('beingPaidFor').value = `${invoiceDetails.vehicleInfo} Deposit`;
+    document.getElementById('exchangeRate').value = invoiceDetails.exchangeRate;
     
     // Store exchange rate in hidden field for calculations
     document.getElementById('invoiceReference').dataset.exchangeRate = invoiceDetails.exchangeRate;
@@ -876,10 +888,10 @@ function updateAmountInWords() {
 function updateReceiptCalculations() {
     const amountReceived = parseFloat(document.getElementById('amountReceived').value) || 0;
     const currency = document.getElementById('currency').value;
+    const exchangeRate = parseFloat(document.getElementById('exchangeRate').value) || 130;
     const invoiceRef = document.getElementById('invoiceReference');
-    const exchangeRate = parseFloat(invoiceRef.dataset.exchangeRate) || 130;
     const totalUSD = parseFloat(invoiceRef.dataset.totalUSD) || 0;
-    const initialBalanceUSD = parseFloat(invoiceRef.dataset.balanceUSD) || 0;
+    const initialBalanceUSD = parseFloat(invoiceRef.dataset.balanceUSD) || totalUSD;
     
     // Calculate amounts in different currencies
     let amountReceivedUSD = amountReceived;
@@ -950,13 +962,14 @@ async function saveReceipt() {
     const chequeNo = document.getElementById('chequeNo').value;
     const rtgsTtNo = document.getElementById('rtgsTtNo').value;
     const bankUsed = document.getElementById('bankUsed').value;
+    const exchangeRate = parseFloat(document.getElementById('exchangeRate').value) || 130;
     const balanceRemaining = parseFloat(document.getElementById('balanceRemaining').value) || 0;
     const balanceDueDate = document.getElementById('balanceDueDate').value;
     const invoiceReference = document.getElementById('invoiceReference').value;
     const invoiceRefElement = document.getElementById('invoiceReference');
-    const exchangeRate = invoiceRefElement && invoiceRefElement.dataset.exchangeRate 
+    const invoiceExchangeRate = invoiceRefElement && invoiceRefElement.dataset.exchangeRate 
         ? parseFloat(invoiceRefElement.dataset.exchangeRate) 
-        : 130;
+        : exchangeRate;
 
     if (isNaN(amountReceived) || amountReceived <= 0) {
         alert("Please enter a valid amount received.");
@@ -1809,13 +1822,14 @@ function addPaymentToExistingReceipt(receiptDocId, receiptNumber, clientName, ex
                         </div>
                     </div>
                     <div class="mb-3">
-                        <label class="block text-sm font-medium text-gray-700">Payment Method</label>
-                        <select id="paymentMethod" required class="mt-1 block w-full p-2 border rounded-md">
-                            <option value="Bank Transfer">Bank Transfer</option>
-                            <option value="Cheque">Cheque</option>
+                        <label class="block text-sm font-medium text-gray-700">Exchange Rate (USD 1 = KES)</label>
+                        <input type="number" id="paymentExchangeRate" step="0.01" required value="${exchangeRate}" class="w-full p-2 border rounded-md">
+                    </div>
+                    <div class="mb-3">
+                        <label class="block text-sm font-medium text-gray-700">Bank Used</label>
+                        <select id="paymentBankUsed" required class="mt-1 block w-full p-2 border rounded-md">
+                            <option value="" disabled selected>Select Bank</option>
                             <option value="Cash">Cash</option>
-                            <option value="RTGS/TT">RTGS/TT</option>
-                            <option value="Other">Other</option>
                         </select>
                     </div>
                     <div class="mb-3">
@@ -1841,6 +1855,51 @@ function addPaymentToExistingReceipt(receiptDocId, receiptNumber, clientName, ex
     `;
     
     document.body.insertAdjacentHTML('beforeend', modalHtml);
+    
+    // Populate bank dropdown in the modal
+    populateBankDropdownForModal('paymentBankUsed');
+}
+
+/**
+ * Populates bank dropdown in modal
+ */
+async function populateBankDropdownForModal(dropdownId) {
+    const bankSelect = document.getElementById(dropdownId);
+    if (!bankSelect) return;
+
+    // Clear existing options except the first one
+    while (bankSelect.options.length > 1) {
+        bankSelect.remove(1);
+    }
+
+    try {
+        const snapshot = await db.collection("bankDetails").orderBy("createdAt", "desc").get();
+        
+        if (snapshot.empty) {
+            const option = document.createElement('option');
+            option.value = "";
+            option.textContent = "No banks configured. Add banks first.";
+            option.disabled = true;
+            bankSelect.appendChild(option);
+            return;
+        }
+
+        snapshot.forEach(doc => {
+            const data = doc.data();
+            const option = document.createElement('option');
+            option.value = `${data.name} - ${data.branch || 'No Branch'} (${data.currency})`;
+            option.textContent = `${data.name} - ${data.branch || 'No Branch'} (${data.currency})`;
+            bankSelect.appendChild(option);
+        });
+
+    } catch (error) {
+        console.error("Error loading banks for modal:", error);
+        const option = document.createElement('option');
+        option.value = "";
+        option.textContent = "Error loading banks";
+        option.disabled = true;
+        bankSelect.appendChild(option);
+    }
 }
 
 /**
@@ -1856,7 +1915,8 @@ async function saveAdditionalPayment(receiptDocId, receiptNumber, exchangeRate) 
     const paymentDate = document.getElementById('paymentDate').value;
     const paymentCurrency = document.getElementById('paymentCurrency').value;
     const paymentAmount = parseFloat(document.getElementById('paymentAmount').value);
-    const paymentMethod = document.getElementById('paymentMethod').value;
+    const paymentExchangeRate = parseFloat(document.getElementById('paymentExchangeRate').value);
+    const paymentBankUsed = document.getElementById('paymentBankUsed').value;
     const paymentDescription = document.getElementById('paymentDescription').value;
     
     if (isNaN(paymentAmount) || paymentAmount <= 0) {
@@ -1869,11 +1929,11 @@ async function saveAdditionalPayment(receiptDocId, receiptNumber, exchangeRate) 
     let amountKSH = paymentAmount;
     
     if (paymentCurrency === 'KSH') {
-        amountUSD = paymentAmount / exchangeRate;
+        amountUSD = paymentAmount / paymentExchangeRate;
         amountKSH = paymentAmount;
     } else if (paymentCurrency === 'USD') {
         amountUSD = paymentAmount;
-        amountKSH = paymentAmount * exchangeRate;
+        amountKSH = paymentAmount * paymentExchangeRate;
     }
     
     // Get next payment number
@@ -1893,9 +1953,9 @@ async function saveAdditionalPayment(receiptDocId, receiptNumber, exchangeRate) 
         currency: paymentCurrency,
         amountUSD: amountUSD,
         amountKSH: amountKSH,
-        exchangeRate: exchangeRate,
+        exchangeRate: paymentExchangeRate,
         description: paymentDescription,
-        paymentMethod: paymentMethod,
+        paymentMethod: paymentBankUsed !== 'Cash' ? `Bank: ${paymentBankUsed}` : "Cash",
         createdBy: currentUser.email,
         createdAt: firebase.firestore.FieldValue.serverTimestamp()
     };
@@ -1909,7 +1969,7 @@ async function saveAdditionalPayment(receiptDocId, receiptNumber, exchangeRate) 
         
         const currentBalanceUSD = receiptData.balanceDetails?.balanceRemainingUSD || 0;
         const newBalanceUSD = Math.max(0, currentBalanceUSD - amountUSD);
-        const newBalanceKSH = newBalanceUSD * exchangeRate;
+        const newBalanceKSH = newBalanceUSD * paymentExchangeRate;
         
         await db.collection("receipts").doc(receiptDocId).update({
             "balanceDetails.balanceRemaining": newBalanceUSD,
@@ -2037,6 +2097,214 @@ function addPaymentToReceipt(receiptData) {
         receiptData.receivedFrom,
         receiptData.exchangeRate || 130
     );
+}
+
+/**
+ * Marks invoice deposit as paid
+ */
+function markInvoiceDepositPaid(invoiceData) {
+    const modalHtml = `
+        <div id="deposit-paid-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+            <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+                <h3 class="text-lg font-semibold text-primary-blue mb-4">Mark Deposit as Paid</h3>
+                <p class="text-sm mb-3">
+                    <strong>Invoice:</strong> ${invoiceData.invoiceId}<br>
+                    <strong>Client:</strong> ${invoiceData.clientName}<br>
+                    <strong>Deposit Required:</strong> USD ${invoiceData.pricing.depositUSD.toFixed(2)} (KES ${invoiceData.pricing.depositKSH})
+                </p>
+                <form id="deposit-paid-form" onsubmit="event.preventDefault(); saveDepositPayment('${invoiceData.firestoreId}', ${invoiceData.pricing.depositUSD}, ${invoiceData.exchangeRate})">
+                    <div class="mb-3">
+                        <label class="block text-sm font-medium text-gray-700">Payment Date</label>
+                        <input type="date" id="depositDate" required value="${new Date().toISOString().slice(0, 10)}" class="mt-1 block w-full p-2 border rounded-md">
+                    </div>
+                    <div class="mb-3">
+                        <label class="block text-sm font-medium text-gray-700">Amount</label>
+                        <div class="grid grid-cols-3 gap-2">
+                            <select id="depositCurrency" required class="p-2 border rounded-md">
+                                <option value="USD">USD</option>
+                                <option value="KSH">KSH</option>
+                            </select>
+                            <input type="number" id="depositAmount" step="0.01" required placeholder="Amount" class="col-span-2 p-2 border rounded-md">
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="block text-sm font-medium text-gray-700">Exchange Rate (USD 1 = KES)</label>
+                        <input type="number" id="depositExchangeRate" step="0.01" required value="${invoiceData.exchangeRate || 130}" class="w-full p-2 border rounded-md">
+                    </div>
+                    <div class="mb-3">
+                        <label class="block text-sm font-medium text-gray-700">Bank Used</label>
+                        <select id="depositBankUsed" required class="mt-1 block w-full p-2 border rounded-md">
+                            <option value="" disabled selected>Select Bank</option>
+                            <option value="Cash">Cash</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="block text-sm font-medium text-gray-700">Reference/Description</label>
+                        <input type="text" id="depositDescription" required placeholder="e.g., Deposit Payment for Invoice ${invoiceData.invoiceId}" class="mt-1 block w-full p-2 border rounded-md">
+                    </div>
+                    <div class="mb-4 p-2 bg-yellow-50 rounded">
+                        <p class="text-xs text-gray-600">
+                            <strong>Note:</strong> This will create a receipt for the deposit payment.
+                        </p>
+                    </div>
+                    <div class="flex justify-end space-x-3">
+                        <button type="button" onclick="(() => { const modal = document.getElementById('deposit-paid-modal'); if (modal) modal.remove(); })()" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-md">
+                            Cancel
+                        </button>
+                        <button type="submit" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-md">
+                            Save Deposit Payment
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+    
+    // Set default amount based on currency
+    const depositCurrency = document.getElementById('depositCurrency');
+    const depositAmount = document.getElementById('depositAmount');
+    
+    if (depositCurrency && depositAmount) {
+        depositCurrency.addEventListener('change', function() {
+            if (this.value === 'USD') {
+                depositAmount.value = invoiceData.pricing.depositUSD.toFixed(2);
+            } else if (this.value === 'KSH') {
+                depositAmount.value = invoiceData.pricing.depositKSH;
+            }
+        });
+        
+        // Set initial value
+        depositAmount.value = invoiceData.pricing.depositUSD.toFixed(2);
+    }
+    
+    // Populate bank dropdown in the modal
+    populateBankDropdownForModal('depositBankUsed');
+}
+
+/**
+ * Saves deposit payment and creates receipt
+ */
+async function saveDepositPayment(invoiceDocId, depositAmountUSD, exchangeRate) {
+    const form = document.getElementById('deposit-paid-form');
+    if (!form.checkValidity()) {
+        form.reportValidity();
+        return;
+    }
+    
+    const depositDate = document.getElementById('depositDate').value;
+    const depositCurrency = document.getElementById('depositCurrency').value;
+    const depositAmount = parseFloat(document.getElementById('depositAmount').value);
+    const depositExchangeRate = parseFloat(document.getElementById('depositExchangeRate').value);
+    const depositBankUsed = document.getElementById('depositBankUsed').value;
+    const depositDescription = document.getElementById('depositDescription').value;
+    
+    if (isNaN(depositAmount) || depositAmount <= 0) {
+        alert("Please enter a valid deposit amount.");
+        return;
+    }
+    
+    // Get invoice data
+    const invoiceDoc = await db.collection("invoices").doc(invoiceDocId).get();
+    if (!invoiceDoc.exists) {
+        alert("Invoice not found!");
+        return;
+    }
+    
+    const invoiceData = invoiceDoc.data();
+    
+    // Calculate amounts in both currencies
+    let amountUSD = depositAmount;
+    let amountKSH = depositAmount;
+    
+    if (depositCurrency === 'KSH') {
+        amountUSD = depositAmount / depositExchangeRate;
+        amountKSH = depositAmount;
+    } else if (depositCurrency === 'USD') {
+        amountUSD = depositAmount;
+        amountKSH = depositAmount * depositExchangeRate;
+    }
+    
+    // Generate receipt ID
+    const receiptId = generateReceiptId("Deposit", invoiceData.clientName);
+    const receiptDate = depositDate || new Date().toLocaleDateString('en-US');
+    
+    // Create receipt data
+    const receiptData = {
+        receiptId,
+        receiptType: "Invoice Deposit",
+        receivedFrom: invoiceData.clientName,
+        currency: depositCurrency,
+        amountReceived: depositAmount,
+        amountReceivedUSD: amountUSD,
+        amountReceivedKSH: amountKSH,
+        amountWords: numberToWords(depositAmount).replace('only', depositCurrency === 'USD' ? 'US Dollars only.' : 'Kenya Shillings only.'),
+        beingPaidFor: `${invoiceData.carDetails.make} ${invoiceData.carDetails.model} ${invoiceData.carDetails.year} Deposit`,
+        paymentDetails: {
+            chequeNo: "",
+            rtgsTtNo: "",
+            bankUsed: depositBankUsed
+        },
+        balanceDetails: {
+            balanceRemaining: invoiceData.pricing.balanceUSD,
+            balanceDueDate: invoiceData.dueDate,
+            balanceRemainingUSD: invoiceData.pricing.balanceUSD,
+            balanceRemainingKSH: invoiceData.pricing.balanceUSD * depositExchangeRate
+        },
+        invoiceReference: invoiceData.invoiceId,
+        exchangeRate: depositExchangeRate,
+        receiptDate,
+        createdBy: currentUser.email,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    };
+    
+    try {
+        // Save receipt
+        const receiptRef = await db.collection("receipts").add(receiptData);
+        
+        // Save payment record
+        const paymentData = {
+            receiptId: receiptRef.id,
+            receiptNumber: receiptId,
+            paymentNumber: 1,
+            paymentDate: receiptDate,
+            amount: depositAmount,
+            currency: depositCurrency,
+            amountUSD: amountUSD,
+            amountKSH: amountKSH,
+            exchangeRate: depositExchangeRate,
+            description: depositDescription,
+            paymentMethod: depositBankUsed !== 'Cash' ? `Bank: ${depositBankUsed}` : "Cash",
+            createdBy: currentUser.email,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
+        
+        await db.collection("receipt_payments").add(paymentData);
+        
+        // Update invoice to mark deposit as paid
+        await db.collection("invoices").doc(invoiceDocId).update({
+            "pricing.depositPaid": true,
+            "pricing.depositPaidDate": receiptDate,
+            "pricing.depositPaidAmount": depositAmount,
+            "pricing.depositPaidCurrency": depositCurrency,
+            "pricing.remainingBalance": invoiceData.pricing.balanceUSD
+        });
+        
+        const modal = document.getElementById('deposit-paid-modal');
+        if (modal) {
+            modal.remove();
+        }
+        
+        alert(`Deposit payment of ${depositCurrency} ${depositAmount.toFixed(2)} saved successfully! Receipt ${receiptId} created.`);
+        
+        // Navigate to receipt form with the invoice reference
+        renderReceiptForm(invoiceData.invoiceId);
+        
+    } catch (error) {
+        console.error("Error saving deposit payment:", error);
+        alert("Failed to save deposit payment: " + error.message);
+    }
 }
 
 /**
@@ -2561,7 +2829,7 @@ function renderInvoiceForm() {
                 <fieldset class="border p-4 rounded-lg mb-6">
                     <legend class="text-base font-semibold text-secondary-red px-2">Client Details</legend>
                     <div class="grid grid-cols-2 gap-4">
-                        <input type="text" id="clientName" required placeholder="Client Full Name" class="p-2 border rounded-md">
+                        <input type="text" id="clientName" required placeholder="Client Full Name" class="p-2 border rounded-md" oninput="autoFillBuyerConfirmation()">
                         <input type="text" id="clientPhone" required placeholder="Client Phone Number" class="p-2 border rounded-md">
                     </div>
                 </fieldset>
@@ -2628,6 +2896,18 @@ function renderInvoiceForm() {
 
     // Populate the bank dropdown when the form loads
     populateBankDropdown('bankDetailsSelect');
+}
+
+/**
+ * Auto-fills the buyer confirmation field when client name is entered
+ */
+function autoFillBuyerConfirmation() {
+    const clientName = document.getElementById('clientName').value;
+    const buyerConfirmation = document.getElementById('buyerNameConfirmation');
+    
+    if (clientName && buyerConfirmation && !buyerConfirmation.value) {
+        buyerConfirmation.value = clientName;
+    }
 }
 
 /**
@@ -2719,6 +2999,8 @@ async function saveInvoice(onlySave) {
             depositUSD,
             balanceUSD,
             depositKSH: depositKSH.toFixed(2),
+            depositPaid: false,
+            remainingBalance: totalPriceUSD
         },
         bankDetails, // Save the full object for easy reference
         buyerNameConfirmation,
@@ -2755,6 +3037,7 @@ function createReceiptFromInvoice(invoiceData) {
         const receivedFromField = document.getElementById('receivedFrom');
         const beingPaidForField = document.getElementById('beingPaidFor');
         const invoiceRefField = document.getElementById('invoiceReference');
+        const exchangeRateField = document.getElementById('exchangeRate');
         
         if (receivedFromField) receivedFromField.value = invoiceData.clientName;
         if (beingPaidForField) beingPaidForField.value = `${invoiceData.carDetails.make} ${invoiceData.carDetails.model} ${invoiceData.carDetails.year}`;
@@ -2765,6 +3048,7 @@ function createReceiptFromInvoice(invoiceData) {
             invoiceRefField.dataset.totalUSD = invoiceData.pricing.totalUSD;
             invoiceRefField.dataset.balanceUSD = invoiceData.pricing.balanceUSD;
         }
+        if (exchangeRateField) exchangeRateField.value = invoiceData.exchangeRate;
         
         // Trigger fetch invoice details
         fetchInvoiceDetails();
@@ -3204,12 +3488,19 @@ async function fetchInvoices() {
                             <strong class="text-primary-blue">${data.docType} ${data.invoiceId}</strong><br>
                             <span class="text-sm text-gray-700">Client: ${data.clientName} | Vehicle: ${data.carDetails.make} ${data.carDetails.model}</span><br>
                             <span class="text-xs text-gray-600">Total: USD ${data.pricing.totalUSD.toFixed(2)}</span>
+                            ${data.pricing.depositPaid ? `<br><span class="text-xs text-green-600">✓ Deposit Paid</span>` : `<br><span class="text-xs text-secondary-red">Deposit Pending</span>`}
                         </div>
                         <div class="mt-2 sm:mt-0 space-x-2">
                             <button onclick='reDownloadInvoice(${invoiceDataJson})' 
                                     class="bg-primary-blue hover:bg-blue-600 text-white text-xs py-1 px-3 rounded-full transition duration-150">
                                 Re-Download PDF
                             </button>
+                            ${!data.pricing.depositPaid ? `
+                            <button onclick='markInvoiceDepositPaid(${invoiceDataJson})' 
+                                    class="bg-green-600 hover:bg-green-700 text-white text-xs py-1 px-3 rounded-full transition duration-150">
+                                Deposit Paid
+                            </button>
+                            ` : ''}
                             <button onclick='createReceiptFromInvoice(${invoiceDataJson})' 
                                     class="bg-secondary-red hover:bg-red-700 text-white text-xs py-1 px-3 rounded-full transition duration-150">
                                 Create Receipt
@@ -3308,7 +3599,7 @@ function renderAgreementForm(receiptReference = '') {
                         <legend class="text-base font-semibold text-secondary-red px-2">Payment Details</legend>
                         <div class="mb-3">
                             <label for="currencySelect" class="block text-sm font-medium text-gray-700">Currency</label>
-                            <select id="currencySelect" required class="block w-full p-2 border rounded-md" onchange="calculatePaymentTotal()">
+                            <select id="currencySelect" required class="block w-full p-2 border rounded-md">
                                 <option value="KES">KES - Kenya Shillings</option>
                                 <option value="USD">USD - US Dollars</option>
                             </select>
@@ -3318,17 +3609,9 @@ function renderAgreementForm(receiptReference = '') {
                             <select id="agreementBankDetailsSelect" required class="mt-1 block w-full p-2 border rounded-md"></select>
                         </div>
                         
-                        <div class="flex justify-between items-center mb-2">
-                            <strong class="text-md text-gray-700">Payment Schedule</strong>
-                            <button type="button" onclick="addPaymentRow()" class="text-primary-blue hover:text-blue-700 font-bold text-sm">+ Add Payment</button>
-                        </div>
-                        
-                        <div id="payment-schedule-rows" class="space-y-2 mb-3">
-                            <div class="grid grid-cols-4 gap-2 payment-row" data-id="1">
-                                <input type="text" required placeholder="e.g. Deposit" value="Deposit" class="p-2 border rounded-md col-span-2 text-sm">
-                                <input type="number" step="0.01" required placeholder="Amount" oninput="calculatePaymentTotal()" class="payment-amount p-2 border rounded-md text-sm">
-                                <input type="date" required class="payment-date p-2 border rounded-md text-sm">
-                            </div>
+                        <div class="mb-3">
+                            <label for="totalPrice" class="block text-sm font-medium text-gray-700">Total Price</label>
+                            <input type="number" id="totalPrice" step="0.01" required placeholder="Total Price" class="w-full p-2 border rounded-md">
                         </div>
 
                         <div class="mt-4 p-2 bg-yellow-200 rounded-md">
@@ -3361,45 +3644,11 @@ function renderAgreementForm(receiptReference = '') {
     populateBankDropdown('agreementBankDetailsSelect'); 
     calculatePaymentTotal();
     fetchAgreements();
-}
-
-/**
- * Adds a new payment row to the schedule table.
- */
-function addPaymentRow() {
-    agreementPaymentCounter++;
-    const container = document.getElementById('payment-schedule-rows');
-    const newRow = document.createElement('div');
-    newRow.className = 'grid grid-cols-4 gap-2 payment-row';
-    newRow.dataset.id = agreementPaymentCounter;
-    newRow.innerHTML = `
-        <input type="text" required placeholder="e.g. Balance" class="p-2 border rounded-md col-span-2 text-sm">
-        <input type="number" step="0.01" required placeholder="Amount" oninput="calculatePaymentTotal()" class="payment-amount p-2 border rounded-md text-sm">
-        <input type="date" required class="payment-date p-2 border rounded-md text-sm">
-        <button type="button" onclick="deletePaymentRow(${agreementPaymentCounter})" class="text-red-500 hover:text-red-700 text-sm">X</button>
-    `;
-    container.appendChild(newRow);
-}
-
-/**
- * Deletes a specific or the last payment row from the schedule table.
- */
-function deletePaymentRow(idToDelete) {
-    const container = document.getElementById('payment-schedule-rows');
-    const rows = container.querySelectorAll('.payment-row');
-    if (rows.length === 1) {
-        alert("The agreement must have at least one payment row.");
-        return;
-    }
-    let rowToRemove;
-    if (idToDelete) {
-        rowToRemove = container.querySelector(`.payment-row[data-id="${idToDelete}"]`);
-    } else {
-        rowToRemove = rows[rows.length - 1];
-    }
-    if (rowToRemove) {
-        rowToRemove.remove();
-        calculatePaymentTotal();
+    
+    // Add event listener for total price input
+    const totalPriceInput = document.getElementById('totalPrice');
+    if (totalPriceInput) {
+        totalPriceInput.addEventListener('input', calculatePaymentTotal);
     }
 }
 
@@ -3407,14 +3656,14 @@ function deletePaymentRow(idToDelete) {
  * Calculates and updates the total amount of the payment schedule.
  */
 function calculatePaymentTotal() {
-    const paymentAmounts = document.querySelectorAll('.payment-amount');
     const currency = document.getElementById('currencySelect').value;
+    const totalPriceInput = document.getElementById('totalPrice');
     const totalSpan = document.getElementById('total-amount');
     
     let total = 0;
-    paymentAmounts.forEach(input => {
-        total += parseFloat(input.value) || 0;
-    });
+    if (totalPriceInput) {
+        total = parseFloat(totalPriceInput.value) || 0;
+    }
 
     totalSpan.textContent = `${total.toLocaleString('en-US', { minimumFractionDigits: 2 })} ${currency}`;
 }
@@ -3444,18 +3693,8 @@ async function saveAgreement() {
     const carVIN = document.getElementById('carVIN').value;
     const carFuelType = document.getElementById('carFuelType').value;
 
-    // 3. Collect Payment Schedule
-    const paymentSchedule = [];
-    let totalAmount = 0;
-    document.querySelectorAll('#payment-schedule-rows .payment-row').forEach(row => {
-        const inputs = row.querySelectorAll('input[type="text"], input[type="number"], input[type="date"]');
-        const description = inputs[0].value;
-        const amount = parseFloat(inputs[1].value);
-        const date = inputs[2].value;
-
-        paymentSchedule.push({ description, amount, date });
-        totalAmount += amount;
-    });
+    // 3. Collect Payment Details (removed payment schedule)
+    const totalPrice = parseFloat(document.getElementById('totalPrice').value);
 
     // 4. Collect other details
     const selectedBankValue = document.getElementById('agreementBankDetailsSelect').value;
@@ -3495,10 +3734,9 @@ async function saveAgreement() {
             fuelType: carFuelType,
         },
         salesTerms: {
-            price: totalAmount,
+            price: totalPrice,
             currency: currency,
             bankId: bankId, // <<< Correctly save only the ID
-            paymentSchedule: paymentSchedule,
         },
         signatures: {
             sellerWitness: document.getElementById('sellerWitness').value,
@@ -3749,30 +3987,6 @@ function generateAgreementPDF(data) {
     doc.text(`Branch: ${bank.branch || 'N/A'} | Currency: ${data.salesTerms.currency}`, margin + 3, y + 14);
     y += 25;
 
-    // Payment Schedule Table
-    drawText('Payment Schedule:', margin, y, 10, 'bold', primaryColor);
-    y += 4;
-    
-    doc.setFillColor(230);
-    doc.rect(margin, y, pageW - 20, 6, 'F');
-    doc.setDrawColor(0);
-    doc.rect(margin, y, pageW - 20, 6);
-    drawText('Description', margin + 2, y + 4, 9, 'bold', 0);
-    drawText('Amount', margin + 110, y + 4, 9, 'bold', 0);
-    drawText('Due Date', margin + 160, y + 4, 9, 'bold', 0);
-    y += 6;
-
-    doc.setFontSize(9);
-    data.salesTerms.paymentSchedule.forEach(payment => {
-        doc.rect(margin, y, pageW - 20, 5);
-        doc.text(payment.description, margin + 2, y + 3.5);
-        doc.text(`${data.salesTerms.currency} ${payment.amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}`, margin + 110, y + 3.5);
-        doc.text(payment.date, margin + 160, y + 3.5);
-        y += 5;
-    });
-
-    y += 4;
-    
     // Additional Terms
     drawText('GENERAL TERMS', margin, y, 12, 'bold', primaryColor);
     y += lineSpacing;
