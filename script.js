@@ -397,6 +397,84 @@ function clearSearch() {
 
 // Add event listener for Enter key in search
 document.addEventListener('DOMContentLoaded', function() {
+
+  function setupSearchEnterKey() {
+    const searchInput = document.getElementById('document-search');
+    if (searchInput) {
+        // Remove any existing listeners to avoid duplicates
+        searchInput.removeEventListener('keypress', handleSearchEnterKey);
+        searchInput.addEventListener('keypress', handleSearchEnterKey);
+    }
+}
+
+function handleSearchEnterKey(e) {
+    if (e.key === 'Enter') {
+        e.preventDefault();
+        searchDocuments();
+    }
+}
+
+// Then update the handleDocumentGenerator function to call setupSearchEnterKey:
+function handleDocumentGenerator() {
+    appContent.innerHTML = `
+        <h2 class="text-3xl font-bold mb-6 text-primary-blue">Document Generator</h2>
+        
+        <!-- Search and Filter Section -->
+        <div class="mb-6 p-4 bg-white rounded-xl shadow-md border border-gray-200">
+            <div class="flex flex-wrap gap-4 items-end">
+                <div class="flex-1 min-w-[300px]">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Search Documents</label>
+                    <div class="flex gap-2">
+                        <input type="text" id="document-search" placeholder="Search by client name, reference number, or car make/model..." class="flex-1 p-3 border border-gray-300 rounded-lg focus:ring-primary-blue focus:border-primary-blue">
+                        <button onclick="searchDocuments()" class="bg-primary-blue hover:bg-blue-900 text-white font-bold py-2 px-6 rounded-lg transition duration-150">
+                            Search
+                        </button>
+                        <button onclick="clearSearch()" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-lg transition duration-150">
+                            Clear
+                        </button>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Document Type</label>
+                    <select id="document-type-filter" class="p-3 border border-gray-300 rounded-lg focus:ring-primary-blue focus:border-primary-blue">
+                        <option value="all">All Documents</option>
+                        <option value="receipt">Receipts Only</option>
+                        <option value="invoice">Invoices Only</option>
+                        <option value="agreement">Sales Agreements Only</option>
+                    </select>
+                </div>
+            </div>
+            <div class="mt-3 text-sm text-gray-600">
+                <p>Search by: Client Name, Reference Number, Car Make/Model, Phone Number, or VIN</p>
+            </div>
+        </div>
+
+        <div class="flex space-x-4 mb-6 flex-wrap">
+            <button onclick="renderInvoiceForm()" class="bg-primary-blue hover:bg-blue-900 text-white p-3 rounded-lg transition duration-150 mb-2">Invoice/Proforma</button>
+            <button onclick="renderInvoiceHistory()" class="bg-gray-700 hover:bg-gray-900 text-white p-3 rounded-lg transition duration-150 mb-2">Invoice History</button>
+            <button onclick="renderReceiptForm()" class="bg-secondary-red hover:bg-red-700 text-white p-3 rounded-lg transition duration-150 mb-2">Payment Receipt</button>
+            <button onclick="renderAgreementForm()" class="bg-gray-700 hover:bg-gray-900 text-white p-3 rounded-lg transition duration-150 mb-2">Car Sales Agreement</button>
+            <button onclick="renderBankManagement()" class="bg-green-600 hover:bg-green-700 text-white p-3 rounded-lg transition duration-150 mb-2">BANKS</button>
+        </div>
+        
+        <div id="document-form-area">
+            <div id="search-results" class="hidden">
+                <h3 class="text-xl font-bold mb-4 text-primary-blue">Search Results</h3>
+                <div id="search-results-list" class="space-y-4">
+                    <!-- Search results will appear here -->
+                </div>
+            </div>
+            <div id="document-creation-area">
+                <p class="text-gray-600">Select a document type or manage bank accounts.</p>
+            </div>
+        </div>
+    `;
+    
+    // Setup enter key listener
+    setTimeout(() => {
+        setupSearchEnterKey();
+    }, 100);
+}
     // This will be initialized when handleDocumentGenerator is called
 });
 
@@ -2908,6 +2986,47 @@ function autoFillBuyerConfirmation() {
     if (clientName && buyerConfirmation && !buyerConfirmation.value) {
         buyerConfirmation.value = clientName;
     }
+function autoFillBuyerConfirmation() {
+    const clientName = document.getElementById('clientName');
+    const buyerConfirmation = document.getElementById('buyerNameConfirmation');
+    
+    if (clientName && buyerConfirmation) {
+        // Set up event listener for input changes
+        clientName.addEventListener('input', function() {
+            if (clientName.value && (!buyerConfirmation.value || buyerConfirmation.value === clientName.value)) {
+                buyerConfirmation.value = clientName.value;
+            }
+        });
+    }
+}
+
+// Also, modify the renderInvoiceForm function to call this function:
+function renderInvoiceForm() {
+    const formArea = document.getElementById('document-form-area');
+    formArea.innerHTML = `
+        <div class="p-6 border border-gray-300 rounded-xl bg-white shadow-lg">
+            <h3 class="text-xl font-semibold mb-4 text-primary-blue">Create Sales Invoice/Proforma</h3>
+            <form id="invoice-form" onsubmit="event.preventDefault(); saveInvoice(false);">
+                <!-- ... existing form content ... -->
+                <fieldset class="border p-4 rounded-lg mb-6">
+                    <legend class="text-base font-semibold text-secondary-red px-2">Client Details</legend>
+                    <div class="grid grid-cols-2 gap-4">
+                        <input type="text" id="clientName" required placeholder="Client Full Name" class="p-2 border rounded-md" oninput="autoFillBuyerConfirmation()">
+                        <input type="text" id="clientPhone" required placeholder="Client Phone Number" class="p-2 border rounded-md">
+                    </div>
+                </fieldset>
+                <!-- ... rest of form ... -->
+            </form>
+        </div>
+    `;
+    
+    // Populate the bank dropdown when the form loads
+    populateBankDropdown('bankDetailsSelect');
+    
+    // Call autoFill function after form renders
+    setTimeout(() => {
+        autoFillBuyerConfirmation();
+    }, 100);
 }
 
 /**
@@ -4065,18 +4184,30 @@ function handleFleetManagement() {
 
 /**
  * Search receipts by various fields
+ */ * Improved search receipts by various fields (case-insensitive)
  */
 async function searchReceipts(searchTerm) {
     try {
-        // Search in multiple fields
-        const receiptsSnapshot = await db.collection("receipts")
-            .where("receivedFrom", ">=", searchTerm)
-            .where("receivedFrom", "<=", searchTerm + '\uf8ff')
-            .get();
+        // Convert to lowercase for case-insensitive search
+        searchTerm = searchTerm.toLowerCase();
         
+        const receiptsSnapshot = await db.collection("receipts").get();
         const results = [];
+        
         receiptsSnapshot.forEach(doc => {
-            results.push({ id: doc.id, ...doc.data() });
+            const data = doc.data();
+            
+            // Check multiple fields for matches
+            const matches = 
+                (data.receivedFrom && data.receivedFrom.toLowerCase().includes(searchTerm)) ||
+                (data.receiptId && data.receiptId.toLowerCase().includes(searchTerm)) ||
+                (data.beingPaidFor && data.beingPaidFor.toLowerCase().includes(searchTerm)) ||
+                (data.invoiceReference && data.invoiceReference.toLowerCase().includes(searchTerm)) ||
+                (data.amountWords && data.amountWords.toLowerCase().includes(searchTerm));
+            
+            if (matches) {
+                results.push({ id: doc.id, ...data });
+            }
         });
         
         return results;
@@ -4087,18 +4218,30 @@ async function searchReceipts(searchTerm) {
 }
 
 /**
- * Search invoices by various fields
+ * Improved search invoices by various fields (case-insensitive)
  */
 async function searchInvoices(searchTerm) {
     try {
-        const invoicesSnapshot = await db.collection("invoices")
-            .where("clientName", ">=", searchTerm)
-            .where("clientName", "<=", searchTerm + '\uf8ff')
-            .get();
+        searchTerm = searchTerm.toLowerCase();
         
+        const invoicesSnapshot = await db.collection("invoices").get();
         const results = [];
+        
         invoicesSnapshot.forEach(doc => {
-            results.push({ id: doc.id, ...doc.data() });
+            const data = doc.data();
+            
+            // Check multiple fields
+            const matches = 
+                (data.clientName && data.clientName.toLowerCase().includes(searchTerm)) ||
+                (data.invoiceId && data.invoiceId.toLowerCase().includes(searchTerm)) ||
+                (data.clientPhone && data.clientPhone.includes(searchTerm)) ||
+                (data.carDetails.make && data.carDetails.make.toLowerCase().includes(searchTerm)) ||
+                (data.carDetails.model && data.carDetails.model.toLowerCase().includes(searchTerm)) ||
+                (data.carDetails.vin && data.carDetails.vin.toLowerCase().includes(searchTerm));
+            
+            if (matches) {
+                results.push({ id: doc.id, ...data });
+            }
         });
         
         return results;
@@ -4109,23 +4252,134 @@ async function searchInvoices(searchTerm) {
 }
 
 /**
- * Search agreements by various fields
+ * Improved search agreements by various fields (case-insensitive)
  */
 async function searchAgreements(searchTerm) {
     try {
-        const agreementsSnapshot = await db.collection("sales_agreements")
-            .where("buyer.name", ">=", searchTerm)
-            .where("buyer.name", "<=", searchTerm + '\uf8ff')
-            .get();
+        searchTerm = searchTerm.toLowerCase();
         
+        const agreementsSnapshot = await db.collection("sales_agreements").get();
         const results = [];
+        
         agreementsSnapshot.forEach(doc => {
-            results.push({ id: doc.id, ...doc.data() });
+            const data = doc.data();
+            
+            // Check multiple fields
+            const matches = 
+                (data.buyer.name && data.buyer.name.toLowerCase().includes(searchTerm)) ||
+                (data.buyer.phone && data.buyer.phone.includes(searchTerm)) ||
+                (data.vehicle.makeModel && data.vehicle.makeModel.toLowerCase().includes(searchTerm)) ||
+                (data.vehicle.vin && data.vehicle.vin.toLowerCase().includes(searchTerm)) ||
+                (data.invoiceReference && data.invoiceReference.toLowerCase().includes(searchTerm));
+            
+            if (matches) {
+                results.push({ id: doc.id, ...data });
+            }
         });
         
         return results;
     } catch (error) {
         console.error("Error searching agreements:", error);
         return [];
+    }
+}
+
+// Also, update the searchDocuments function to handle empty results better:
+async function searchDocuments() {
+    const searchTerm = document.getElementById('document-search')?.value.trim();
+    const docTypeFilter = document.getElementById('document-type-filter')?.value;
+    
+    if (!searchTerm || searchTerm.length < 2) {
+        alert("Please enter at least 2 characters to search");
+        return;
+    }
+    
+    // Get references to DOM elements
+    const resultsList = document.getElementById('search-results-list');
+    const searchResultsDiv = document.getElementById('search-results');
+    const docCreationArea = document.getElementById('document-creation-area');
+    
+    // If we're not on the document generator page, navigate to it first
+    if (!resultsList || !searchResultsDiv || !docCreationArea) {
+        handleDocumentGenerator();
+        
+        setTimeout(() => {
+            const searchInput = document.getElementById('document-search');
+            const filterSelect = document.getElementById('document-type-filter');
+            
+            if (searchInput) searchInput.value = searchTerm;
+            if (filterSelect && docTypeFilter) filterSelect.value = docTypeFilter;
+            
+            setTimeout(() => {
+                performSearch(searchTerm, docTypeFilter || 'all');
+            }, 300);
+        }, 200);
+        return;
+    }
+    
+    await performSearch(searchTerm, docTypeFilter || 'all');
+}
+
+// Update the performSearch function to show better messages:
+async function performSearch(searchTerm, docTypeFilter) {
+    const resultsList = document.getElementById('search-results-list');
+    const searchResultsDiv = document.getElementById('search-results');
+    const docCreationArea = document.getElementById('document-creation-area');
+    
+    if (!resultsList || !searchResultsDiv || !docCreationArea) {
+        console.error("Required DOM elements not found");
+        alert("Error: Please try searching again.");
+        return;
+    }
+    
+    resultsList.innerHTML = '<div class="text-center p-8"><p class="text-gray-500">Searching documents...</p><div class="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-primary-blue"></div></div>';
+    searchResultsDiv.classList.remove('hidden');
+    docCreationArea.classList.add('hidden');
+    
+    let allResults = [];
+    
+    try {
+        console.log(`Searching for: "${searchTerm}" in ${docTypeFilter}`);
+        
+        if (docTypeFilter === 'all' || docTypeFilter === 'receipt') {
+            const receiptResults = await searchReceipts(searchTerm);
+            console.log(`Found ${receiptResults.length} receipts`);
+            allResults = allResults.concat(receiptResults.map(r => ({...r, type: 'receipt'})));
+        }
+        
+        if (docTypeFilter === 'all' || docTypeFilter === 'invoice') {
+            const invoiceResults = await searchInvoices(searchTerm);
+            console.log(`Found ${invoiceResults.length} invoices`);
+            allResults = allResults.concat(invoiceResults.map(i => ({...i, type: 'invoice'})));
+        }
+        
+        if (docTypeFilter === 'all' || docTypeFilter === 'agreement') {
+            const agreementResults = await searchAgreements(searchTerm);
+            console.log(`Found ${agreementResults.length} agreements`);
+            allResults = allResults.concat(agreementResults.map(a => ({...a, type: 'agreement'})));
+        }
+        
+        console.log(`Total results: ${allResults.length}`);
+        
+        // Sort by date (newest first)
+        allResults.sort((a, b) => {
+            const dateA = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(a.createdAt || 0);
+            const dateB = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(b.createdAt || 0);
+            return dateB - dateA;
+        });
+        
+        displaySearchResults(allResults, searchTerm);
+        
+    } catch (error) {
+        console.error("Error searching documents:", error);
+        resultsList.innerHTML = `
+            <div class="text-center p-8 bg-red-50 rounded-lg">
+                <p class="text-red-600 font-semibold">Search Error</p>
+                <p class="text-sm text-gray-600 mt-2">${error.message}</p>
+                <button onclick="clearSearch()" class="mt-4 bg-primary-blue hover:bg-blue-900 text-white font-bold py-2 px-4 rounded-md">
+                    Return to Document Generator
+                </button>
+            </div>
+        `;
     }
 }
