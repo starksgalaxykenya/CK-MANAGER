@@ -2880,6 +2880,26 @@ async function populateBankDropdown(dropdownId) {
 /**
  * Renders the Invoice/Proforma form.
  */
+/**
+ * Auto-fills the buyer confirmation field when client name is entered
+ */
+function autoFillBuyerConfirmation() {
+    const clientName = document.getElementById('clientName');
+    const buyerConfirmation = document.getElementById('buyerNameConfirmation');
+    
+    if (clientName && buyerConfirmation) {
+        // Set up event listener for input changes
+        clientName.addEventListener('input', function() {
+            if (clientName.value && (!buyerConfirmation.value || buyerConfirmation.value === clientName.value)) {
+                buyerConfirmation.value = clientName.value;
+            }
+        });
+    }
+}
+
+/**
+ * Renders the Invoice/Proforma form.
+ */
 function renderInvoiceForm() {
     const formArea = document.getElementById('document-form-area');
     formArea.innerHTML = `
@@ -2974,60 +2994,13 @@ function renderInvoiceForm() {
 
     // Populate the bank dropdown when the form loads
     populateBankDropdown('bankDetailsSelect');
-}
-
-/**
- * Auto-fills the buyer confirmation field when client name is entered
- */
-function autoFillBuyerConfirmation() {
-    const clientName = document.getElementById('clientName').value;
-    const buyerConfirmation = document.getElementById('buyerNameConfirmation');
-    
-    if (clientName && buyerConfirmation && !buyerConfirmation.value) {
-        buyerConfirmation.value = clientName;
-    }
-function autoFillBuyerConfirmation() {
-    const clientName = document.getElementById('clientName');
-    const buyerConfirmation = document.getElementById('buyerNameConfirmation');
-    
-    if (clientName && buyerConfirmation) {
-        // Set up event listener for input changes
-        clientName.addEventListener('input', function() {
-            if (clientName.value && (!buyerConfirmation.value || buyerConfirmation.value === clientName.value)) {
-                buyerConfirmation.value = clientName.value;
-            }
-        });
-    }
-}
-
-// Also, modify the renderInvoiceForm function to call this function:
-function renderInvoiceForm() {
-    const formArea = document.getElementById('document-form-area');
-    formArea.innerHTML = `
-        <div class="p-6 border border-gray-300 rounded-xl bg-white shadow-lg">
-            <h3 class="text-xl font-semibold mb-4 text-primary-blue">Create Sales Invoice/Proforma</h3>
-            <form id="invoice-form" onsubmit="event.preventDefault(); saveInvoice(false);">
-                <!-- ... existing form content ... -->
-                <fieldset class="border p-4 rounded-lg mb-6">
-                    <legend class="text-base font-semibold text-secondary-red px-2">Client Details</legend>
-                    <div class="grid grid-cols-2 gap-4">
-                        <input type="text" id="clientName" required placeholder="Client Full Name" class="p-2 border rounded-md" oninput="autoFillBuyerConfirmation()">
-                        <input type="text" id="clientPhone" required placeholder="Client Phone Number" class="p-2 border rounded-md">
-                    </div>
-                </fieldset>
-                <!-- ... rest of form ... -->
-            </form>
-        </div>
-    `;
-    
-    // Populate the bank dropdown when the form loads
-    populateBankDropdown('bankDetailsSelect');
     
     // Call autoFill function after form renders
     setTimeout(() => {
         autoFillBuyerConfirmation();
     }, 100);
 }
+
 
 /**
  * Saves the invoice data to Firestore and optionally generates a PDF.
