@@ -2416,8 +2416,6 @@ function generateReceiptPDF(data) {
     // =================================================================
     
     // Top Bar (Color #183263)
-    doc.setFillColor(primaryColor);
-    doc.rect(0, 0, pageW, 15, 'F');
     
     drawText('WanBite Investments Co. Ltd.', pageW / 2, 8, 18, 'bold', '#FFFFFF', 'center');
     drawText('carskenya.co.ke', pageW / 2, 13, 10, 'normal', '#FFFFFF', 'center');
@@ -2890,10 +2888,17 @@ function autoFillBuyerConfirmation() {
     if (clientName && buyerConfirmation) {
         // Set up event listener for input changes
         clientName.addEventListener('input', function() {
-            if (clientName.value && (!buyerConfirmation.value || buyerConfirmation.value === clientName.value)) {
+            // Only auto-fill if buyer confirmation is empty OR matches the beginning of client name
+            if (clientName.value && (!buyerConfirmation.value || 
+                buyerConfirmation.value === clientName.value.substring(0, buyerConfirmation.value.length))) {
                 buyerConfirmation.value = clientName.value;
             }
         });
+        
+        // Also auto-fill on page load if client name is already filled
+        if (clientName.value && !buyerConfirmation.value) {
+            buyerConfirmation.value = clientName.value;
+        }
     }
 }
 
