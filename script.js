@@ -4156,8 +4156,10 @@ function handleFleetManagement() {
 // =================================================================
 
 /**
- * Search receipts by various fields
- */Improved search receipts by various fields (case-insensitive)
+// Search receipts by various fields
+// Improved search receipts by various fields (case-insensitive)
+*/
+
 async function searchReceipts(searchTerm) {
     try {
         // Convert to lowercase for case-insensitive search
