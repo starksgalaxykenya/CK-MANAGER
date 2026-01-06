@@ -302,6 +302,10 @@ function renderReceiptSearchResult(doc, docJson) {
                             class="bg-green-600 hover:bg-green-700 text-white text-xs py-1 px-3 rounded-full transition duration-150">
                         View Balances
                     </button>
+                    <button onclick='createAgreementFromReceipt(${docJson})' 
+                            class="bg-gray-700 hover:bg-gray-900 text-white text-xs py-1 px-3 rounded-full transition duration-150">
+                        Create Agreement
+                    </button>
                 </div>
             </div>
         </div>
@@ -725,9 +729,6 @@ async function calculateReceiptBalances(receiptId) {
 /**
  * Renders the new comprehensive Receipt form.
  */
-/**
- * Renders the new comprehensive Receipt form.
- */
 function renderReceiptForm(invoiceReference = '') {
     const formArea = document.getElementById('document-form-area');
     formArea.innerHTML = `
@@ -767,6 +768,28 @@ function renderReceiptForm(invoiceReference = '') {
                         <p id="invoice-rate" class="text-sm"></p>
                     </div>
 
+                    <!-- NEW SECTION FOR MANUAL TOTAL PAYMENT INPUT -->
+                    <div id="manual-total-section" class="hidden mb-4 p-3 bg-green-50 rounded-lg border border-green-200">
+                        <h4 class="font-bold text-green-700 mb-2">Total Payment Information (For receipts without invoice)</h4>
+                        <div class="grid grid-cols-2 gap-3 mb-2">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700">Total Payment Amount</label>
+                                <input type="number" id="manualTotalAmount" step="0.01" placeholder="0.00" class="w-full p-2 border rounded-md" oninput="updateManualBalanceCalculation()">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700">Currency</label>
+                                <select id="manualTotalCurrency" class="w-full p-2 border rounded-md" onchange="updateManualBalanceCalculation()">
+                                    <option value="KSH">KSH</option>
+                                    <option value="USD">USD</option>
+                                </select>
+                            </div>
+                        </div>
+                        <p id="manual-total-display" class="text-sm text-gray-600"></p>
+                        <button type="button" onclick="applyManualTotalToBalances()" class="mt-2 bg-green-600 hover:bg-green-700 text-white text-xs py-1 px-3 rounded-md transition duration-150">
+                            Apply to Balance Calculation
+                        </button>
+                    </div>
+
                     <fieldset class="border p-4 rounded-lg mb-4">
                         <legend class="text-base font-semibold text-primary-blue px-2">Amount Received</legend>
                         <div class="grid grid-cols-3 gap-3">
@@ -774,13 +797,20 @@ function renderReceiptForm(invoiceReference = '') {
                                 <option value="KSH">KSH</option>
                                 <option value="USD">USD</option>
                             </select>
-                            <input type="number" id="amountReceived" step="0.01" required placeholder="Amount Figure" class="p-2 border rounded-md col-span-2" oninput="updateAmountInWords()">
+                            <input type="number" id="amountReceived" step="0.01" required placeholder="Amount Figure" class="p-2 border rounded-md col-span-2" oninput="updateAmountInWords(); checkForManualTotal();">
                         </div>
                         <div class="mt-2">
                             <label for="amountWords" class="block text-sm font-medium text-gray-700">Amount in Words:</label>
                             <textarea id="amountWords" rows="2" readonly class="mt-1 block w-full p-2 border rounded-md bg-gray-100 text-gray-800"></textarea>
                         </div>
                     </fieldset>
+
+                    <!-- ADD BUTTON TO OPEN MANUAL TOTAL SECTION -->
+                    <div class="mb-4">
+                        <button type="button" onclick="toggleManualTotalSection()" class="text-primary-blue hover:text-blue-900 text-sm underline">
+                            + Add total payment information (for receipts without invoice)
+                        </button>
+                    </div>
 
                     <input type="text" id="beingPaidFor" required placeholder="Being Paid For (e.g., Toyota Vitz 2018 Deposit)" value="${invoiceReference}" class="mb-4 block w-full p-2 border rounded-md">
 
@@ -844,6 +874,108 @@ function renderReceiptForm(invoiceReference = '') {
     // Load bank dropdown options
     populateBankDropdownForReceipt();
     fetchReceipts();
+    
+    // Add event listener for invoice reference to hide manual section when invoice is found
+    const invoiceRefInput = document.getElementById('invoiceReference');
+    if (invoiceRefInput) {
+        invoiceRefInput.addEventListener('input', function() {
+            if (this.value.trim()) {
+                document.getElementById('manual-total-section').classList.add('hidden');
+            }
+        });
+    }
+}
+
+// New functions for manual total handling:
+function toggleManualTotalSection() {
+    const manualSection = document.getElementById('manual-total-section');
+    const invoiceRef = document.getElementById('invoiceReference').value;
+    
+    if (invoiceRef.trim()) {
+        alert("You already have an invoice reference. Remove it first to use manual total payment.");
+        return;
+    }
+    
+    manualSection.classList.toggle('hidden');
+}
+
+function checkForManualTotal() {
+    const amountReceived = parseFloat(document.getElementById('amountReceived').value) || 0;
+    const invoiceRef = document.getElementById('invoiceReference').value;
+    
+    // If no invoice reference and amount is entered, show manual total option
+    if (!invoiceRef.trim() && amountReceived > 0) {
+        // Show suggestion to add manual total
+        if (!document.getElementById('manual-total-suggestion')) {
+            const suggestion = document.createElement('div');
+            suggestion.id = 'manual-total-suggestion';
+            suggestion.className = 'mb-3 p-2 bg-yellow-50 rounded text-sm text-yellow-700';
+            suggestion.innerHTML = `
+                <p>No invoice reference provided. Consider adding total payment amount for accurate balance calculation.</p>
+                <button type="button" onclick="toggleManualTotalSection()" class="mt-1 text-blue-600 hover:text-blue-800 underline">
+                    Add total payment information
+                </button>
+            `;
+            const beingPaidForField = document.getElementById('beingPaidFor');
+            beingPaidForField.parentNode.insertBefore(suggestion, beingPaidForField);
+        }
+    }
+}
+
+function updateManualBalanceCalculation() {
+    const manualTotal = parseFloat(document.getElementById('manualTotalAmount').value) || 0;
+    const manualCurrency = document.getElementById('manualTotalCurrency').value;
+    const exchangeRate = parseFloat(document.getElementById('exchangeRate').value) || 130;
+    
+    if (manualTotal > 0) {
+        let totalUSD = manualTotal;
+        let totalKSH = manualTotal;
+        
+        if (manualCurrency === 'KSH') {
+            totalUSD = manualTotal / exchangeRate;
+            totalKSH = manualTotal;
+        } else {
+            totalUSD = manualTotal;
+            totalKSH = manualTotal * exchangeRate;
+        }
+        
+        document.getElementById('manual-total-display').innerHTML = 
+            `Total: ${manualCurrency} ${manualTotal.toFixed(2)} (USD ${totalUSD.toFixed(2)} / KES ${totalKSH.toFixed(2)})`;
+    }
+}
+
+function applyManualTotalToBalances() {
+    const manualTotal = parseFloat(document.getElementById('manualTotalAmount').value) || 0;
+    const manualCurrency = document.getElementById('manualTotalCurrency').value;
+    const exchangeRate = parseFloat(document.getElementById('exchangeRate').value) || 130;
+    
+    if (manualTotal <= 0) {
+        alert("Please enter a valid total payment amount");
+        return;
+    }
+    
+    // Calculate totals
+    let totalUSD = manualTotal;
+    let totalKSH = manualTotal;
+    
+    if (manualCurrency === 'KSH') {
+        totalUSD = manualTotal / exchangeRate;
+        totalKSH = manualTotal;
+    } else {
+        totalUSD = manualTotal;
+        totalKSH = manualTotal * exchangeRate;
+    }
+    
+    // Store in dataset for calculations
+    const invoiceRefElement = document.getElementById('invoiceReference');
+    invoiceRefElement.dataset.totalUSD = totalUSD;
+    invoiceRefElement.dataset.balanceUSD = totalUSD; // Initial balance equals total
+    invoiceRefElement.dataset.exchangeRate = exchangeRate;
+    
+    // Update calculations
+    updateReceiptCalculations();
+    
+    alert(`Total payment of ${manualCurrency} ${manualTotal.toFixed(2)} applied. Balance calculations will now use this total.`);
 }
 
 /**
@@ -888,8 +1020,6 @@ async function populateBankDropdownForReceipt() {
         bankSelect.appendChild(option);
     }
 }
-
-
 
 /**
  * Fetches invoice details and auto-populates receipt form
@@ -1015,12 +1145,6 @@ function generateReceiptId(type, name) {
     return `RCPT-${datePart}-${typePart}-${namePart}`;
 }
 
-/**
- * Saves the new receipt details to Firestore.
- */
-/**
- * Saves the new receipt details to Firestore.
- */
 /**
  * Saves the new receipt details to Firestore.
  */
@@ -1182,24 +1306,20 @@ async function saveReceipt() {
         alert(`Receipt ${receiptId} saved successfully!`);
         
         receiptData.firestoreId = docRef.id;
-        // In saveReceipt() function, find this line:
-generateReceiptPDF(receiptData);
-
-// Change it to add payment history:
-receiptData.firestoreId = docRef.id;
-receiptData.totalPaidUSD = amountReceivedUSD;
-receiptData.totalPaidKSH = amountReceivedKSH;
-receiptData.paymentCount = 1;
-receiptData.paymentHistory = [{
-    paymentDate: receiptDate,
-    amount: amountReceived,
-    currency: currency,
-    amountUSD: amountReceivedUSD,
-    amountKSH: amountReceivedKSH,
-    paymentMethod: bankUsed !== 'Cash' ? `Bank: ${bankUsed}` : (chequeNo ? `Cheque: ${chequeNo}` : (rtgsTtNo ? `RTGS/TT: ${rtgsTtNo}` : "Cash")),
-    description: "Initial Payment"
-}];
-generateReceiptPDF(receiptData);
+        receiptData.totalPaidUSD = amountReceivedUSD;
+        receiptData.totalPaidKSH = amountReceivedKSH;
+        receiptData.paymentCount = 1;
+        receiptData.paymentHistory = [{
+            paymentDate: receiptDate,
+            amount: amountReceived,
+            currency: currency,
+            amountUSD: amountReceivedUSD,
+            amountKSH: amountReceivedKSH,
+            paymentMethod: bankUsed !== 'Cash' ? `Bank: ${bankUsed}` : (chequeNo ? `Cheque: ${chequeNo}` : (rtgsTtNo ? `RTGS/TT: ${rtgsTtNo}` : "Cash")),
+            description: "Initial Payment"
+        }];
+        
+        generateReceiptPDF(receiptData);
         
         document.getElementById('receipt-form').reset();
         document.getElementById('amountWords').value = '';
@@ -1307,7 +1427,6 @@ async function fetchReceipts() {
                 totalPaidUSD: totalPaidUSD,
                 totalPaidKSH: totalPaidKSH,
                 paymentCount: balances.paymentCount,
-                // Ensure Timestamp is handled for JSON stringify
                 createdAt: data.createdAt ? data.createdAt.toDate().toISOString() : new Date().toISOString()
             });
 
@@ -1422,7 +1541,6 @@ async function viewReceiptPaymentDetails(receiptDocId, receiptNumber, clientName
 }
 
 /**
-/**
  * Downloads receipt PDF with full payment history
  */
 async function downloadReceiptWithHistory(receiptDocId) {
@@ -1452,1346 +1570,6 @@ async function downloadReceiptWithHistory(receiptDocId) {
     } catch (error) {
         console.error("Error downloading receipt with history:", error);
         alert("Failed to download receipt with history: " + error.message);
-    }
-}
-
-
-    // =================================================================
-    // HEADER SECTION
-    // =================================================================
-    
-    // Top Bar (Color #183263)
-    doc.setFillColor(primaryColor);
-    doc.rect(0, 0, pageW, 15, 'F');
-    
-    drawText('WanBite Investments Co. Ltd.', pageW / 2, 8, 18, 'bold', '#FFFFFF', 'center');
-    drawText('carskenya.co.ke', pageW / 2, 13, 10, 'normal', '#FFFFFF', 'center');
-    
-    y = 25;
-
-    // RECEIPT TITLE
-    doc.setTextColor(primaryColor);
-    doc.setFontSize(24);
-    doc.setFont("helvetica", "bold");
-    doc.text("OFFICIAL RECEIPT", pageW / 2, y, null, null, "center");
-    y += 12;
-    
-    // Receipt Metadata Box (ID and Date)
-    doc.setDrawColor(primaryColor);
-    doc.setLineWidth(0.5);
-    doc.rect(margin, y, boxW, 15);
-    
-    drawText('RECEIPT NO:', margin + 3, y + 5, 10, 'bold', secondaryColor);
-    drawText(data.receiptId, margin + 3, y + 11, 14, 'bold', primaryColor);
-    
-    drawText('DATE:', pageW - margin - 3, y + 5, 10, 'bold', secondaryColor, 'right');
-    drawText(data.receiptDate, pageW - margin - 3, y + 11, 14, 'bold', primaryColor, 'right');
-    y += 20;
-
-    // =================================================================
-    // MAIN BODY
-    // =================================================================
-
-    // Received From
-    doc.setTextColor(primaryColor);
-    drawText('RECEIVED FROM:', margin, y, 10, 'bold');
-    doc.setDrawColor(0);
-    doc.line(margin + 35, y, pageW - margin, y);
-    drawText(data.receivedFrom, margin + 35, y - 0.5, 12, 'bold', 0);
-    y += lineHeight + 2;
-
-    // The Sum of Money (Words)
-    drawText('THE SUM OF:', margin, y + 3, 10, 'bold');
-    doc.setFillColor(240, 240, 240); 
-    doc.rect(margin + 35, y, boxW - 35, lineHeight * 2.5, 'F'); // Box for words
-    doc.setDrawColor(0);
-    doc.setLineWidth(0.2);
-    doc.rect(margin + 35, y, boxW - 35, lineHeight * 2.5);
-    
-    doc.setTextColor(0);
-    doc.setFontSize(11);
-    // Use splitTextToSize to wrap the words nicely within the box
-    const wrappedWords = doc.splitTextToSize(data.amountWords, boxW - 37);
-    doc.text(wrappedWords, margin + 36, y + 4);
-    y += lineHeight * 2.5 + 5;
-
-    // Being Paid For
-    drawText('BEING PAID FOR:', margin, y, 10, 'bold', primaryColor);
-    doc.line(margin + 35, y, pageW - margin, y);
-    drawText(data.beingPaidFor, margin + 35, y - 0.5, 12, 'bold', 0);
-    y += lineHeight + 4;
-
-    // Payment References Section
-    doc.setTextColor(primaryColor);
-    drawText('PAYMENT DETAILS:', margin, y, 10, 'bold');
-    y += 4;
-
-    doc.setFontSize(10);
-    doc.setTextColor(0);
-
-    // Row 1: Cheque and RTGS/TT
-    doc.rect(margin, y, boxW * 0.45, lineHeight); // Cheque Box
-    doc.text(`Cheque No: ${data.paymentDetails.chequeNo || 'N/A'}`, margin + 2, y + 4.5);
-    doc.rect(margin + boxW * 0.55, y, boxW * 0.45, lineHeight); // RTGS/TT Box
-    doc.text(`RTGS/TT No: ${data.paymentDetails.rtgsTtNo || 'N/A'}`, margin + boxW * 0.55 + 2, y + 4.5);
-    y += lineHeight + 2;
-
-    // Row 2: Bank Used and Receipt Type
-    doc.rect(margin, y, boxW * 0.45, lineHeight); // Bank Used Box
-    doc.text(`Bank Used: ${data.paymentDetails.bankUsed || 'N/A'}`, margin + 2, y + 4.5);
-    doc.rect(margin + boxW * 0.55, y, boxW * 0.45, lineHeight); // Receipt Type Box
-    doc.text(`Receipt Type: ${data.receiptType}`, margin + boxW * 0.55 + 2, y + 4.5);
-    y += lineHeight + 6;
-
-    // =================================================================
-    // AMOUNT FIGURE (BIG BOX)
-    // =================================================================
-    const amountBoxH = 15;
-    const amountBoxY = y + 5;
-    
-    // Total Amount Box (Right Side)
-    doc.setFillColor(secondaryColor);
-    doc.rect(pageW - margin - 70, amountBoxY, 70, amountBoxH, 'F');
-    
-    doc.setTextColor(255);
-    drawText('AMOUNT FIGURE', pageW - margin - 65, amountBoxY + 4, 8, 'bold', 255);
-    drawText(`${data.currency} ${data.amountReceived.toLocaleString('en-US', { minimumFractionDigits: 2 })}`, pageW - margin - 5, amountBoxY + 11, 18, 'bold', 255, 'right');
-    
-    // Balance Details (Left Side)
-    doc.setTextColor(primaryColor);
-    drawText('BALANCE DETAILS', margin, amountBoxY + 4, 10, 'bold');
-    doc.setFontSize(12);
-    doc.setTextColor(0);
-
-    const balanceText = data.balanceDetails.balanceRemaining > 0 
-        ? `${data.currency} ${data.balanceDetails.balanceRemaining.toLocaleString('en-US', { minimumFractionDigits: 2 })}` 
-        : 'ZERO';
-    
-    drawText(`Balance Remaining: ${balanceText}`, margin, amountBoxY + 10, 10);
-    drawText(`Due On/Before: ${data.balanceDetails.balanceDueDate || 'N/A'}`, margin, amountBoxY + 14, 10);
-    
-    y = amountBoxY + amountBoxH + 7;
-
-    // =================================================================
-    // PAYMENT HISTORY SECTION (NEW)
-    // =================================================================
-    if (data.paymentHistory && data.paymentHistory.length > 0) {
-        y += 5;
-        drawText('PAYMENT HISTORY', margin, y, 12, 'bold', primaryColor);
-        y += 8;
-        
-        // Table Header
-        doc.setFillColor(primaryColor);
-        doc.rect(margin, y, boxW, 6, 'F');
-        doc.setTextColor(255);
-        drawText('#', margin + 2, y + 4, 8, 'bold', 255);
-        drawText('Date', margin + 15, y + 4, 8, 'bold', 255);
-        drawText('Amount', margin + 50, y + 4, 8, 'bold', 255);
-        drawText('Method', margin + 90, y + 4, 8, 'bold', 255);
-        drawText('Description', margin + 130, y + 4, 8, 'bold', 255);
-        y += 6;
-        
-        // Payment Rows
-        doc.setFontSize(8);
-        doc.setTextColor(0);
-        
-        data.paymentHistory.forEach((payment, index) => {
-            if (y > doc.internal.pageSize.getHeight() - 20) {
-                doc.addPage();
-                y = 10;
-            }
-            
-            doc.rect(margin, y, boxW, 5);
-            drawText(`${index + 1}`, margin + 2, y + 3.5, 8);
-            drawText(payment.paymentDate || 'N/A', margin + 15, y + 3.5, 8);
-            drawText(`${payment.currency} ${payment.amount.toFixed(2)}`, margin + 50, y + 3.5, 8);
-            drawText(payment.paymentMethod || 'N/A', margin + 90, y + 3.5, 8);
-            
-            // Truncate description if too long
-            const description = payment.description || 'N/A';
-            const shortDesc = description.length > 30 ? description.substring(0, 27) + '...' : description;
-            drawText(shortDesc, margin + 130, y + 3.5, 8);
-            
-            y += 5;
-        });
-        
-        // Summary
-        y += 3;
-        doc.setFillColor(240, 240, 240);
-        doc.rect(margin, y, boxW, 8, 'F');
-        doc.rect(margin, y, boxW, 8);
-        doc.setFontSize(9);
-        doc.setTextColor(primaryColor);
-        doc.setFont("helvetica", "bold");
-        doc.text(`Total Payments: ${data.totalPayments}`, margin + 5, y + 5);
-        doc.text(`Total Paid: USD ${data.totalPaidUSD.toFixed(2)} / KES ${data.totalPaidKSH.toFixed(2)}`, margin + 70, y + 5);
-        y += 10;
-    }
-
-    // =================================================================
-    // FOOTER/SIGNATURES
-    // =================================================================
-
-    doc.setTextColor(primaryColor);
-    drawText('... With thanks', margin, y + 10, 12, 'italic', secondaryColor);
-    
-    doc.line(pageW - margin - 50, y + 15, pageW - margin, y + 15);
-    drawText('For WanBite Investment Co. LTD', pageW - margin - 50, y + 19, 10, 'normal', primaryColor);
-    y += 25;
-
-    // --- Global Footer ---
-    doc.setFillColor(primaryColor);
-    doc.rect(0, doc.internal.pageSize.getHeight() - 10, pageW, 10, 'F');
-    
-    doc.setTextColor(255);
-    doc.setFontSize(9);
-    const footerText = `Location: Ngong Road, Kilimani, Nairobi. | Email: sales@carskenya.co.ke | Phone: 0713147136`;
-    doc.text(footerText, pageW / 2, doc.internal.pageSize.getHeight() - 4, null, null, "center");
-
-    doc.save(`Receipt_${data.receiptId}_with_History.pdf`);
-
-/**
- * Renders a view of all receipt balances
- */
-async function renderReceiptBalancesView() {
-    const formArea = document.getElementById('document-form-area');
-    formArea.innerHTML = `
-        <div class="p-6 border border-gray-300 rounded-xl bg-white shadow-lg">
-            <h3 class="text-xl font-semibold mb-6 text-primary-blue">Receipt Balances & Payments</h3>
-            
-            <div class="mb-6">
-                <div class="flex flex-wrap gap-4 mb-4">
-                    <input type="text" id="searchClient" placeholder="Search by client name..." class="p-2 border rounded-md flex-1">
-                    <input type="date" id="filterDateFrom" class="p-2 border rounded-md">
-                    <input type="date" id="filterDateTo" class="p-2 border rounded-md">
-                    <button onclick="filterReceiptBalances()" class="bg-primary-blue hover:bg-blue-900 text-white font-bold py-2 px-4 rounded-md">
-                        Filter
-                    </button>
-                    <button onclick="renderReceiptForm()" class="bg-gray-500 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-md">
-                        Back to Receipts
-                    </button>
-                </div>
-            </div>
-            
-            <div id="receipt-balances-list">
-                <p class="text-center text-gray-500">Loading receipt balances...</p>
-            </div>
-        </div>
-    `;
-    
-    fetchAllReceiptBalances();
-}
-
-/**
- * Fetches and displays all receipt balances with filtering
- */
-async function fetchAllReceiptBalances(filters = {}) {
-    const listElement = document.getElementById('receipt-balances-list');
-    let html = ``;
-    
-    try {
-        let query = db.collection("receipts").orderBy("createdAt", "desc");
-        
-        // Apply filters if provided
-        if (filters.clientName) {
-            query = query.where("receivedFrom", ">=", filters.clientName)
-                        .where("receivedFrom", "<=", filters.clientName + '\uf8ff');
-        }
-        
-        const snapshot = await query.get();
-        
-        if (snapshot.empty) {
-            listElement.innerHTML = `<p class="text-gray-500">No receipts found.</p>`;
-            return;
-        }
-        
-        html = `<div class="overflow-x-auto">
-                    <table class="min-w-full divide-y divide-gray-200">
-                        <thead class="bg-gray-50">
-                            <tr>
-                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Receipt ID</th>
-                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Client</th>
-                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total Paid</th>
-                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Balances</th>
-                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Payments</th>
-                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody class="bg-white divide-y divide-gray-200">`;
-        
-        for (const doc of snapshot.docs) {
-            const data = doc.data();
-            
-            // Calculate balances for this receipt
-            const balances = await calculateReceiptBalances(doc.id);
-            const totalPaidUSD = balances.totalPaidUSD;
-            const totalPaidKSH = balances.totalPaidKSH;
-            
-            // Calculate remaining balances
-            const remainingUSD = data.balanceDetails?.balanceRemainingUSD || 0;
-            const remainingKSH = data.balanceDetails?.balanceRemainingKSH || 0;
-            
-            // Apply date filter if provided
-            if (filters.dateFrom || filters.dateTo) {
-                const receiptDate = data.createdAt?.toDate ? data.createdAt.toDate() : new Date();
-                if (filters.dateFrom && receiptDate < new Date(filters.dateFrom)) continue;
-                if (filters.dateTo && receiptDate > new Date(filters.dateTo)) continue;
-            }
-            
-            html += `<tr>
-                        <td class="px-4 py-3 whitespace-nowrap">
-                            <div class="text-sm font-medium text-primary-blue">${data.receiptId}</div>
-                            <div class="text-xs text-gray-500">${data.receiptDate}</div>
-                        </td>
-                        <td class="px-4 py-3 whitespace-nowrap">
-                            <div class="text-sm text-gray-900">${data.receivedFrom}</div>
-                            <div class="text-xs text-gray-500">${data.beingPaidFor || 'N/A'}</div>
-                        </td>
-                        <td class="px-4 py-3 whitespace-nowrap">
-                            <div class="text-sm font-bold text-green-600">USD ${totalPaidUSD.toFixed(2)}</div>
-                            <div class="text-xs text-gray-600">KES ${totalPaidKSH.toFixed(2)}</div>
-                        </td>
-                        <td class="px-4 py-3 whitespace-nowrap">
-                            <div class="text-sm font-bold ${remainingUSD > 0 ? 'text-secondary-red' : 'text-green-600'}">
-                                USD ${remainingUSD.toFixed(2)}
-                            </div>
-                            <div class="text-xs text-gray-600">
-                                KES ${remainingKSH.toFixed(2)}
-                            </div>
-                        </td>
-                        <td class="px-4 py-3 whitespace-nowrap">
-                            <div class="text-sm text-gray-900">${balances.paymentCount} payment(s)</div>
-                            <div class="text-xs text-gray-500">Last: ${balances.payments.length > 0 ? balances.payments[balances.payments.length-1].paymentDate : 'N/A'}</div>
-                        </td>
-                        <td class="px-4 py-3 whitespace-nowrap text-sm font-medium">
-                            <button onclick='viewReceiptPaymentDetails("${doc.id}", "${data.receiptId}", "${data.receivedFrom}")' 
-                                    class="text-primary-blue hover:text-blue-900 mr-3">
-                                Details
-                            </button>
-                            <button onclick='addPaymentToExistingReceipt("${doc.id}", "${data.receiptId}", "${data.receivedFrom}", ${data.exchangeRate || 130})' 
-                                    class="text-green-600 hover:text-green-900">
-                                Add Payment
-                            </button>
-                        </td>
-                    </tr>`;
-        }
-        
-        html += `</tbody></table></div>`;
-        listElement.innerHTML = html;
-        
-    } catch (error) {
-        console.error("Error fetching receipt balances:", error);
-        listElement.innerHTML = `<p class="text-red-500">Error loading receipt balances. Check console for details.</p>`;
-    }
-}
-
-/**
- * Filters receipt balances based on search criteria
- */
-function filterReceiptBalances() {
-    const clientName = document.getElementById('searchClient').value;
-    const dateFrom = document.getElementById('filterDateFrom').value;
-    const dateTo = document.getElementById('filterDateTo').value;
-    
-    const filters = {};
-    if (clientName) filters.clientName = clientName;
-    if (dateFrom) filters.dateFrom = dateFrom;
-    if (dateTo) filters.dateTo = dateTo;
-    
-    fetchAllReceiptBalances(filters);
-}
-
-/**
- * Views detailed payment history for a specific receipt
- */
-async function viewReceiptPaymentDetails(receiptDocId, receiptNumber, clientName) {
-    const balances = await calculateReceiptBalances(receiptDocId);
-    
-    let paymentDetailsHtml = `<h4 class="font-bold text-primary-blue mb-3">Payment History for ${receiptNumber}</h4>`;
-    paymentDetailsHtml += `<p class="text-sm text-gray-600 mb-4">Client: ${clientName}</p>`;
-    
-    if (balances.payments.length === 0) {
-        paymentDetailsHtml += `<p class="text-gray-500">No payment history found.</p>`;
-    } else {
-        paymentDetailsHtml += `<div class="overflow-x-auto">
-            <table class="min-w-full divide-y divide-gray-200">
-                <thead class="bg-gray-50">
-                    <tr>
-                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Payment #</th>
-                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Date</th>
-                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Amount</th>
-                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">USD Equivalent</th>
-                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">KES Equivalent</th>
-                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Method</th>
-                    </tr>
-                </thead>
-                <tbody class="bg-white divide-y divide-gray-200">`;
-        
-        balances.payments.forEach((payment, index) => {
-            paymentDetailsHtml += `<tr>
-                <td class="px-4 py-2 text-sm">${index + 1}</td>
-                <td class="px-4 py-2 text-sm">${payment.paymentDate || 'N/A'}</td>
-                <td class="px-4 py-2 text-sm font-bold">${payment.currency} ${payment.amount.toFixed(2)}</td>
-                <td class="px-4 py-2 text-sm">USD ${payment.amountUSD?.toFixed(2) || (payment.currency === 'USD' ? payment.amount.toFixed(2) : (payment.amount / (payment.exchangeRate || 130)).toFixed(2))}</td>
-                <td class="px-4 py-2 text-sm">KES ${payment.amountKSH?.toFixed(2) || (payment.currency === 'KSH' ? payment.amount.toFixed(2) : (payment.amount * (payment.exchangeRate || 130)).toFixed(2))}</td>
-                <td class="px-4 py-2 text-sm">${payment.paymentMethod || 'N/A'}</td>
-            </tr>`;
-        });
-        
-        paymentDetailsHtml += `</tbody></table>`;
-        
-        // Add summary
-        paymentDetailsHtml += `<div class="mt-4 p-3 bg-blue-50 rounded-lg">
-            <h5 class="font-bold text-primary-blue mb-2">Payment Summary</h5>
-            <p class="text-sm">Total Payments: ${balances.payments.length}</p>
-            <p class="text-sm">Total Paid (USD): <span class="font-bold">${balances.totalPaidUSD.toFixed(2)}</span></p>
-            <p class="text-sm">Total Paid (KES): <span class="font-bold">${balances.totalPaidKSH.toFixed(2)}</span></p>
-        </div>`;
-    }
-    
-    const modalHtml = `
-        <div id="payment-details-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-            <div class="relative top-20 mx-auto p-5 border w-3/4 shadow-lg rounded-md bg-white">
-                <div class="flex justify-between items-center mb-4">
-                    <h3 class="text-lg font-semibold text-primary-blue">Payment Details</h3>
-                    <button onclick="document.getElementById('payment-details-modal').remove()" class="text-gray-500 hover:text-gray-700">
-                        &times;
-                    </button>
-                </div>
-                ${paymentDetailsHtml}
-                <div class="mt-4 flex justify-end">
-                    <button onclick="document.getElementById('payment-details-modal').remove()" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-md">
-                        Close
-                    </button>
-                </div>
-            </div>
-        </div>
-    `;
-    
-    document.body.insertAdjacentHTML('beforeend', modalHtml);
-}
-
-/**
- * Adds a payment to an existing receipt
- */
-function addPaymentToExistingReceipt(receiptDocId, receiptNumber, clientName, exchangeRate = 130) {
-    const modalHtml = `
-        <div id="add-payment-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-            <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
-                <h3 class="text-lg font-semibold text-primary-blue mb-4">Add Payment to Receipt</h3>
-                <p class="text-sm mb-3">
-                    <strong>Receipt:</strong> ${receiptNumber}<br>
-                    <strong>Client:</strong> ${clientName}<br>
-                    <strong>Exchange Rate:</strong> USD 1 = KES ${exchangeRate}
-                </p>
-                <form id="add-payment-form" onsubmit="event.preventDefault(); saveAdditionalPayment('${receiptDocId}', '${receiptNumber}', ${exchangeRate})">
-                    <div class="mb-3">
-                        <label class="block text-sm font-medium text-gray-700">Payment Date</label>
-                        <input type="date" id="paymentDate" required value="${new Date().toISOString().slice(0, 10)}" class="mt-1 block w-full p-2 border rounded-md">
-                    </div>
-                    <div class="mb-3">
-                        <label class="block text-sm font-medium text-gray-700">Amount</label>
-                        <div class="grid grid-cols-3 gap-2">
-                            <select id="paymentCurrency" required class="p-2 border rounded-md">
-                                <option value="KSH">KSH</option>
-                                <option value="USD">USD</option>
-                            </select>
-                            <input type="number" id="paymentAmount" step="0.01" required placeholder="Amount" class="col-span-2 p-2 border rounded-md">
-                        </div>
-                    </div>
-                    <div class="mb-3">
-                        <label class="block text-sm font-medium text-gray-700">Exchange Rate (USD 1 = KES)</label>
-                        <input type="number" id="paymentExchangeRate" step="0.01" required value="${exchangeRate}" class="w-full p-2 border rounded-md">
-                    </div>
-                    <div class="mb-3">
-                        <label class="block text-sm font-medium text-gray-700">Bank Used</label>
-                        <select id="paymentBankUsed" required class="mt-1 block w-full p-2 border rounded-md">
-                            <option value="" disabled selected>Select Bank</option>
-                            <option value="Cash">Cash</option>
-                        </select>
-                    </div>
-                    <div class="mb-3">
-                        <label class="block text-sm font-medium text-gray-700">Reference/Description</label>
-                        <input type="text" id="paymentDescription" required placeholder="e.g., Balance Payment, Additional Payment" class="mt-1 block w-full p-2 border rounded-md">
-                    </div>
-                    <div class="mb-4 p-2 bg-yellow-50 rounded">
-                        <p class="text-xs text-gray-600">
-                            <strong>Note:</strong> Amount will be auto-converted using exchange rate: USD 1 = KES ${exchangeRate}
-                        </p>
-                    </div>
-                    <div class="flex justify-end space-x-3">
-                       <button type="button" onclick="(() => { const modal = document.getElementById('add-payment-modal'); if (modal) modal.remove(); })()" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-md">
-    Cancel
-</button>
-                        <button type="submit" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-md">
-                            Add Payment
-                        </button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    `;
-    
-    document.body.insertAdjacentHTML('beforeend', modalHtml);
-    
-    // Populate bank dropdown in the modal
-    populateBankDropdownForModal('paymentBankUsed');
-}
-
-/**
- * Populates bank dropdown in modal
- */
-async function populateBankDropdownForModal(dropdownId) {
-    const bankSelect = document.getElementById(dropdownId);
-    if (!bankSelect) return;
-
-    // Clear existing options except the first one
-    while (bankSelect.options.length > 1) {
-        bankSelect.remove(1);
-    }
-
-    try {
-        const snapshot = await db.collection("bankDetails").orderBy("createdAt", "desc").get();
-        
-        if (snapshot.empty) {
-            const option = document.createElement('option');
-            option.value = "";
-            option.textContent = "No banks configured. Add banks first.";
-            option.disabled = true;
-            bankSelect.appendChild(option);
-            return;
-        }
-
-        snapshot.forEach(doc => {
-            const data = doc.data();
-            const option = document.createElement('option');
-            option.value = `${data.name} - ${data.branch || 'No Branch'} (${data.currency})`;
-            option.textContent = `${data.name} - ${data.branch || 'No Branch'} (${data.currency})`;
-            bankSelect.appendChild(option);
-        });
-
-    } catch (error) {
-        console.error("Error loading banks for modal:", error);
-        const option = document.createElement('option');
-        option.value = "";
-        option.textContent = "Error loading banks";
-        option.disabled = true;
-        bankSelect.appendChild(option);
-    }
-}
-
-/**
- * Saves an additional payment to an existing receipt
- */
-async function saveAdditionalPayment(receiptDocId, receiptNumber, exchangeRate) {
-    const form = document.getElementById('add-payment-form');
-    if (!form.checkValidity()) {
-        form.reportValidity();
-        return;
-    }
-    
-    const paymentDate = document.getElementById('paymentDate').value;
-    const paymentCurrency = document.getElementById('paymentCurrency').value;
-    const paymentAmount = parseFloat(document.getElementById('paymentAmount').value);
-    const paymentExchangeRate = parseFloat(document.getElementById('paymentExchangeRate').value);
-    const paymentBankUsed = document.getElementById('paymentBankUsed').value;
-    const paymentDescription = document.getElementById('paymentDescription').value;
-    
-    if (isNaN(paymentAmount) || paymentAmount <= 0) {
-        alert("Please enter a valid payment amount.");
-        return;
-    }
-    
-    // Calculate amounts in both currencies
-    let amountUSD = paymentAmount;
-    let amountKSH = paymentAmount;
-    
-    if (paymentCurrency === 'KSH') {
-        amountUSD = paymentAmount / paymentExchangeRate;
-        amountKSH = paymentAmount;
-    } else if (paymentCurrency === 'USD') {
-        amountUSD = paymentAmount;
-        amountKSH = paymentAmount * paymentExchangeRate;
-    }
-    
-    // Get next payment number
-    const paymentsSnapshot = await db.collection("receipt_payments")
-        .where("receiptId", "==", receiptDocId)
-        .get();
-    
-    const nextPaymentNumber = paymentsSnapshot.size + 1;
-    
-    // Save payment record
-    const paymentData = {
-        receiptId: receiptDocId,
-        receiptNumber: receiptNumber,
-        paymentNumber: nextPaymentNumber,
-        paymentDate: paymentDate,
-        amount: paymentAmount,
-        currency: paymentCurrency,
-        amountUSD: amountUSD,
-        amountKSH: amountKSH,
-        exchangeRate: paymentExchangeRate,
-        description: paymentDescription,
-        paymentMethod: paymentBankUsed !== 'Cash' ? `Bank: ${paymentBankUsed}` : "Cash",
-        createdBy: currentUser.email,
-        createdAt: firebase.firestore.FieldValue.serverTimestamp()
-    };
-    
-    try {
-        await db.collection("receipt_payments").add(paymentData);
-        
-        // Update receipt balance
-        const receiptDoc = await db.collection("receipts").doc(receiptDocId).get();
-        const receiptData = receiptDoc.data();
-        
-        const currentBalanceUSD = receiptData.balanceDetails?.balanceRemainingUSD || 0;
-        const newBalanceUSD = Math.max(0, currentBalanceUSD - amountUSD);
-        const newBalanceKSH = newBalanceUSD * paymentExchangeRate;
-        
-        await db.collection("receipts").doc(receiptDocId).update({
-            "balanceDetails.balanceRemaining": newBalanceUSD,
-            "balanceDetails.balanceRemainingUSD": newBalanceUSD,
-            "balanceDetails.balanceRemainingKSH": newBalanceKSH
-        });
-        
-        const modal = document.getElementById('add-payment-modal');
-        if (modal) {
-            modal.remove();
-        }
-        
-        alert(`Additional payment of ${paymentCurrency} ${paymentAmount.toFixed(2)} added successfully!`);
-        
-        // Refresh the view
-        if (document.getElementById('receipt-balances-list')) {
-            fetchAllReceiptBalances();
-        } else {
-            fetchReceipts();
-        }
-        
-    } catch (error) {
-        console.error("Error saving additional payment:", error);
-        alert("Failed to save payment: " + error.message);
-    }
-}
-
-/**
- * Creates a sales agreement from receipt data
- */
-function createAgreementFromReceipt(receiptData) {
-    // Navigate to agreement form with receipt reference
-    renderAgreementForm();
-    
-    // You could auto-populate some fields here if needed
-    // For example, set the buyer name from receipt
-    setTimeout(() => {
-        const buyerNameField = document.getElementById('buyerName');
-        const beingPaidForField = document.getElementById('carMakeModel');
-        
-        if (buyerNameField) buyerNameField.value = receiptData.receivedFrom;
-        if (beingPaidForField) beingPaidForField.value = receiptData.beingPaidFor;
-    }, 100);
-}
-
-/**
-/**
- * Re-downloads the PDF for a selected receipt document from history.
- * @param {object} data - The receipt data object retrieved from Firestore.
- */
-async function reDownloadReceipt(data) {
-    // Ensure data.receiptDate is set (should be from the save logic)
-    if (!data.receiptDate) {
-         data.receiptDate = new Date().toLocaleDateString('en-US'); // Fallback
-    }
-    
-    // If we have the firestoreId, fetch payment history
-    if (data.firestoreId) {
-        try {
-            const balances = await calculateReceiptBalances(data.firestoreId);
-            data.totalPaidUSD = balances.totalPaidUSD;
-            data.totalPaidKSH = balances.totalPaidKSH;
-            data.paymentCount = balances.paymentCount;
-            data.paymentHistory = balances.payments;
-        } catch (error) {
-            console.error("Error fetching payment history for PDF:", error);
-        }
-    }
-    
-    // Now generate the PDF with all the data
-    generateReceiptPDF(data);
-}
-
-/**
- * View balances for a specific receipt
- */
-function viewReceiptBalances(data) {
-    const modalHtml = `
-        <div id="balances-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-            <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
-                <h3 class="text-lg font-semibold text-primary-blue mb-4">Receipt Balances</h3>
-                <p class="text-sm mb-3">
-                    <strong>Receipt:</strong> ${data.receiptId}<br>
-                    <strong>Client:</strong> ${data.receivedFrom}<br>
-                    <strong>Exchange Rate:</strong> USD 1 = KES ${data.exchangeRate || 130}
-                </p>
-                <div class="mb-4 p-3 bg-blue-50 rounded-lg">
-                    <h4 class="font-bold text-primary-blue mb-2">Payment Summary</h4>
-                    <p class="text-sm"><strong>Total Payments:</strong> ${data.paymentCount || 1}</p>
-                    <p class="text-sm"><strong>Total Paid (USD):</strong> <span class="font-bold text-green-600">${data.totalPaidUSD?.toFixed(2) || data.amountReceivedUSD?.toFixed(2) || (data.currency === 'USD' ? data.amountReceived.toFixed(2) : (data.amountReceived / (data.exchangeRate || 130)).toFixed(2))}</span></p>
-                    <p class="text-sm"><strong>Total Paid (KES):</strong> <span class="font-bold text-green-600">${data.totalPaidKSH?.toFixed(2) || data.amountReceivedKSH?.toFixed(2) || (data.currency === 'KSH' ? data.amountReceived.toFixed(2) : (data.amountReceived * (data.exchangeRate || 130)).toFixed(2))}</span></p>
-                </div>
-                <div class="mb-4 p-3 ${data.balanceDetails?.balanceRemaining > 0 ? 'bg-red-50' : 'bg-green-50'} rounded-lg">
-                    <h4 class="font-bold ${data.balanceDetails?.balanceRemaining > 0 ? 'text-secondary-red' : 'text-green-600'} mb-2">
-                        ${data.balanceDetails?.balanceRemaining > 0 ? 'Remaining Balance' : 'Fully Paid'}
-                    </h4>
-                    <p class="text-sm"><strong>USD Balance:</strong> <span class="font-bold">${data.balanceDetails?.balanceRemainingUSD?.toFixed(2) || data.balanceDetails?.balanceRemaining?.toFixed(2) || '0.00'}</span></p>
-                    <p class="text-sm"><strong>KES Balance:</strong> <span class="font-bold">${data.balanceDetails?.balanceRemainingKSH?.toFixed(2) || (data.balanceDetails?.balanceRemaining * (data.exchangeRate || 130)).toFixed(2) || '0.00'}</span></p>
-                    ${data.balanceDetails?.balanceDueDate ? `<p class="text-sm"><strong>Due Date:</strong> ${data.balanceDetails.balanceDueDate}</p>` : ''}
-                </div>
-                <div class="flex justify-end space-x-3">
-                    <button onclick="addPaymentToReceipt(${JSON.stringify(data)})" 
-                            class="bg-primary-blue hover:bg-blue-900 text-white font-bold py-2 px-4 rounded-md">
-                        Add Payment
-                    </button>
-                    <button onclick="document.getElementById('balances-modal').remove()" 
-                            class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-md">
-                        Close
-                    </button>
-                </div>
-            </div>
-        </div>
-    `;
-    
-    document.body.insertAdjacentHTML('beforeend', modalHtml);
-}
-
-/**
- * Add payment to receipt from receipt history
- */
-function addPaymentToReceipt(receiptData) {
-    addPaymentToExistingReceipt(
-        receiptData.firestoreId,
-        receiptData.receiptId,
-        receiptData.receivedFrom,
-        receiptData.exchangeRate || 130
-    );
-}
-
-/**
- * Marks invoice deposit as paid
- */
-function markInvoiceDepositPaid(invoiceData) {
-    const modalHtml = `
-        <div id="deposit-paid-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-            <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
-                <h3 class="text-lg font-semibold text-primary-blue mb-4">Mark Deposit as Paid</h3>
-                <p class="text-sm mb-3">
-                    <strong>Invoice:</strong> ${invoiceData.invoiceId}<br>
-                    <strong>Client:</strong> ${invoiceData.clientName}<br>
-                    <strong>Deposit Required:</strong> USD ${invoiceData.pricing.depositUSD.toFixed(2)} (KES ${invoiceData.pricing.depositKSH})
-                </p>
-                <form id="deposit-paid-form" onsubmit="event.preventDefault(); saveDepositPayment('${invoiceData.firestoreId}', ${invoiceData.pricing.depositUSD}, ${invoiceData.exchangeRate})">
-                    <div class="mb-3">
-                        <label class="block text-sm font-medium text-gray-700">Payment Date</label>
-                        <input type="date" id="depositDate" required value="${new Date().toISOString().slice(0, 10)}" class="mt-1 block w-full p-2 border rounded-md">
-                    </div>
-                    <div class="mb-3">
-                        <label class="block text-sm font-medium text-gray-700">Amount</label>
-                        <div class="grid grid-cols-3 gap-2">
-                            <select id="depositCurrency" required class="p-2 border rounded-md">
-                                <option value="USD">USD</option>
-                                <option value="KSH">KSH</option>
-                            </select>
-                            <input type="number" id="depositAmount" step="0.01" required placeholder="Amount" class="col-span-2 p-2 border rounded-md">
-                        </div>
-                    </div>
-                    <div class="mb-3">
-                        <label class="block text-sm font-medium text-gray-700">Exchange Rate (USD 1 = KES)</label>
-                        <input type="number" id="depositExchangeRate" step="0.01" required value="${invoiceData.exchangeRate || 130}" class="w-full p-2 border rounded-md">
-                    </div>
-                    <div class="mb-3">
-                        <label class="block text-sm font-medium text-gray-700">Bank Used</label>
-                        <select id="depositBankUsed" required class="mt-1 block w-full p-2 border rounded-md">
-                            <option value="" disabled selected>Select Bank</option>
-                            <option value="Cash">Cash</option>
-                        </select>
-                    </div>
-                    <div class="mb-3">
-                        <label class="block text-sm font-medium text-gray-700">Reference/Description</label>
-                        <input type="text" id="depositDescription" required placeholder="e.g., Deposit Payment for Invoice ${invoiceData.invoiceId}" class="mt-1 block w-full p-2 border rounded-md">
-                    </div>
-                    <div class="mb-4 p-2 bg-yellow-50 rounded">
-                        <p class="text-xs text-gray-600">
-                            <strong>Note:</strong> This will create a receipt for the deposit payment.
-                        </p>
-                    </div>
-                    <div class="flex justify-end space-x-3">
-                        <button type="button" onclick="(() => { const modal = document.getElementById('deposit-paid-modal'); if (modal) modal.remove(); })()" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-md">
-                            Cancel
-                        </button>
-                        <button type="submit" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-md">
-                            Save Deposit Payment
-                        </button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    `;
-    
-    document.body.insertAdjacentHTML('beforeend', modalHtml);
-    
-    // Set default amount based on currency
-    const depositCurrency = document.getElementById('depositCurrency');
-    const depositAmount = document.getElementById('depositAmount');
-    
-    if (depositCurrency && depositAmount) {
-        depositCurrency.addEventListener('change', function() {
-            if (this.value === 'USD') {
-                depositAmount.value = invoiceData.pricing.depositUSD.toFixed(2);
-            } else if (this.value === 'KSH') {
-                depositAmount.value = invoiceData.pricing.depositKSH;
-            }
-        });
-        
-        // Set initial value
-        depositAmount.value = invoiceData.pricing.depositUSD.toFixed(2);
-    }
-    
-    // Populate bank dropdown in the modal
-    populateBankDropdownForModal('depositBankUsed');
-}
-
-/**
- * Saves deposit payment and creates receipt
- */
-async function saveDepositPayment(invoiceDocId, depositAmountUSD, exchangeRate) {
-    const form = document.getElementById('deposit-paid-form');
-    if (!form.checkValidity()) {
-        form.reportValidity();
-        return;
-    }
-    
-    const depositDate = document.getElementById('depositDate').value;
-    const depositCurrency = document.getElementById('depositCurrency').value;
-    const depositAmount = parseFloat(document.getElementById('depositAmount').value);
-    const depositExchangeRate = parseFloat(document.getElementById('depositExchangeRate').value);
-    const depositBankUsed = document.getElementById('depositBankUsed').value;
-    const depositDescription = document.getElementById('depositDescription').value;
-    
-    if (isNaN(depositAmount) || depositAmount <= 0) {
-        alert("Please enter a valid deposit amount.");
-        return;
-    }
-    
-    // Get invoice data
-    const invoiceDoc = await db.collection("invoices").doc(invoiceDocId).get();
-    if (!invoiceDoc.exists) {
-        alert("Invoice not found!");
-        return;
-    }
-    
-    const invoiceData = invoiceDoc.data();
-    
-    // Calculate amounts in both currencies
-    let amountUSD = depositAmount;
-    let amountKSH = depositAmount;
-    
-    if (depositCurrency === 'KSH') {
-        amountUSD = depositAmount / depositExchangeRate;
-        amountKSH = depositAmount;
-    } else if (depositCurrency === 'USD') {
-        amountUSD = depositAmount;
-        amountKSH = depositAmount * depositExchangeRate;
-    }
-    
-    // Generate receipt ID
-    const receiptId = generateReceiptId("Deposit", invoiceData.clientName);
-    const receiptDate = depositDate || new Date().toLocaleDateString('en-US');
-    
-    // Create receipt data
-    const receiptData = {
-        receiptId,
-        receiptType: "Invoice Deposit",
-        receivedFrom: invoiceData.clientName,
-        currency: depositCurrency,
-        amountReceived: depositAmount,
-        amountReceivedUSD: amountUSD,
-        amountReceivedKSH: amountKSH,
-        amountWords: numberToWords(depositAmount).replace('only', depositCurrency === 'USD' ? 'US Dollars only.' : 'Kenya Shillings only.'),
-        beingPaidFor: `${invoiceData.carDetails.make} ${invoiceData.carDetails.model} ${invoiceData.carDetails.year} Deposit`,
-        paymentDetails: {
-            chequeNo: "",
-            rtgsTtNo: "",
-            bankUsed: depositBankUsed
-        },
-        balanceDetails: {
-            balanceRemaining: invoiceData.pricing.balanceUSD,
-            balanceDueDate: invoiceData.dueDate,
-            balanceRemainingUSD: invoiceData.pricing.balanceUSD,
-            balanceRemainingKSH: invoiceData.pricing.balanceUSD * depositExchangeRate
-        },
-        invoiceReference: invoiceData.invoiceId,
-        exchangeRate: depositExchangeRate,
-        receiptDate,
-        createdBy: currentUser.email,
-        createdAt: firebase.firestore.FieldValue.serverTimestamp()
-    };
-    
-    try {
-        // Save receipt
-        const receiptRef = await db.collection("receipts").add(receiptData);
-        
-        // Save payment record
-        const paymentData = {
-            receiptId: receiptRef.id,
-            receiptNumber: receiptId,
-            paymentNumber: 1,
-            paymentDate: receiptDate,
-            amount: depositAmount,
-            currency: depositCurrency,
-            amountUSD: amountUSD,
-            amountKSH: amountKSH,
-            exchangeRate: depositExchangeRate,
-            description: depositDescription,
-            paymentMethod: depositBankUsed !== 'Cash' ? `Bank: ${depositBankUsed}` : "Cash",
-            createdBy: currentUser.email,
-            createdAt: firebase.firestore.FieldValue.serverTimestamp()
-        };
-        
-        await db.collection("receipt_payments").add(paymentData);
-        
-        // Update invoice to mark deposit as paid
-        await db.collection("invoices").doc(invoiceDocId).update({
-            "pricing.depositPaid": true,
-            "pricing.depositPaidDate": receiptDate,
-            "pricing.depositPaidAmount": depositAmount,
-            "pricing.depositPaidCurrency": depositCurrency,
-            "pricing.remainingBalance": invoiceData.pricing.balanceUSD
-        });
-        
-        const modal = document.getElementById('deposit-paid-modal');
-        if (modal) {
-            modal.remove();
-        }
-        
-        alert(`Deposit payment of ${depositCurrency} ${depositAmount.toFixed(2)} saved successfully! Receipt ${receiptId} created.`);
-        
-        // Navigate to receipt form with the invoice reference
-        renderReceiptForm(invoiceData.invoiceId);
-        
-    } catch (error) {
-        console.error("Error saving deposit payment:", error);
-        alert("Failed to save deposit payment: " + error.message);
-    }
-}
-
-/**
-/**
- * Generates and downloads a custom PDF for the comprehensive receipt. (WITH PAYMENT HISTORY)
- */
-function generateReceiptPDF(data) {
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF('p', 'mm', 'a4'); 
-
-    const primaryColor = '#183263'; // WanBite Blue
-    const secondaryColor = '#D96359'; // Red
-    
-    const pageW = doc.internal.pageSize.getWidth();
-    let y = 10; 
-    const margin = 10;
-    const boxW = pageW - (2 * margin);
-    // Increased base line height for better spacing
-    const lineHeight = 7; 
-
-    // --- HELPER FUNCTION ---
-    const drawText = (text, x, y, size, style = 'normal', color = primaryColor, align = 'left') => {
-        doc.setFontSize(size);
-        doc.setFont("helvetica", style);
-        doc.setTextColor(color);
-        doc.text(text, x, y, { align: align });
-    };
-
-    // =================================================================
-    // HEADER SECTION
-    // =================================================================
-    
-    // Top Bar (Color #183263)
-    
-    drawText('WanBite Investments Co. Ltd.', pageW / 2, 8, 18, 'bold', '#FFFFFF', 'center');
-    drawText('carskenya.co.ke', pageW / 2, 13, 10, 'normal', '#FFFFFF', 'center');
-    
-    y = 25;
-
-    // RECEIPT TITLE
-    doc.setTextColor(primaryColor);
-    doc.setFontSize(24);
-    doc.setFont("helvetica", "bold");
-    doc.text("OFFICIAL RECEIPT", pageW / 2, y, null, null, "center");
-    y += 12; // Increased space after title
-    
-    // Receipt Metadata Box (ID and Date)
-    doc.setDrawColor(primaryColor);
-    doc.setLineWidth(0.5);
-    doc.rect(margin, y, boxW, 15);
-    
-    drawText('RECEIPT NO:', margin + 3, y + 5, 10, 'bold', secondaryColor);
-    drawText(data.receiptId, margin + 3, y + 11, 14, 'bold', primaryColor);
-    
-    drawText('DATE:', pageW - margin - 3, y + 5, 10, 'bold', secondaryColor, 'right');
-    drawText(data.receiptDate, pageW - margin - 3, y + 11, 14, 'bold', primaryColor, 'right');
-    y += 20;
-
-    // =================================================================
-    // MAIN BODY
-    // =================================================================
-
-    // Received From
-    doc.setTextColor(primaryColor);
-    drawText('RECEIVED FROM:', margin, y, 10, 'bold');
-    doc.setDrawColor(0);
-    doc.line(margin + 35, y, pageW - margin, y);
-    drawText(data.receivedFrom, margin + 35, y - 0.5, 12, 'bold', 0);
-    y += lineHeight + 2;
-
-    // The Sum of Money (Words)
-    drawText('THE SUM OF:', margin, y + 3, 10, 'bold');
-    doc.setFillColor(240, 240, 240); 
-    doc.rect(margin + 35, y, boxW - 35, lineHeight * 2.5, 'F'); // Box for words
-    doc.setDrawColor(0);
-    doc.setLineWidth(0.2);
-    doc.rect(margin + 35, y, boxW - 35, lineHeight * 2.5);
-    
-    doc.setTextColor(0);
-    doc.setFontSize(11);
-    // Use splitTextToSize to wrap the words nicely within the box
-    const wrappedWords = doc.splitTextToSize(data.amountWords, boxW - 37);
-    doc.text(wrappedWords, margin + 36, y + 4);
-    y += lineHeight * 2.5 + 5;
-
-    // Being Paid For
-    drawText('BEING PAID FOR:', margin, y, 10, 'bold', primaryColor);
-    doc.line(margin + 35, y, pageW - margin, y);
-    drawText(data.beingPaidFor, margin + 35, y - 0.5, 12, 'bold', 0);
-    y += lineHeight + 4;
-
-    // =================================================================
-    // PAYMENT REFERENCES SECTION (UPDATED BANK DISPLAY)
-    // =================================================================
-    doc.setTextColor(primaryColor);
-    drawText('PAYMENT DETAILS:', margin, y, 10, 'bold');
-    y += 4;
-
-    doc.setFontSize(10);
-    doc.setTextColor(0);
-
-    // Parse bank details from the bankUsed field
-    let bankName = data.paymentDetails.bankUsed || 'N/A';
-    let branchName = '';
-    
-    // Extract branch if it exists in the format "Bank Name - Branch Name (Currency)"
-    if (bankName.includes(' - ')) {
-        const parts = bankName.split(' - ');
-        bankName = parts[0];
-        if (parts[1]) {
-            // Remove currency from branch if present
-            branchName = parts[1].replace(/\s*\([^)]*\)$/, '');
-        }
-    }
-
-    // Row 1: Cheque and RTGS/TT
-    doc.rect(margin, y, boxW * 0.45, lineHeight); // Cheque Box
-    doc.text(`Cheque No: ${data.paymentDetails.chequeNo || 'N/A'}`, margin + 2, y + 4.5);
-    doc.rect(margin + boxW * 0.55, y, boxW * 0.45, lineHeight); // RTGS/TT Box
-    doc.text(`RTGS/TT No: ${data.paymentDetails.rtgsTtNo || 'N/A'}`, margin + boxW * 0.55 + 2, y + 4.5);
-    y += lineHeight + 2;
-
-    // Row 2: Bank Name Only
-    doc.rect(margin, y, boxW * 0.45, lineHeight); // Bank Name Box
-    doc.text(`Bank Name: ${bankName}`, margin + 2, y + 4.5);
-    
-    // Row 2: Receipt Type
-    doc.rect(margin + boxW * 0.55, y, boxW * 0.45, lineHeight); // Receipt Type Box
-    doc.text(`Receipt Type: ${data.receiptType}`, margin + boxW * 0.55 + 2, y + 4.5);
-    y += lineHeight + 2;
-
-    // Row 3: Bank Branch (if exists)
-    if (branchName) {
-        doc.rect(margin, y, boxW * 0.45, lineHeight); // Bank Branch Box
-        doc.text(`Bank Branch: ${branchName}`, margin + 2, y + 4.5);
-        y += lineHeight + 2;
-    }
-
-    // =================================================================
-    // AMOUNT FIGURE (BIG BOX) - UPDATED WITH TOTAL PAID
-    // =================================================================
-    const amountBoxH = 15;
-    const amountBoxY = y + 5;
-    
-    // Use pre-fetched payment history if available
-    let totalPaidUSD = data.totalPaidUSD || data.amountReceivedUSD || 0;
-    let totalPaidKSH = data.totalPaidKSH || data.amountReceivedKSH || 0;
-    let paymentCount = data.paymentCount || 1;
-    let paymentHistory = data.paymentHistory || [];
-    
-    // Total Amount Box (Right Side)
-    doc.setFillColor(secondaryColor);
-    doc.rect(pageW - margin - 70, amountBoxY, 70, amountBoxH, 'F');
-    
-    doc.setTextColor(255);
-    drawText('AMOUNT FIGURE', pageW - margin - 65, amountBoxY + 4, 8, 'bold', 255);
-    drawText(`${data.currency} ${data.amountReceived.toLocaleString('en-US', { minimumFractionDigits: 2 })}`, pageW - margin - 5, amountBoxY + 11, 18, 'bold', 255, 'right');
-    
-    // Balance Details (Left Side)
-    doc.setTextColor(primaryColor);
-    drawText('BALANCE DETAILS', margin, amountBoxY + 4, 10, 'bold');
-    doc.setFontSize(12);
-    doc.setTextColor(0);
-
-    const balanceText = data.balanceDetails.balanceRemaining > 0 
-        ? `${data.currency} ${data.balanceDetails.balanceRemaining.toLocaleString('en-US', { minimumFractionDigits: 2 })}` 
-        : 'ZERO';
-    
-    drawText(`Balance Remaining: ${balanceText}`, margin, amountBoxY + 10, 10);
-    drawText(`Due On/Before: ${data.balanceDetails.balanceDueDate || 'N/A'}`, margin, amountBoxY + 14, 10);
-    
-    y = amountBoxY + amountBoxH + 7;
-
-    // =================================================================
-    // PAYMENT HISTORY SECTION (NEW)
-    // =================================================================
-    if (paymentCount > 1 && paymentHistory.length > 0) {
-        y += 5;
-        drawText('PAYMENT HISTORY', margin, y, 12, 'bold', primaryColor);
-        y += 8;
-        
-        // Summary Box
-        doc.setFillColor(240, 240, 240);
-        doc.rect(margin, y, boxW, 10, 'F');
-        doc.setDrawColor(primaryColor);
-        doc.setLineWidth(0.3);
-        doc.rect(margin, y, boxW, 10);
-        
-        doc.setFontSize(9);
-        doc.setTextColor(primaryColor);
-        doc.setFont("helvetica", "bold");
-        doc.text(`Total Payments: ${paymentCount}`, margin + 5, y + 6);
-        doc.text(`Total Paid (USD): ${totalPaidUSD.toFixed(2)}`, margin + 60, y + 6);
-        doc.text(`Total Paid (KES): ${totalPaidKSH.toFixed(2)}`, margin + 120, y + 6);
-        y += 12;
-        
-        // Table Header
-        doc.setFillColor(primaryColor);
-        doc.rect(margin, y, boxW, 6, 'F');
-        doc.setTextColor(255);
-        drawText('#', margin + 2, y + 4, 8, 'bold', 255);
-        drawText('Date', margin + 10, y + 4, 8, 'bold', 255);
-        drawText('Amount', margin + 40, y + 4, 8, 'bold', 255);
-        drawText('USD', margin + 75, y + 4, 8, 'bold', 255);
-        drawText('KES', margin + 105, y + 4, 8, 'bold', 255);
-        drawText('Method', margin + 135, y + 4, 8, 'bold', 255);
-        drawText('Description', margin + 170, y + 4, 8, 'bold', 255);
-        y += 6;
-        
-        // Payment Rows
-        doc.setFontSize(8);
-        doc.setTextColor(0);
-        
-        paymentHistory.forEach((payment, index) => {
-            // Check if we need a new page
-            if (y > doc.internal.pageSize.getHeight() - 20) {
-                doc.addPage();
-                y = 10;
-            }
-            
-            // Alternate row colors
-            if (index % 2 === 0) {
-                doc.setFillColor(250, 250, 250);
-                doc.rect(margin, y, boxW, 5, 'F');
-            }
-            
-            doc.rect(margin, y, boxW, 5);
-            drawText(`${index + 1}`, margin + 2, y + 3.5, 8);
-            drawText(payment.paymentDate || 'N/A', margin + 10, y + 3.5, 8);
-            drawText(`${payment.currency} ${payment.amount.toFixed(2)}`, margin + 40, y + 3.5, 8);
-            drawText(`USD ${payment.amountUSD?.toFixed(2) || (payment.currency === 'USD' ? payment.amount.toFixed(2) : (payment.amount / (payment.exchangeRate || data.exchangeRate || 130)).toFixed(2))}`, margin + 75, y + 3.5, 8);
-            drawText(`KES ${payment.amountKSH?.toFixed(2) || (payment.currency === 'KSH' ? payment.amount.toFixed(2) : (payment.amount * (payment.exchangeRate || data.exchangeRate || 130)).toFixed(2))}`, margin + 105, y + 3.5, 8);
-            
-            // Truncate method if too long
-            const method = payment.paymentMethod || 'N/A';
-            const shortMethod = method.length > 15 ? method.substring(0, 12) + '...' : method;
-            drawText(shortMethod, margin + 135, y + 3.5, 8);
-            
-            // Truncate description if too long
-            const description = payment.description || 'Payment';
-            const shortDesc = description.length > 20 ? description.substring(0, 17) + '...' : description;
-            drawText(shortDesc, margin + 170, y + 3.5, 8);
-            
-            y += 5;
-        });
-        
-        y += 3;
-    } else if (paymentCount === 1) {
-        // Single payment note
-        y += 5;
-        doc.setFontSize(9);
-        doc.setTextColor(secondaryColor);
-        doc.setFont("helvetica", "italic");
-        doc.text(`Note: This is the initial payment for this receipt.`, margin, y);
-        doc.setTextColor(0);
-        y += 5;
-    }
-
-    // =================================================================
-    // FOOTER/SIGNATURES
-    // =================================================================
-
-    doc.setTextColor(primaryColor);
-    drawText('... With thanks', margin, y + 10, 12, 'italic', secondaryColor);
-    
-    doc.line(pageW - margin - 50, y + 15, pageW - margin, y + 15);
-    drawText('For WanBite Investment Co. LTD', pageW - margin - 50, y + 19, 10, 'normal', primaryColor);
-    y += 25;
-
-    // --- Global Footer ---
-    doc.setFillColor(primaryColor);
-    doc.rect(0, doc.internal.pageSize.getHeight() - 10, pageW, 10, 'F');
-    
-    doc.setTextColor(255);
-    doc.setFontSize(9);
-    const footerText = `Location: Ngong Road, Kilimani, Nairobi. | Email: sales@carskenya.co.ke | Phone: 0713147136`;
-    doc.text(footerText, pageW / 2, doc.internal.pageSize.getHeight() - 4, null, null, "center");
-
-    doc.save(`Receipt_${data.receiptId}.pdf`);
-}
-// =================================================================
-//                 7. BANK MANAGEMENT MODULE (NEW)
-// =================================================================
-
-/**
- * Renders the interface for adding and managing bank accounts.
- */
-function renderBankManagement() {
-    const formArea = document.getElementById('document-form-area');
-    formArea.innerHTML = `
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div class="md:col-span-1 p-6 border border-green-300 rounded-xl bg-green-50 shadow-md">
-                <h3 class="text-xl font-semibold mb-4 text-green-700">Add New Bank Account</h3>
-                <form id="add-bank-form" onsubmit="event.preventDefault(); addBankDetails()">
-                    <input type="text" id="bankName" required placeholder="Bank Name (e.g., KCB Bank)" class="mt-2 block w-full p-2 border rounded-md">
-                    <input type="text" id="bankBranch" required placeholder="Bank Branch (e.g., Kilimani Branch)" class="mt-2 block w-full p-2 border rounded-md">
-                    <input type="text" id="accountName" required placeholder="Account Name" value="WANBITE INVESTMENTS CO. LTD" class="mt-2 block w-full p-2 border rounded-md">
-                    <input type="text" id="accountNumber" required placeholder="Account Number" class="mt-2 block w-full p-2 border rounded-md">
-                    <input type="text" id="swiftCode" required placeholder="SWIFT/BIC Code" class="mt-2 block w-full p-2 border rounded-md">
-                    <select id="currency" required class="mt-2 block w-full p-2 border rounded-md">
-                        <option value="" disabled selected>Select Currency</option>
-                        <option value="USD">USD</option>
-                        <option value="KES">KES</option>
-                    </select>
-                    <button type="submit" class="mt-4 w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 rounded-md transition duration-150">
-                        Save Bank Account
-                    </button>
-                </form>
-            </div>
-
-            <div class="md:col-span-2 p-6 border border-gray-300 rounded-xl bg-white shadow-md">
-                <h3 class="text-xl font-semibold mb-4 text-primary-blue">Saved Bank Accounts</h3>
-                <div id="saved-banks-list" class="space-y-3">
-                    <p class="text-center text-gray-500">Loading banks...</p>
-                </div>
-            </div>
-        </div>
-    `;
-    fetchAndDisplayBankDetails();
-}
-
-/**
- * Saves new bank details to the 'bankDetails' Firestore collection.
- */
-async function addBankDetails() {
-    const bankName = document.getElementById('bankName').value;
-    const bankBranch = document.getElementById('bankBranch').value; // <-- NEW FIELD
-    const accountName = document.getElementById('accountName').value;
-    const accountNumber = document.getElementById('accountNumber').value;
-    const swiftCode = document.getElementById('swiftCode').value;
-    const currency = document.getElementById('currency').value;
-
-    const newBank = {
-        name: bankName,
-        branch: bankBranch, // <-- NEW FIELD SAVED TO FIRESTORE
-        accountName,
-        accountNumber,
-        swiftCode,
-        currency,
-        createdAt: firebase.firestore.FieldValue.serverTimestamp()
-    };
-
-    try {
-        await db.collection("bankDetails").add(newBank);
-        alert(`Bank account for ${bankName} (${bankBranch}) saved successfully!`);
-        document.getElementById('add-bank-form').reset();
-        fetchAndDisplayBankDetails(); // Refresh the list
-    } catch (error) {
-        console.error("Error saving bank details:", error);
-        alert("Failed to save bank details: " + error.message);
-    }
-}
-
-/**
- * Fetches and displays all saved bank details in the list.
- * (Updated to display the branch)
- */
-async function fetchAndDisplayBankDetails() {
-    const listElement = document.getElementById('saved-banks-list');
-    if (!listElement) return;
-
-    listElement.innerHTML = `<p class="text-center text-gray-500">Fetching data...</p>`;
-    let html = ``;
-
-    try {
-        const snapshot = await db.collection("bankDetails").orderBy("createdAt", "desc").get();
-        if (snapshot.empty) {
-            listElement.innerHTML = `<p class="text-center text-gray-500">No bank accounts have been configured yet.</p>`;
-            return;
-        }
-
-        html = `<ul class="divide-y divide-gray-200">`;
-        snapshot.forEach(doc => {
-            const data = doc.data();
-            html += `
-                <li class="p-4 flex flex-col">
-                    <div class="flex justify-between items-center">
-                        <strong class="text-lg text-primary-blue">${data.name} (${data.currency})</strong>
-                        <button onclick="deleteBank('${doc.id}')" class="text-red-500 hover:text-red-700 text-sm">Delete</button>
-                    </div>
-                    <p class="text-sm text-gray-700">Branch: ${data.branch || 'N/A'}</p>
-                    <p class="text-sm text-gray-700">Account: ${data.accountName}</p>
-                    <p class="text-sm text-gray-600">No: ${data.accountNumber} | SWIFT: ${data.swiftCode}</p>
-                </li>
-            `;
-        });
-        html += `</ul>`;
-        listElement.innerHTML = html;
-
-    } catch (error) {
-        console.error("Error fetching banks:", error);
-        listElement.innerHTML = `<p class="text-red-500">Error loading bank accounts.</p>`;
-    }
-}
-/**
- * Deletes a bank document from Firestore.
- * @param {string} bankId - The Firestore document ID of the bank.
- */
-async function deleteBank(bankId) {
-    if (!confirm("Are you sure you want to delete this bank account?")) {
-        return;
-    }
-    try {
-        await db.collection("bankDetails").doc(bankId).delete();
-        alert("Bank account deleted successfully!");
-        fetchAndDisplayBankDetails(); // Refresh the list
-    } catch (error) {
-        console.error("Error deleting bank:", error);
-        alert("Failed to delete bank: " + error.message);
     }
 }
 
@@ -2875,9 +1653,6 @@ async function populateBankDropdown(dropdownId) {
     bankSelect.innerHTML = options;
 }
 
-/**
- * Renders the Invoice/Proforma form.
- */
 /**
  * Auto-fills the buyer confirmation field when client name is entered
  */
@@ -3006,7 +1781,6 @@ function renderInvoiceForm() {
     }, 100);
 }
 
-
 /**
  * Saves the invoice data to Firestore and optionally generates a PDF.
  * @param {boolean} onlySave - If true, only saves to Firestore without generating PDF.
@@ -3103,7 +1877,8 @@ async function saveInvoice(onlySave) {
         buyerNameConfirmation,
         createdBy: currentUser.email,
         createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-        invoiceId: generatedInvoiceId
+        invoiceId: generatedInvoiceId,
+        revoked: false // Add revoked flag
     };
 
     // 5. Save to Firestore
@@ -3122,131 +1897,928 @@ async function saveInvoice(onlySave) {
     }
 }
 
+// =================================================================
+//                 8. INVOICE HISTORY MODULE (UPDATED WITH REVOKE)
+// =================================================================
+
 /**
- * Creates a receipt from invoice data
+ * Renders the container for the Invoice History list.
  */
-function createReceiptFromInvoice(invoiceData) {
-    // Navigate to receipt form with invoice reference
-    renderReceiptForm(invoiceData.invoiceId);
-    
-    // Auto-populate fields from invoice data
-    setTimeout(() => {
-        const receivedFromField = document.getElementById('receivedFrom');
-        const beingPaidForField = document.getElementById('beingPaidFor');
-        const invoiceRefField = document.getElementById('invoiceReference');
-        const exchangeRateField = document.getElementById('exchangeRate');
-        
-        if (receivedFromField) receivedFromField.value = invoiceData.clientName;
-        if (beingPaidForField) beingPaidForField.value = `${invoiceData.carDetails.make} ${invoiceData.carDetails.model} ${invoiceData.carDetails.year}`;
-        if (invoiceRefField) {
-            invoiceRefField.value = invoiceData.invoiceId;
-            // Store exchange rate for calculations
-            invoiceRefField.dataset.exchangeRate = invoiceData.exchangeRate;
-            invoiceRefField.dataset.totalUSD = invoiceData.pricing.totalUSD;
-            invoiceRefField.dataset.balanceUSD = invoiceData.pricing.balanceUSD;
-        }
-        if (exchangeRateField) exchangeRateField.value = invoiceData.exchangeRate;
-        
-        // Trigger fetch invoice details
-        fetchInvoiceDetails();
-    }, 100);
+function renderInvoiceHistory() {
+    const formArea = document.getElementById('document-form-area');
+    formArea.innerHTML = `
+        <div class="p-6 border border-gray-300 rounded-xl bg-white shadow-lg">
+            <h3 class="text-xl font-semibold mb-6 text-primary-blue">Previously Saved Invoices</h3>
+            <div id="invoice-history-list">
+                <p class="text-center text-gray-500">Loading invoice history...</p>
+            </div>
+        </div>
+    `;
+    fetchInvoices();
 }
 
 /**
- * Creates a car sales agreement from invoice data
+ * Fetches and displays recent invoices.
  */
-function createAgreementFromInvoice(invoiceData) {
-    // Navigate to agreement form
-    renderAgreementForm();
+async function fetchInvoices() {
+    const listElement = document.getElementById('invoice-history-list');
+    let html = ``;
+    try {
+        const snapshot = await db.collection("invoices").orderBy("createdAt", "desc").limit(10).get();
+        if (snapshot.empty) {
+            listElement.innerHTML = `<p class="text-gray-500">No recent invoices found.</p>`;
+            return;
+        }
+        
+        html = `<ul class="space-y-3 divide-y divide-gray-200">`;
+        snapshot.forEach(doc => {
+            const data = doc.data();
+            const invoiceDataJson = JSON.stringify({
+                ...data, 
+                firestoreId: doc.id,
+                createdAt: data.createdAt ? data.createdAt.toDate().toISOString() : new Date().toISOString()
+            });
+
+            const isRevoked = data.revoked || false;
+            
+            html += `<li class="p-3 bg-gray-50 flex flex-col sm:flex-row justify-between items-start sm:items-center ${isRevoked ? 'bg-red-50 border-l-4 border-red-500' : ''}">
+                        <div>
+                            ${isRevoked ? `<span class="bg-red-500 text-white text-xs font-bold px-2 py-1 rounded mb-2 inline-block">REVOKED</span><br>` : ''}
+                            <strong class="text-primary-blue">${data.docType} ${data.invoiceId}</strong><br>
+                            <span class="text-sm text-gray-700">Client: ${data.clientName} | Vehicle: ${data.carDetails.make} ${data.carDetails.model}</span><br>
+                            <span class="text-xs text-gray-600">Total: USD ${data.pricing.totalUSD.toFixed(2)}</span>
+                            ${data.pricing.depositPaid ? `<br><span class="text-xs text-green-600">✓ Deposit Paid</span>` : `<br><span class="text-xs text-secondary-red">Deposit Pending</span>`}
+                        </div>
+                        <div class="mt-2 sm:mt-0 space-x-2">
+                            <button onclick='reDownloadInvoice(${invoiceDataJson})' 
+                                    class="bg-primary-blue hover:bg-blue-600 text-white text-xs py-1 px-3 rounded-full transition duration-150">
+                                Re-Download PDF
+                            </button>
+                            ${!isRevoked ? `
+                                ${!data.pricing.depositPaid ? `
+                                <button onclick='markInvoiceDepositPaid(${invoiceDataJson})' 
+                                        class="bg-green-600 hover:bg-green-700 text-white text-xs py-1 px-3 rounded-full transition duration-150">
+                                    Deposit Paid
+                                </button>
+                                ` : ''}
+                                <button onclick='createReceiptFromInvoice(${invoiceDataJson})' 
+                                        class="bg-secondary-red hover:bg-red-700 text-white text-xs py-1 px-3 rounded-full transition duration-150">
+                                    Create Receipt
+                                </button>
+                                <button onclick='createAgreementFromInvoice(${invoiceDataJson})' 
+                                        class="bg-green-600 hover:bg-green-800 text-white text-xs py-1 px-3 rounded-full transition duration-150">
+                                    Create Agreement
+                                </button>
+                                <button onclick='revokeInvoice(${invoiceDataJson})' 
+                                        class="bg-red-600 hover:bg-red-800 text-white text-xs py-1 px-3 rounded-full transition duration-150">
+                                    REVOKE
+                                </button>
+                            ` : `
+                                <button onclick='unrevokeInvoice(${invoiceDataJson})' 
+                                        class="bg-gray-600 hover:bg-gray-800 text-white text-xs py-1 px-3 rounded-full transition duration-150">
+                                    UNREVOKE
+                                </button>
+                            `}
+                        </div>
+                    </li>`;
+        });
+        html += `</ul>`;
+        listElement.innerHTML = html;
+    } catch (error) {
+        console.error("Error fetching invoices:", error);
+        listElement.innerHTML = `<p class="text-red-500">Error loading invoice history. Check console for details.</p>`;
+    }
+}
+
+// Add revoke function:
+async function revokeInvoice(invoiceData) {
+    if (!confirm(`Are you sure you want to REVOKE invoice ${invoiceData.invoiceId}?\n\nThis will mark it as invalid and disable creation of receipts/agreements.`)) {
+        return;
+    }
     
-    // Auto-populate fields from invoice data
-    setTimeout(() => {
-        const buyerNameField = document.getElementById('buyerName');
-        const buyerPhoneField = document.getElementById('buyerPhone');
-        const carMakeModelField = document.getElementById('carMakeModel');
-        const carYearField = document.getElementById('carYear');
-        const carColorField = document.getElementById('carColor');
-        const carVINField = document.getElementById('carVIN');
-        const carFuelTypeField = document.getElementById('carFuelType');
-        const agreementDateInput = document.getElementById('agreementDateInput');
+    try {
+        await db.collection("invoices").doc(invoiceData.firestoreId).update({
+            revoked: true,
+            revokedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            revokedBy: currentUser.email
+        });
         
-        // Set basic information
-        if (buyerNameField) buyerNameField.value = invoiceData.clientName;
-        if (buyerPhoneField) buyerPhoneField.value = invoiceData.clientPhone || '';
+        alert(`Invoice ${invoiceData.invoiceId} has been revoked.`);
+        fetchInvoices(); // Refresh the list
+    } catch (error) {
+        console.error("Error revoking invoice:", error);
+        alert("Failed to revoke invoice: " + error.message);
+    }
+}
+
+// Add unrevoke function:
+async function unrevokeInvoice(invoiceData) {
+    if (!confirm(`Are you sure you want to UNREVOKE invoice ${invoiceData.invoiceId}?`)) {
+        return;
+    }
+    
+    try {
+        await db.collection("invoices").doc(invoiceData.firestoreId).update({
+            revoked: false,
+            unrevokedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            unrevokedBy: currentUser.email
+        });
         
-        // Set vehicle details
-        if (carMakeModelField) carMakeModelField.value = `${invoiceData.carDetails.make} ${invoiceData.carDetails.model}`;
-        if (carYearField) carYearField.value = invoiceData.carDetails.year || '';
-        if (carColorField) carColorField.value = invoiceData.carDetails.color || '';
-        if (carVINField) carVINField.value = invoiceData.carDetails.vin || '';
-        if (carFuelTypeField) carFuelTypeField.value = invoiceData.carDetails.fuel || '';
+        alert(`Invoice ${invoiceData.invoiceId} has been unrevoked.`);
+        fetchInvoices(); // Refresh the list
+    } catch (error) {
+        console.error("Error unrevoking invoice:", error);
+        alert("Failed to unrevoke invoice: " + error.message);
+    }
+}
+
+/**
+ * Re-downloads the PDF for a selected invoice document.
+ * @param {object} data - The invoice data object retrieved from Firestore.
+ */
+function reDownloadInvoice(data) {
+    // The issueDate is stored as a string in Firestore and should be available directly in data.
+    // If it was stored as a date object in the history fetch, it needs conversion back to a string for consistency
+    if (data.issueDate) {
+        // Assume it's already a formatted string from the original save/history fetch
+    } else if (data.createdAt && typeof data.createdAt === 'string') {
+        // If we serialized the Firestore Timestamp as ISO string, use that date
+        data.issueDate = new Date(data.createdAt).toLocaleDateString('en-US');
+    }
+    generateInvoicePDF(data);
+}
+
+// =================================================================
+//                 9. CAR SALES AGREEMENT BANK HELPER (FROM bankDetails)
+// =================================================================
+
+// (The _getBankDetailsData function is reused from Section 6)
+
+// =================================================================
+//                 10. CAR SALES AGREEMENT MODULE (UPDATED - REMOVED ADD PAYMENT)
+// =================================================================
+
+let agreementPaymentCounter = 1;
+
+/**
+ * Renders the Car Sales Agreement form.
+ */
+function renderAgreementForm(receiptReference = '') {
+    const formArea = document.getElementById('document-form-area');
+    formArea.innerHTML = `
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div class="p-6 border border-gray-300 rounded-xl bg-white shadow-md">
+                <h3 class="text-xl font-semibold mb-4 text-primary-blue">New Car Sales Agreement</h3>
+                <form id="agreement-form" onsubmit="event.preventDefault(); saveAgreement()">
+                    
+                    <fieldset class="border p-4 rounded-lg mb-4 bg-blue-50">
+                        <legend class="text-base font-semibold text-primary-blue px-2">Agreement Parties & Date</legend>
+                        
+                        <label for="agreementDateInput" class="block text-sm font-medium text-gray-700 mb-2">Agreement Date:</label>
+                        <input type="date" id="agreementDateInput" required value="${new Date().toISOString().slice(0, 10)}" class="mb-4 block w-full p-2 border rounded-md">
+                        
+                        <h4 class="font-bold text-sm mt-2 text-secondary-red">SELLER: WanBite Investments Company Limited</h4>
+                        <div class="grid grid-cols-2 gap-3 mt-1 mb-4">
+                            <input type="text" id="sellerAddress" value="Ngong Road, Kilimani, Nairobi" required placeholder="Seller Address" class="p-2 border rounded-md text-sm">
+                            <input type="text" id="sellerPhone" value="0713147136" required placeholder="Seller Phone" class="p-2 border rounded-md text-sm">
+                        </div>
+                        
+                        <h4 class="font-bold text-sm mt-2 text-primary-blue">BUYER:</h4>
+                        <div class="grid grid-cols-2 gap-3 mt-1">
+                            <input type="text" id="buyerName" required placeholder="Buyer Name" class="p-2 border rounded-md">
+                            <input type="text" id="buyerPhone" required placeholder="Buyer Phone" class="p-2 border rounded-md">
+                            <input type="text" id="buyerAddress" required placeholder="Buyer Address" class="p-2 border rounded-md col-span-2">
+                        </div>
+                    </fieldset>
+                    
+                    <fieldset class="border p-4 rounded-lg mb-4">
+                        <legend class="text-base font-semibold text-primary-blue px-2">Vehicle Details</legend>
+                        <div class="grid grid-cols-2 gap-3">
+                            <input type="text" id="carMakeModel" required placeholder="Make and Model (e.g., Toyota Vitz)" class="p-2 border rounded-md">
+                            <input type="number" id="carYear" required placeholder="Year of Manufacture" class="p-2 border rounded-md">
+                            <input type="text" id="carColor" required placeholder="Color" class="p-2 border rounded-md">
+                            <input type="text" id="carVIN" required placeholder="VIN Number" class="p-2 border rounded-md">
+                        </div>
+                        <select id="carFuelType" required class="block w-full p-2 border rounded-md mt-3">
+                            <option value="" disabled selected>Select Fuel Type</option>
+                            <option value="Petrol">Petrol</option>
+                            <option value="Diesel">Diesel</option>
+                            <option value="Hybrid">Hybrid</option>
+                        </select>
+                    </fieldset>
+
+                    <fieldset class="border p-4 rounded-lg mb-4 bg-yellow-50">
+                        <legend class="text-base font-semibold text-secondary-red px-2">Payment Details</legend>
+                        <div class="mb-3">
+                            <label for="currencySelect" class="block text-sm font-medium text-gray-700">Currency</label>
+                            <select id="currencySelect" required class="block w-full p-2 border rounded-md">
+                                <option value="KES">KES - Kenya Shillings</option>
+                                <option value="USD">USD - US Dollars</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label for="agreementBankDetailsSelect" class="block text-sm font-medium text-gray-700">Select Bank Account for Payment</label>
+                            <select id="agreementBankDetailsSelect" required class="mt-1 block w-full p-2 border rounded-md"></select>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="totalPrice" class="block text-sm font-medium text-gray-700">Total Price</label>
+                            <input type="number" id="totalPrice" step="0.01" required placeholder="Total Price" class="w-full p-2 border rounded-md">
+                        </div>
+
+                        <div class="mt-4 p-2 bg-yellow-200 rounded-md">
+                            <strong class="text-secondary-red">Total Price: </strong> 
+                            <span id="total-amount" class="font-bold text-lg text-secondary-red">0.00 KES</span>
+                        </div>
+                    </fieldset>
+
+                    <fieldset class="border p-4 rounded-lg mb-6">
+                        <legend class="text-base font-semibold text-primary-blue px-2">Witnesses</legend>
+                        <input type="text" id="sellerWitness" required placeholder="Seller Witness Name" class="mt-2 block w-full p-2 border rounded-md">
+                        <input type="text" id="buyerWitness" required placeholder="Buyer Witness Name" class="mt-2 block w-full p-2 border rounded-md">
+                    </fieldset>
+
+                    <button type="submit" class="w-full bg-primary-blue hover:bg-blue-900 text-white font-bold py-3 rounded-lg transition duration-150">
+                        Generate & Save Agreement
+                    </button>
+                </form>
+            </div>
+            <div class="p-6 border border-gray-300 rounded-xl bg-white shadow-md">
+                <h3 class="text-xl font-semibold mb-4 text-primary-blue">Recent Sales Agreements</h3>
+                <div id="recent-agreements">
+                    <p class="text-center text-gray-500">Loading agreements...</p>
+                </div>
+            </div>
+        </div>
+    `; 
+    
+    // Populate the dropdown
+    populateBankDropdown('agreementBankDetailsSelect'); 
+    calculatePaymentTotal();
+    fetchAgreements();
+    
+    // Add event listener for total price input
+    const totalPriceInput = document.getElementById('totalPrice');
+    if (totalPriceInput) {
+        totalPriceInput.addEventListener('input', calculatePaymentTotal);
+    }
+}
+
+/**
+ * Calculates and updates the total amount of the payment schedule.
+ */
+function calculatePaymentTotal() {
+    const currency = document.getElementById('currencySelect').value;
+    const totalPriceInput = document.getElementById('totalPrice');
+    const totalSpan = document.getElementById('total-amount');
+    
+    let total = 0;
+    if (totalPriceInput) {
+        total = parseFloat(totalPriceInput.value) || 0;
+    }
+
+    totalSpan.textContent = `${total.toLocaleString('en-US', { minimumFractionDigits: 2 })} ${currency}`;
+}
+
+/**
+ * Handles form submission and saves the sales agreement to Firestore.
+ */
+async function saveAgreement() {
+    const form = document.getElementById('agreement-form');
+    if (!form.checkValidity()) {
+        form.reportValidity();
+        return;
+    }
+
+    // --- CORRECTION 1: READ THE DATE INPUT VALUE ---
+    const agreementDate = document.getElementById('agreementDateInput').value; // Get YYYY-MM-DD format
+
+    // 1. Collect Buyer Details
+    const buyerName = document.getElementById('buyerName').value;
+    const buyerPhone = document.getElementById('buyerPhone').value;
+    
+    // 2. Collect Vehicle Details
+    const carMakeModel = document.getElementById('carMakeModel').value;
+    const carYear = document.getElementById('carYear').value;
+    const carColor = document.getElementById('carColor').value;
+    const carVIN = document.getElementById('carVIN').value;
+    const carFuelType = document.getElementById('carFuelType').value;
+
+    // 3. Collect Payment Details (removed payment schedule)
+    const totalPrice = parseFloat(document.getElementById('totalPrice').value);
+
+    // 4. Collect other details
+    const selectedBankValue = document.getElementById('agreementBankDetailsSelect').value;
+    const currency = document.getElementById('currencySelect').value;
+
+    // --- CORRECTION 2: Parse the full bank details from the dropdown value ---
+    let bankDetails = {};
+    let bankId = '';
+
+    try {
+        bankDetails = JSON.parse(selectedBankValue);
+        bankId = bankDetails.id;
+    } catch (e) {
+        console.error("Error parsing bank details from dropdown:", e);
+        alert("Please select a valid bank account.");
+        return;
+    }
+
+     // 5. Construct Agreement Data Object
+    const agreementData = {
+        // --- Use the date from the input ---
+        agreementDate: agreementDate, 
+        buyer: {
+            name: buyerName,
+            phone: buyerPhone,
+            address: document.getElementById('buyerAddress').value
+        },
+        seller: {
+            address: document.getElementById('sellerAddress').value,
+            phone: document.getElementById('sellerPhone').value
+        },
+        vehicle: {
+            makeModel: carMakeModel,
+            year: carYear,
+            color: carColor,
+            vin: carVIN,
+            fuelType: carFuelType,
+        },
+        salesTerms: {
+            price: totalPrice,
+            currency: currency,
+            bankId: bankId, // <<< Correctly save only the ID
+        },
+        signatures: {
+            sellerWitness: document.getElementById('sellerWitness').value,
+            buyerWitness: document.getElementById('buyerWitness').value,
+            // Signatures and Dates will be added manually on the printed copy
+        },
+        // ADD THESE LINES FOR INVOICE REFERENCE
+        invoiceReference: document.getElementById('agreement-form')?.dataset.invoiceReference || '',
+        invoiceId: document.getElementById('agreement-form')?.dataset.invoiceId || '',
+        // ADD THESE LINES FOR RECEIPT REFERENCE
+        receiptReference: document.getElementById('agreement-form')?.dataset.receiptReference || '',
+        receiptId: document.getElementById('agreement-form')?.dataset.receiptId || '',
+        // END OF ADDED LINES
+        createdBy: currentUser.email,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    };
+
+    try {
+        const docRef = await db.collection("sales_agreements").add(agreementData);
+        alert(`Sales Agreement for ${agreementData.buyer.name} saved successfully!`);
+
+        // Use the parsed bank details object for immediate PDF generation
+        agreementData.firestoreId = docRef.id;
+        agreementData.bankDetails = bankDetails; // <<< Attach full details for PDF
+        generateAgreementPDF(agreementData);
+
+        form.reset();
+        calculatePaymentTotal();
+        fetchAgreements(); // Refresh history
+    } catch (error) {
+        console.error("Error saving sales agreement:", error);
+        alert("Failed to save sales agreement: " + error.message);
+    }
+}
+
+/**
+ * Fetches and displays recent sales agreements.
+ */
+async function fetchAgreements() {
+    const agreementList = document.getElementById('recent-agreements');
+    let html = ``;
+    try {
+        const snapshot = await db.collection("sales_agreements").orderBy("createdAt", "desc").limit(10).get();
+        if (snapshot.empty) {
+            agreementList.innerHTML = `<p class="text-gray-500">No recent agreements found.</p>`;
+            return;
+        }
         
-        // Set agreement date to today
-        if (agreementDateInput) agreementDateInput.value = new Date().toISOString().slice(0, 10);
-        
-        // Set payment details based on invoice pricing
-        const totalAmount = invoiceData.pricing.totalUSD || 0;
-        const depositAmount = invoiceData.pricing.depositUSD || (totalAmount * 0.5);
-        const balanceAmount = invoiceData.pricing.balanceUSD || (totalAmount * 0.5);
-        
-        // Set currency to USD (since invoice is in USD)
-        const currencySelect = document.getElementById('currencySelect');
-        if (currencySelect) currencySelect.value = 'USD';
-        
-        // Clear existing payment rows
-        const paymentRows = document.getElementById('payment-schedule-rows');
-        if (paymentRows) {
-            paymentRows.innerHTML = '';
-            
-            // Add deposit payment row
-            const depositRow = document.createElement('div');
-            depositRow.className = 'grid grid-cols-4 gap-2 payment-row';
-            depositRow.dataset.id = '1';
-            depositRow.innerHTML = `
-                <input type="text" required placeholder="e.g. Deposit" value="Deposit" class="p-2 border rounded-md col-span-2 text-sm">
-                <input type="number" step="0.01" required placeholder="Amount" value="${depositAmount.toFixed(2)}" oninput="calculatePaymentTotal()" class="payment-amount p-2 border rounded-md text-sm">
-                <input type="date" required value="${new Date().toISOString().slice(0, 10)}" class="payment-date p-2 border rounded-md text-sm">
-            `;
-            paymentRows.appendChild(depositRow);
-            
-            // Add balance payment row
-            if (balanceAmount > 0) {
-                const dueDate = invoiceData.dueDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-                const balanceRow = document.createElement('div');
-                balanceRow.className = 'grid grid-cols-4 gap-2 payment-row';
-                balanceRow.dataset.id = '2';
-                balanceRow.innerHTML = `
-                    <input type="text" required placeholder="e.g. Balance" value="Balance" class="p-2 border rounded-md col-span-2 text-sm">
-                    <input type="number" step="0.01" required placeholder="Amount" value="${balanceAmount.toFixed(2)}" oninput="calculatePaymentTotal()" class="payment-amount p-2 border rounded-md text-sm">
-                    <input type="date" required value="${dueDate}" class="payment-date p-2 border rounded-md text-sm">
-                    <button type="button" onclick="deletePaymentRow(2)" class="text-red-500 hover:text-red-700 text-sm">X</button>
-                `;
-                paymentRows.appendChild(balanceRow);
+        html = `<ul class="space-y-3">`;
+        snapshot.forEach(doc => {
+            const data = doc.data();
+            const agreementDataJson = JSON.stringify({
+                ...data, 
+                firestoreId: doc.id,
+                createdAt: data.createdAt ? data.createdAt.toDate().toISOString() : new Date().toISOString()
+            });
+
+            html += `<li class="p-3 border rounded-lg bg-gray-50 flex flex-col sm:flex-row justify-between items-start sm:items-center">
+                        <div>
+                            <strong class="text-primary-blue">Agreement ID: ${doc.id.substring(0, 8)}...</strong><br>
+                            <span class="text-sm text-gray-700">Buyer: ${data.buyer.name} | Vehicle: ${data.vehicle.makeModel}</span>
+                            ${data.invoiceReference ? `<br><span class="text-xs text-green-600">Invoice Ref: ${data.invoiceReference}</span>` : ''}
+                            ${data.receiptReference ? `<br><span class="text-xs text-blue-600">Receipt Ref: ${data.receiptReference}</span>` : ''}
+                        </div>
+                        <div class="mt-2 sm:mt-0 space-x-2">
+                            <button onclick='reDownloadAgreement(${agreementDataJson})' 
+                                    class="bg-gray-700 hover:bg-gray-600 text-white text-xs py-1 px-3 rounded-full transition duration-150">
+                                Re-Download PDF
+                            </button>
+                        </div>
+                    </li>`;
+        });
+        html += `</ul>`;
+        agreementList.innerHTML = html;
+    } catch (error) {
+        console.error("Error fetching agreements:", error);
+        agreementList.innerHTML = `<p class="text-red-500">Error loading agreements. Check console for details.</p>`;
+    }
+}
+
+/**
+ * Re-downloads the PDF for a selected sales agreement document.
+ * @param {object} data - The agreement data object retrieved from Firestore.
+ */
+async function reDownloadAgreement(data) {
+    // 1. Check if bankDetails are already present
+    if (data.bankDetails && data.bankDetails.name) {
+        return generateAgreementPDF(data);
+    }
+
+    let bankDetails = null;
+    const bankIdValue = data.salesTerms?.bankId;
+
+    if (bankIdValue) {
+        // Check if the value is a stringified JSON object (to support old, bugged data)
+        if (bankIdValue.startsWith('{') && bankIdValue.endsWith('}')) {
+            try {
+                // If it's the bugged full JSON string, parse it
+                bankDetails = JSON.parse(bankIdValue);
+            } catch (e) {
+                console.warn("Could not parse old bankId JSON string. Falling back to ID fetch.");
             }
         }
         
-        // Update the total
-        calculatePaymentTotal();
-        
-        // Store the invoice reference in a hidden field or data attribute
-        const agreementForm = document.getElementById('agreement-form');
-        if (agreementForm) {
-            agreementForm.dataset.invoiceReference = invoiceData.invoiceId;
-            agreementForm.dataset.invoiceId = invoiceData.firestoreId;
+        // If bankDetails is still null, assume it's the correct new format (just the ID) or the fallback failed
+        if (!bankDetails) {
+            const banks = await _getBankDetailsData();
+            bankDetails = banks.find(b => b.id === bankIdValue);
         }
-        
-        // Show notification
-        setTimeout(() => {
-            alert(`Invoice ${invoiceData.invoiceId} data has been loaded into the agreement form. The invoice number will be used as the agreement reference.`);
-        }, 300);
-        
-    }, 100);
+    }
+    
+    // Attach the fetched/parsed details to the data object
+    data.bankDetails = bankDetails || {}; 
+    generateAgreementPDF(data);
+}
+
+// =================================================================
+//                 7. BANK MANAGEMENT MODULE (NEW)
+// =================================================================
+
+/**
+ * Renders the interface for adding and managing bank accounts.
+ */
+function renderBankManagement() {
+    const formArea = document.getElementById('document-form-area');
+    formArea.innerHTML = `
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div class="md:col-span-1 p-6 border border-green-300 rounded-xl bg-green-50 shadow-md">
+                <h3 class="text-xl font-semibold mb-4 text-green-700">Add New Bank Account</h3>
+                <form id="add-bank-form" onsubmit="event.preventDefault(); addBankDetails()">
+                    <input type="text" id="bankName" required placeholder="Bank Name (e.g., KCB Bank)" class="mt-2 block w-full p-2 border rounded-md">
+                    <input type="text" id="bankBranch" required placeholder="Bank Branch (e.g., Kilimani Branch)" class="mt-2 block w-full p-2 border rounded-md">
+                    <input type="text" id="accountName" required placeholder="Account Name" value="WANBITE INVESTMENTS CO. LTD" class="mt-2 block w-full p-2 border rounded-md">
+                    <input type="text" id="accountNumber" required placeholder="Account Number" class="mt-2 block w-full p-2 border rounded-md">
+                    <input type="text" id="swiftCode" required placeholder="SWIFT/BIC Code" class="mt-2 block w-full p-2 border rounded-md">
+                    <select id="currency" required class="mt-2 block w-full p-2 border rounded-md">
+                        <option value="" disabled selected>Select Currency</option>
+                        <option value="USD">USD</option>
+                        <option value="KES">KES</option>
+                    </select>
+                    <button type="submit" class="mt-4 w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 rounded-md transition duration-150">
+                        Save Bank Account
+                    </button>
+                </form>
+            </div>
+
+            <div class="md:col-span-2 p-6 border border-gray-300 rounded-xl bg-white shadow-md">
+                <h3 class="text-xl font-semibold mb-4 text-primary-blue">Saved Bank Accounts</h3>
+                <div id="saved-banks-list" class="space-y-3">
+                    <p class="text-center text-gray-500">Loading banks...</p>
+                </div>
+            </div>
+        </div>
+    `;
+    fetchAndDisplayBankDetails();
 }
 
 /**
- * Modified saveAgreement function to include invoice reference
- * Find the existing saveAgreement function and add invoice reference handling
+ * Saves new bank details to the 'bankDetails' Firestore collection.
  */
+async function addBankDetails() {
+    const bankName = document.getElementById('bankName').value;
+    const bankBranch = document.getElementById('bankBranch').value; // <-- NEW FIELD
+    const accountName = document.getElementById('accountName').value;
+    const accountNumber = document.getElementById('accountNumber').value;
+    const swiftCode = document.getElementById('swiftCode').value;
+    const currency = document.getElementById('currency').value;
+
+    const newBank = {
+        name: bankName,
+        branch: bankBranch, // <-- NEW FIELD SAVED TO FIRESTORE
+        accountName,
+        accountNumber,
+        swiftCode,
+        currency,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    };
+
+    try {
+        await db.collection("bankDetails").add(newBank);
+        alert(`Bank account for ${bankName} (${bankBranch}) saved successfully!`);
+        document.getElementById('add-bank-form').reset();
+        fetchAndDisplayBankDetails(); // Refresh the list
+    } catch (error) {
+        console.error("Error saving bank details:", error);
+        alert("Failed to save bank details: " + error.message);
+    }
+}
+
+/**
+ * Fetches and displays all saved bank details in the list.
+ * (Updated to display the branch)
+ */
+async function fetchAndDisplayBankDetails() {
+    const listElement = document.getElementById('saved-banks-list');
+    if (!listElement) return;
+
+    listElement.innerHTML = `<p class="text-center text-gray-500">Fetching data...</p>`;
+    let html = ``;
+
+    try {
+        const snapshot = await db.collection("bankDetails").orderBy("createdAt", "desc").get();
+        if (snapshot.empty) {
+            listElement.innerHTML = `<p class="text-center text-gray-500">No bank accounts have been configured yet.</p>`;
+            return;
+        }
+
+        html = `<ul class="divide-y divide-gray-200">`;
+        snapshot.forEach(doc => {
+            const data = doc.data();
+            html += `
+                <li class="p-4 flex flex-col">
+                    <div class="flex justify-between items-center">
+                        <strong class="text-lg text-primary-blue">${data.name} (${data.currency})</strong>
+                        <button onclick="deleteBank('${doc.id}')" class="text-red-500 hover:text-red-700 text-sm">Delete</button>
+                    </div>
+                    <p class="text-sm text-gray-700">Branch: ${data.branch || 'N/A'}</p>
+                    <p class="text-sm text-gray-700">Account: ${data.accountName}</p>
+                    <p class="text-sm text-gray-600">No: ${data.accountNumber} | SWIFT: ${data.swiftCode}</p>
+                </li>
+            `;
+        });
+        html += `</ul>`;
+        listElement.innerHTML = html;
+
+    } catch (error) {
+        console.error("Error fetching banks:", error);
+        listElement.innerHTML = `<p class="text-red-500">Error loading bank accounts.</p>`;
+    }
+}
+
+/**
+ * Deletes a bank document from Firestore.
+ * @param {string} bankId - The Firestore document ID of the bank.
+ */
+async function deleteBank(bankId) {
+    if (!confirm("Are you sure you want to delete this bank account?")) {
+        return;
+    }
+    try {
+        await db.collection("bankDetails").doc(bankId).delete();
+        alert("Bank account deleted successfully!");
+        fetchAndDisplayBankDetails(); // Refresh the list
+    } catch (error) {
+        console.error("Error deleting bank:", error);
+        alert("Failed to delete bank: " + error.message);
+    }
+}
+
+// =================================================================
+//                 PDF GENERATION FUNCTIONS (UPDATED)
+// =================================================================
+
+/**
+ * Generates and downloads a custom PDF for the comprehensive receipt. (WITH PAYMENT HISTORY)
+ */
+function generateReceiptPDF(data) {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF('p', 'mm', 'a4'); 
+
+    const primaryColor = '#183263'; // WanBite Blue
+    const secondaryColor = '#D96359'; // Red
+    
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    let y = 10; 
+    const margin = 10;
+    const boxW = pageW - (2 * margin);
+    const lineHeight = 7; 
+
+    // --- HELPER FUNCTION WITH BETTER LINE HEIGHT CALCULATION ---
+    const drawText = (text, x, y, size, style = 'normal', color = primaryColor, align = 'left') => {
+        doc.setFontSize(size);
+        doc.setFont("helvetica", style);
+        doc.setTextColor(color);
+        doc.text(text, x, y, { align: align });
+        return size / 3; // Return approximate line height in mm
+    };
+
+    const getTextHeight = (text, fontSize, maxWidth) => {
+        const lineHeightFactor = 1.15;
+        const lines = doc.splitTextToSize(text, maxWidth);
+        return lines.length * fontSize * lineHeightFactor / doc.internal.scaleFactor;
+    };
+
+    // =================================================================
+    // HEADER SECTION
+    // =================================================================
+    
+    // Top Bar
+    doc.setFillColor(primaryColor);
+    doc.rect(0, 0, pageW, 15, 'F');
+    
+    drawText('WanBite Investments Co. Ltd.', pageW / 2, 8, 18, 'bold', '#FFFFFF', 'center');
+    drawText('carskenya.co.ke', pageW / 2, 13, 10, 'normal', '#FFFFFF', 'center');
+    
+    y = 25;
+
+    // RECEIPT TITLE
+    doc.setTextColor(primaryColor);
+    doc.setFontSize(24);
+    doc.setFont("helvetica", "bold");
+    doc.text("OFFICIAL RECEIPT", pageW / 2, y, null, null, "center");
+    y += 12;
+
+    // Receipt Metadata Box
+    doc.setDrawColor(primaryColor);
+    doc.setLineWidth(0.5);
+    doc.rect(margin, y, boxW, 15);
+    
+    drawText('RECEIPT NO:', margin + 3, y + 5, 10, 'bold', secondaryColor);
+    drawText(data.receiptId, margin + 3, y + 11, 14, 'bold', primaryColor);
+    
+    drawText('DATE:', pageW - margin - 3, y + 5, 10, 'bold', secondaryColor, 'right');
+    drawText(data.receiptDate, pageW - margin - 3, y + 11, 14, 'bold', primaryColor, 'right');
+    y += 20;
+
+    // =================================================================
+    // MAIN BODY WITH BETTER SPACING
+    // =================================================================
+
+    // Received From
+    const receivedFromHeight = drawText('RECEIVED FROM:', margin, y, 10, 'bold');
+    doc.setDrawColor(0);
+    doc.line(margin + 35, y, pageW - margin, y);
+    drawText(data.receivedFrom, margin + 35, y - 0.5, 12, 'bold', 0);
+    y += lineHeight;
+
+    // The Sum of Money (Words) - FIXED OVERLAPPING
+    drawText('THE SUM OF:', margin, y + 3, 10, 'bold');
+    doc.setFillColor(240, 240, 240); 
+    const wordsBoxHeight = lineHeight * 2.5;
+    doc.rect(margin + 35, y, boxW - 35, wordsBoxHeight, 'F');
+    doc.setDrawColor(0);
+    doc.setLineWidth(0.2);
+    doc.rect(margin + 35, y, boxW - 35, wordsBoxHeight);
+    
+    doc.setTextColor(0);
+    doc.setFontSize(11);
+    const wrappedWords = doc.splitTextToSize(data.amountWords || '', boxW - 37);
+    
+    // Calculate vertical position for centered text
+    const textHeight = wrappedWords.length * 4; // Approximate height in mm
+    const verticalOffset = y + (wordsBoxHeight - textHeight) / 2 + 3;
+    
+    doc.text(wrappedWords, margin + 36, Math.max(verticalOffset, y + 4));
+    y += wordsBoxHeight + 5;
+
+    // Being Paid For
+    drawText('BEING PAID FOR:', margin, y, 10, 'bold', primaryColor);
+    doc.line(margin + 35, y, pageW - margin, y);
+    drawText(data.beingPaidFor, margin + 35, y - 0.5, 12, 'bold', 0);
+    y += lineHeight + 4;
+
+    // =================================================================
+    // PAYMENT REFERENCES SECTION
+    // =================================================================
+    drawText('PAYMENT DETAILS:', margin, y, 10, 'bold');
+    y += 4;
+
+    doc.setFontSize(10);
+    doc.setTextColor(0);
+
+    // Parse bank details
+    let bankName = data.paymentDetails?.bankUsed || 'N/A';
+    let branchName = '';
+    
+    if (bankName.includes(' - ')) {
+        const parts = bankName.split(' - ');
+        bankName = parts[0];
+        if (parts[1]) {
+            branchName = parts[1].replace(/\s*\([^)]*\)$/, '');
+        }
+    }
+
+    // Row 1: Cheque and RTGS/TT
+    doc.rect(margin, y, boxW * 0.45, lineHeight);
+    doc.text(`Cheque No: ${data.paymentDetails?.chequeNo || 'N/A'}`, margin + 2, y + 4.5);
+    doc.rect(margin + boxW * 0.55, y, boxW * 0.45, lineHeight);
+    doc.text(`RTGS/TT No: ${data.paymentDetails?.rtgsTtNo || 'N/A'}`, margin + boxW * 0.55 + 2, y + 4.5);
+    y += lineHeight + 2;
+
+    // Row 2: Bank Name Only
+    doc.rect(margin, y, boxW * 0.45, lineHeight);
+    doc.text(`Bank Name: ${bankName}`, margin + 2, y + 4.5);
+    
+    // Row 2: Receipt Type
+    doc.rect(margin + boxW * 0.55, y, boxW * 0.45, lineHeight);
+    doc.text(`Receipt Type: ${data.receiptType}`, margin + boxW * 0.55 + 2, y + 4.5);
+    y += lineHeight + 2;
+
+    // Row 3: Bank Branch (if exists)
+    if (branchName) {
+        doc.rect(margin, y, boxW * 0.45, lineHeight);
+        doc.text(`Bank Branch: ${branchName}`, margin + 2, y + 4.5);
+        y += lineHeight + 2;
+    }
+
+    // =================================================================
+    // AMOUNT FIGURE SECTION WITH DYNAMIC POSITIONING
+    // =================================================================
+    const amountBoxH = 15;
+    const amountBoxY = y + 5;
+    
+    // Check if we need to add a page
+    if (amountBoxY + amountBoxH > pageH - 30) {
+        doc.addPage();
+        y = 10;
+    }
+    
+    // Total Amount Box
+    doc.setFillColor(secondaryColor);
+    doc.rect(pageW - margin - 70, amountBoxY, 70, amountBoxH, 'F');
+    
+    doc.setTextColor(255);
+    drawText('AMOUNT FIGURE', pageW - margin - 65, amountBoxY + 4, 8, 'bold', 255);
+    drawText(`${data.currency} ${data.amountReceived?.toLocaleString('en-US', { minimumFractionDigits: 2 }) || '0.00'}`, 
+             pageW - margin - 5, amountBoxY + 11, 18, 'bold', 255, 'right');
+    
+    // Balance Details
+    doc.setTextColor(primaryColor);
+    drawText('BALANCE DETAILS', margin, amountBoxY + 4, 10, 'bold');
+    doc.setFontSize(12);
+    doc.setTextColor(0);
+
+    const balanceText = data.balanceDetails?.balanceRemaining > 0 
+        ? `${data.currency} ${data.balanceDetails.balanceRemaining.toLocaleString('en-US', { minimumFractionDigits: 2 })}` 
+        : 'ZERO';
+    
+    drawText(`Balance Remaining: ${balanceText}`, margin, amountBoxY + 10, 10);
+    drawText(`Due On/Before: ${data.balanceDetails?.balanceDueDate || 'N/A'}`, margin, amountBoxY + 14, 10);
+    
+    y = amountBoxY + amountBoxH + 7;
+
+    // =================================================================
+    // PAYMENT HISTORY SECTION (IF EXISTS)
+    // =================================================================
+    const paymentHistory = data.paymentHistory || [];
+    const paymentCount = data.paymentCount || paymentHistory.length || 0;
+    
+    if (paymentCount > 0 && paymentHistory.length > 0) {
+        // Check page space
+        const historyHeight = 20 + (paymentHistory.length * 5);
+        if (y + historyHeight > pageH - 20) {
+            doc.addPage();
+            y = 10;
+        }
+        
+        y += 5;
+        drawText('PAYMENT HISTORY', margin, y, 12, 'bold', primaryColor);
+        y += 8;
+        
+        // Summary Box
+        doc.setFillColor(240, 240, 240);
+        doc.rect(margin, y, boxW, 10, 'F');
+        doc.setDrawColor(primaryColor);
+        doc.setLineWidth(0.3);
+        doc.rect(margin, y, boxW, 10);
+        
+        doc.setFontSize(9);
+        doc.setTextColor(primaryColor);
+        doc.setFont("helvetica", "bold");
+        doc.text(`Total Payments: ${paymentCount}`, margin + 5, y + 6);
+        doc.text(`Total Paid (USD): ${data.totalPaidUSD?.toFixed(2) || '0.00'}`, margin + 60, y + 6);
+        doc.text(`Total Paid (KES): ${data.totalPaidKSH?.toFixed(2) || '0.00'}`, margin + 120, y + 6);
+        y += 12;
+        
+        // Table Header
+        doc.setFillColor(primaryColor);
+        doc.rect(margin, y, boxW, 6, 'F');
+        doc.setTextColor(255);
+        drawText('#', margin + 2, y + 4, 8, 'bold', 255);
+        drawText('Date', margin + 10, y + 4, 8, 'bold', 255);
+        drawText('Amount', margin + 40, y + 4, 8, 'bold', 255);
+        drawText('USD', margin + 75, y + 4, 8, 'bold', 255);
+        drawText('KES', margin + 105, y + 4, 8, 'bold', 255);
+        drawText('Method', margin + 135, y + 4, 8, 'bold', 255);
+        drawText('Description', margin + 170, y + 4, 8, 'bold', 255);
+        y += 6;
+        
+        // Payment Rows
+        doc.setFontSize(8);
+        doc.setTextColor(0);
+        
+        paymentHistory.forEach((payment, index) => {
+            // Check page boundary
+            if (y > pageH - 20) {
+                doc.addPage();
+                y = 10;
+            }
+            
+            // Alternate row colors
+            if (index % 2 === 0) {
+                doc.setFillColor(250, 250, 250);
+                doc.rect(margin, y, boxW, 5, 'F');
+            }
+            
+            doc.rect(margin, y, boxW, 5);
+            drawText(`${index + 1}`, margin + 2, y + 3.5, 8);
+            drawText(payment.paymentDate || 'N/A', margin + 10, y + 3.5, 8);
+            drawText(`${payment.currency} ${payment.amount?.toFixed(2) || '0.00'}`, margin + 40, y + 3.5, 8);
+            drawText(`USD ${payment.amountUSD?.toFixed(2) || '0.00'}`, margin + 75, y + 3.5, 8);
+            drawText(`KES ${payment.amountKSH?.toFixed(2) || '0.00'}`, margin + 105, y + 3.5, 8);
+            
+            const method = payment.paymentMethod || 'N/A';
+            const shortMethod = method.length > 15 ? method.substring(0, 12) + '...' : method;
+            drawText(shortMethod, margin + 135, y + 3.5, 8);
+            
+            const description = payment.description || 'Payment';
+            const shortDesc = description.length > 20 ? description.substring(0, 17) + '...' : description;
+            drawText(shortDesc, margin + 170, y + 3.5, 8);
+            
+            y += 5;
+        });
+        
+        y += 3;
+    } else if (paymentCount === 1) {
+        // Single payment note
+        y += 5;
+        doc.setFontSize(9);
+        doc.setTextColor(secondaryColor);
+        doc.setFont("helvetica", "italic");
+        doc.text(`Note: This is the initial payment for this receipt.`, margin, y);
+        doc.setTextColor(0);
+        y += 5;
+    }
+
+    // =================================================================
+    // FOOTER/SIGNATURES WITH SIGNATURE STAMP
+    // =================================================================
+    
+    // Check if we need a new page for signatures
+    if (y > pageH - 40) {
+        doc.addPage();
+        y = 10;
+    }
+    
+    doc.setTextColor(primaryColor);
+    drawText('... With thanks', margin, y + 10, 12, 'italic', secondaryColor);
+    
+    // Signature line
+    const sigX = pageW - margin - 50;
+    doc.line(sigX, y + 15, pageW - margin, y + 15);
+    
+    // Add signature stamp with date
+    const stampDate = new Date().toLocaleDateString('en-US');
+    doc.setFontSize(10);
+    doc.setTextColor(primaryColor);
+    doc.setFont("helvetica", "bold");
+    
+    // Add current date for stamp
+    doc.text(stampDate, sigX + 25, y + 19, null, null, "center");
+    
+    // Stamp text
+    doc.text('For WanBite Investment Co. LTD', sigX + 25, y + 23, null, null, "center");
+    
+    y += 30;
+
+    // =================================================================
+    // GLOBAL FOOTER
+    // =================================================================
+    doc.setFillColor(primaryColor);
+    doc.rect(0, pageH - 10, pageW, 10, 'F');
+    
+    doc.setTextColor(255);
+    doc.setFontSize(9);
+    const footerText = `Location: Ngong Road, Kilimani, Nairobi. | Email: sales@carskenya.co.ke | Phone: 0713147136`;
+    doc.text(footerText, pageW / 2, pageH - 4, null, null, "center");
+
+    doc.save(`Receipt_${data.receiptId}.pdf`);
+}
 
 /**
  * Generates and downloads a custom PDF for the Invoice/Proforma.
@@ -3259,10 +2831,22 @@ function generateInvoicePDF(data) {
     const secondaryColor = '#D96359'; // Red
     
     const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
     let y = 10; 
     const margin = 10;
     const lineHeight = 5; 
     const termIndent = 5;
+
+    // Add REVOKED watermark if invoice is revoked
+    if (data.revoked) {
+        doc.setFontSize(60);
+        doc.setTextColor(255, 0, 0, 30); // Red with transparency
+        doc.setFont("helvetica", "bold");
+        doc.text('REVOKED', pageW / 2, pageH / 2, null, null, "center");
+        doc.setTextColor(255, 0, 0, 30);
+        doc.text('INVALID', pageW / 2, pageH / 2 + 20, null, null, "center");
+        doc.setTextColor(0); // Reset text color
+    }
 
     // --- HELPER FUNCTIONS ---
     const drawText = (text, x, y, size, style = 'normal', color = primaryColor, align = 'left') => {
@@ -3472,6 +3056,17 @@ function generateInvoicePDF(data) {
     
     y += 5;
 
+    // Add revocation note if revoked
+    if (data.revoked) {
+        y += 10;
+        doc.setFontSize(12);
+        doc.setTextColor(255, 0, 0);
+        doc.setFont("helvetica", "bold");
+        doc.text('*** THIS INVOICE HAS BEEN REVOKED AND IS NO LONGER VALID ***', pageW / 2, y, null, null, "center");
+        doc.setTextColor(0);
+        y += 10;
+    }
+
     // =================================================================
     // PAYMENT INSTRUCTIONS 
     // =================================================================
@@ -3509,7 +3104,7 @@ function generateInvoicePDF(data) {
     y += 45;
 
     // =================================================================
-    // CONFIRMATION SIGNATURES
+    // CONFIRMATION SIGNATURES WITH STAMP
     // =================================================================
     doc.setDrawColor(primaryColor);
     
@@ -3517,9 +3112,21 @@ function generateInvoicePDF(data) {
     doc.line(margin, y + 15, 90, y + 15);
     drawText(`Accepted and Confirmed by Buyer: ${data.buyerNameConfirmation}`, margin, y + 19, 10);
     
-    // Seller Signature
-    doc.line(110, y + 15, 190, y + 15);
-    drawText('Seller: WANBITE INVESTMENTS COMPANY LIMITED', 110, y + 19, 10);
+    // Seller Signature with stamp
+    const sellerSigX = 110;
+    doc.line(sellerSigX, y + 15, 190, y + 15);
+    
+    // Add stamp date
+    const stampDate = new Date().toLocaleDateString('en-US');
+    doc.setFontSize(9);
+    doc.setTextColor(secondaryColor);
+    doc.text(stampDate, sellerSigX + 40, y + 19, null, null, "center");
+    
+    // Stamp text
+    doc.setFontSize(10);
+    doc.setTextColor(primaryColor);
+    doc.setFont("helvetica", "bold");
+    doc.text('For WanBite Investment Co. LTD', sellerSigX + 40, y + 23, null, null, "center");
     y += 30;
 
     // =================================================================
@@ -3534,419 +3141,6 @@ function generateInvoicePDF(data) {
 
     doc.save(`${data.docType}_${data.invoiceId}.pdf`);
 }
-
-// =================================================================
-//                 8. INVOICE HISTORY MODULE (UPDATED)
-// =================================================================
-
-/**
- * Renders the container for the Invoice History list.
- */
-function renderInvoiceHistory() {
-    const formArea = document.getElementById('document-form-area');
-    formArea.innerHTML = `
-        <div class="p-6 border border-gray-300 rounded-xl bg-white shadow-lg">
-            <h3 class="text-xl font-semibold mb-6 text-primary-blue">Previously Saved Invoices</h3>
-            <div id="invoice-history-list">
-                <p class="text-center text-gray-500">Loading invoice history...</p>
-            </div>
-        </div>
-    `;
-    fetchInvoices();
-}
-
-/**
- * Fetches and displays recent invoices.
- */
-/**
- * Fetches and displays recent invoices.
- */
-async function fetchInvoices() {
-    const listElement = document.getElementById('invoice-history-list');
-    let html = ``;
-    try {
-        const snapshot = await db.collection("invoices").orderBy("createdAt", "desc").limit(10).get();
-        if (snapshot.empty) {
-            listElement.innerHTML = `<p class="text-gray-500">No recent invoices found.</p>`;
-            return;
-        }
-        
-        html = `<ul class="space-y-3 divide-y divide-gray-200">`;
-        snapshot.forEach(doc => {
-            const data = doc.data();
-            const invoiceDataJson = JSON.stringify({
-                ...data, 
-                firestoreId: doc.id,
-                createdAt: data.createdAt ? data.createdAt.toDate().toISOString() : new Date().toISOString()
-            });
-
-            html += `<li class="p-3 bg-gray-50 flex flex-col sm:flex-row justify-between items-start sm:items-center">
-                        <div>
-                            <strong class="text-primary-blue">${data.docType} ${data.invoiceId}</strong><br>
-                            <span class="text-sm text-gray-700">Client: ${data.clientName} | Vehicle: ${data.carDetails.make} ${data.carDetails.model}</span><br>
-                            <span class="text-xs text-gray-600">Total: USD ${data.pricing.totalUSD.toFixed(2)}</span>
-                            ${data.pricing.depositPaid ? `<br><span class="text-xs text-green-600">✓ Deposit Paid</span>` : `<br><span class="text-xs text-secondary-red">Deposit Pending</span>`}
-                        </div>
-                        <div class="mt-2 sm:mt-0 space-x-2">
-                            <button onclick='reDownloadInvoice(${invoiceDataJson})' 
-                                    class="bg-primary-blue hover:bg-blue-600 text-white text-xs py-1 px-3 rounded-full transition duration-150">
-                                Re-Download PDF
-                            </button>
-                            ${!data.pricing.depositPaid ? `
-                            <button onclick='markInvoiceDepositPaid(${invoiceDataJson})' 
-                                    class="bg-green-600 hover:bg-green-700 text-white text-xs py-1 px-3 rounded-full transition duration-150">
-                                Deposit Paid
-                            </button>
-                            ` : ''}
-                            <button onclick='createReceiptFromInvoice(${invoiceDataJson})' 
-                                    class="bg-secondary-red hover:bg-red-700 text-white text-xs py-1 px-3 rounded-full transition duration-150">
-                                Create Receipt
-                            </button>
-                            <button onclick='createAgreementFromInvoice(${invoiceDataJson})' 
-                                    class="bg-green-600 hover:bg-green-800 text-white text-xs py-1 px-3 rounded-full transition duration-150">
-                                Create Agreement
-                            </button>
-                        </div>
-                    </li>`;
-        });
-        html += `</ul>`;
-        listElement.innerHTML = html;
-    } catch (error) {
-        console.error("Error fetching invoices:", error);
-        listElement.innerHTML = `<p class="text-red-500">Error loading invoice history. Check console for details.</p>`;
-    }
-}
-
-/**
- * Re-downloads the PDF for a selected invoice document.
- * @param {object} data - The invoice data object retrieved from Firestore.
- */
-function reDownloadInvoice(data) {
-    // The issueDate is stored as a string in Firestore and should be available directly in data.
-    // If it was stored as a date object in the history fetch, it needs conversion back to a string for consistency
-    if (data.issueDate) {
-        // Assume it's already a formatted string from the original save/history fetch
-    } else if (data.createdAt && typeof data.createdAt === 'string') {
-        // If we serialized the Firestore Timestamp as ISO string, use that date
-        data.issueDate = new Date(data.createdAt).toLocaleDateString('en-US');
-    }
-    generateInvoicePDF(data);
-}
-
-// =================================================================
-//                 9. CAR SALES AGREEMENT BANK HELPER (FROM bankDetails)
-// =================================================================
-
-// (The _getBankDetailsData function is reused from Section 6)
-
-// =================================================================
-//                 10. CAR SALES AGREEMENT MODULE (UPDATED - REMOVED ADD PAYMENT)
-// =================================================================
-
-let agreementPaymentCounter = 1;
-
-/**
- * Renders the Car Sales Agreement form.
- */
-function renderAgreementForm(receiptReference = '') {
-    const formArea = document.getElementById('document-form-area');
-    formArea.innerHTML = `
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div class="p-6 border border-gray-300 rounded-xl bg-white shadow-md">
-                <h3 class="text-xl font-semibold mb-4 text-primary-blue">New Car Sales Agreement</h3>
-                <form id="agreement-form" onsubmit="event.preventDefault(); saveAgreement()">
-                    
-                    <fieldset class="border p-4 rounded-lg mb-4 bg-blue-50">
-                        <legend class="text-base font-semibold text-primary-blue px-2">Agreement Parties & Date</legend>
-                        
-                        <label for="agreementDateInput" class="block text-sm font-medium text-gray-700 mb-2">Agreement Date:</label>
-                        <input type="date" id="agreementDateInput" required value="${new Date().toISOString().slice(0, 10)}" class="mb-4 block w-full p-2 border rounded-md">
-                        
-                        <h4 class="font-bold text-sm mt-2 text-secondary-red">SELLER: WanBite Investments Company Limited</h4>
-                        <div class="grid grid-cols-2 gap-3 mt-1 mb-4">
-                            <input type="text" id="sellerAddress" value="Ngong Road, Kilimani, Nairobi" required placeholder="Seller Address" class="p-2 border rounded-md text-sm">
-                            <input type="text" id="sellerPhone" value="0713147136" required placeholder="Seller Phone" class="p-2 border rounded-md text-sm">
-                        </div>
-                        
-                        <h4 class="font-bold text-sm mt-2 text-primary-blue">BUYER:</h4>
-                        <div class="grid grid-cols-2 gap-3 mt-1">
-                            <input type="text" id="buyerName" required placeholder="Buyer Name" class="p-2 border rounded-md">
-                            <input type="text" id="buyerPhone" required placeholder="Buyer Phone" class="p-2 border rounded-md">
-                            <input type="text" id="buyerAddress" required placeholder="Buyer Address" class="p-2 border rounded-md col-span-2">
-                        </div>
-                    </fieldset>
-                    
-                    <fieldset class="border p-4 rounded-lg mb-4">
-                        <legend class="text-base font-semibold text-primary-blue px-2">Vehicle Details</legend>
-                        <div class="grid grid-cols-2 gap-3">
-                            <input type="text" id="carMakeModel" required placeholder="Make and Model (e.g., Toyota Vitz)" class="p-2 border rounded-md">
-                            <input type="number" id="carYear" required placeholder="Year of Manufacture" class="p-2 border rounded-md">
-                            <input type="text" id="carColor" required placeholder="Color" class="p-2 border rounded-md">
-                            <input type="text" id="carVIN" required placeholder="VIN Number" class="p-2 border rounded-md">
-                        </div>
-                        <select id="carFuelType" required class="block w-full p-2 border rounded-md mt-3">
-                            <option value="" disabled selected>Select Fuel Type</option>
-                            <option value="Petrol">Petrol</option>
-                            <option value="Diesel">Diesel</option>
-                            <option value="Hybrid">Hybrid</option>
-                        </select>
-                    </fieldset>
-
-                    <fieldset class="border p-4 rounded-lg mb-4 bg-yellow-50">
-                        <legend class="text-base font-semibold text-secondary-red px-2">Payment Details</legend>
-                        <div class="mb-3">
-                            <label for="currencySelect" class="block text-sm font-medium text-gray-700">Currency</label>
-                            <select id="currencySelect" required class="block w-full p-2 border rounded-md">
-                                <option value="KES">KES - Kenya Shillings</option>
-                                <option value="USD">USD - US Dollars</option>
-                            </select>
-                        </div>
-                        <div class="mb-3">
-                            <label for="agreementBankDetailsSelect" class="block text-sm font-medium text-gray-700">Select Bank Account for Payment</label>
-                            <select id="agreementBankDetailsSelect" required class="mt-1 block w-full p-2 border rounded-md"></select>
-                        </div>
-                        
-                        <div class="mb-3">
-                            <label for="totalPrice" class="block text-sm font-medium text-gray-700">Total Price</label>
-                            <input type="number" id="totalPrice" step="0.01" required placeholder="Total Price" class="w-full p-2 border rounded-md">
-                        </div>
-
-                        <div class="mt-4 p-2 bg-yellow-200 rounded-md">
-                            <strong class="text-secondary-red">Total Price: </strong> 
-                            <span id="total-amount" class="font-bold text-lg text-secondary-red">0.00 KES</span>
-                        </div>
-                    </fieldset>
-
-                    <fieldset class="border p-4 rounded-lg mb-6">
-                        <legend class="text-base font-semibold text-primary-blue px-2">Witnesses</legend>
-                        <input type="text" id="sellerWitness" required placeholder="Seller Witness Name" class="mt-2 block w-full p-2 border rounded-md">
-                        <input type="text" id="buyerWitness" required placeholder="Buyer Witness Name" class="mt-2 block w-full p-2 border rounded-md">
-                    </fieldset>
-
-                    <button type="submit" class="w-full bg-primary-blue hover:bg-blue-900 text-white font-bold py-3 rounded-lg transition duration-150">
-                        Generate & Save Agreement
-                    </button>
-                </form>
-            </div>
-            <div class="p-6 border border-gray-300 rounded-xl bg-white shadow-md">
-                <h3 class="text-xl font-semibold mb-4 text-primary-blue">Recent Sales Agreements</h3>
-                <div id="recent-agreements">
-                    <p class="text-center text-gray-500">Loading agreements...</p>
-                </div>
-            </div>
-        </div>
-    `; 
-    
-    // Populate the dropdown
-    populateBankDropdown('agreementBankDetailsSelect'); 
-    calculatePaymentTotal();
-    fetchAgreements();
-    
-    // Add event listener for total price input
-    const totalPriceInput = document.getElementById('totalPrice');
-    if (totalPriceInput) {
-        totalPriceInput.addEventListener('input', calculatePaymentTotal);
-    }
-}
-
-/**
- * Calculates and updates the total amount of the payment schedule.
- */
-function calculatePaymentTotal() {
-    const currency = document.getElementById('currencySelect').value;
-    const totalPriceInput = document.getElementById('totalPrice');
-    const totalSpan = document.getElementById('total-amount');
-    
-    let total = 0;
-    if (totalPriceInput) {
-        total = parseFloat(totalPriceInput.value) || 0;
-    }
-
-    totalSpan.textContent = `${total.toLocaleString('en-US', { minimumFractionDigits: 2 })} ${currency}`;
-}
-
-
-/**
- * Handles form submission and saves the sales agreement to Firestore.
- */
-async function saveAgreement() {
-    const form = document.getElementById('agreement-form');
-    if (!form.checkValidity()) {
-        form.reportValidity();
-        return;
-    }
-
-    // --- CORRECTION 1: READ THE DATE INPUT VALUE ---
-    const agreementDate = document.getElementById('agreementDateInput').value; // Get YYYY-MM-DD format
-
-    // 1. Collect Buyer Details
-    const buyerName = document.getElementById('buyerName').value;
-    const buyerPhone = document.getElementById('buyerPhone').value;
-    
-    // 2. Collect Vehicle Details
-    const carMakeModel = document.getElementById('carMakeModel').value;
-    const carYear = document.getElementById('carYear').value;
-    const carColor = document.getElementById('carColor').value;
-    const carVIN = document.getElementById('carVIN').value;
-    const carFuelType = document.getElementById('carFuelType').value;
-
-    // 3. Collect Payment Details (removed payment schedule)
-    const totalPrice = parseFloat(document.getElementById('totalPrice').value);
-
-    // 4. Collect other details
-    const selectedBankValue = document.getElementById('agreementBankDetailsSelect').value;
-    const currency = document.getElementById('currencySelect').value;
-
-    // --- CORRECTION 2: Parse the full bank details from the dropdown value ---
-    let bankDetails = {};
-    let bankId = '';
-
-    try {
-        bankDetails = JSON.parse(selectedBankValue);
-        bankId = bankDetails.id;
-    } catch (e) {
-        console.error("Error parsing bank details from dropdown:", e);
-        alert("Please select a valid bank account.");
-        return;
-    }
-
-     // 5. Construct Agreement Data Object
-    const agreementData = {
-        // --- Use the date from the input ---
-        agreementDate: agreementDate, 
-        buyer: {
-            name: buyerName,
-            phone: buyerPhone,
-            address: document.getElementById('buyerAddress').value
-        },
-        seller: {
-            address: document.getElementById('sellerAddress').value,
-            phone: document.getElementById('sellerPhone').value
-        },
-        vehicle: {
-            makeModel: carMakeModel,
-            year: carYear,
-            color: carColor,
-            vin: carVIN,
-            fuelType: carFuelType,
-        },
-        salesTerms: {
-            price: totalPrice,
-            currency: currency,
-            bankId: bankId, // <<< Correctly save only the ID
-        },
-        signatures: {
-            sellerWitness: document.getElementById('sellerWitness').value,
-            buyerWitness: document.getElementById('buyerWitness').value,
-            // Signatures and Dates will be added manually on the printed copy
-        },
-        // ADD THESE LINES FOR INVOICE REFERENCE
-        invoiceReference: document.getElementById('agreement-form')?.dataset.invoiceReference || '',
-        invoiceId: document.getElementById('agreement-form')?.dataset.invoiceId || '',
-        // END OF ADDED LINES
-        createdBy: currentUser.email,
-        createdAt: firebase.firestore.FieldValue.serverTimestamp()
-    };
-
-    try {
-        const docRef = await db.collection("sales_agreements").add(agreementData);
-        alert(`Sales Agreement for ${agreementData.buyer.name} saved successfully!`);
-
-        // Use the parsed bank details object for immediate PDF generation
-        agreementData.firestoreId = docRef.id;
-        agreementData.bankDetails = bankDetails; // <<< Attach full details for PDF
-        generateAgreementPDF(agreementData);
-
-        form.reset();
-        calculatePaymentTotal();
-        fetchAgreements(); // Refresh history
-    } catch (error) {
-        console.error("Error saving sales agreement:", error);
-        alert("Failed to save sales agreement: " + error.message);
-    }
-}
-
-/**
-/**
- * Fetches and displays recent sales agreements.
- */
-async function fetchAgreements() {
-    const agreementList = document.getElementById('recent-agreements');
-    let html = ``;
-    try {
-        const snapshot = await db.collection("sales_agreements").orderBy("createdAt", "desc").limit(10).get();
-        if (snapshot.empty) {
-            agreementList.innerHTML = `<p class="text-gray-500">No recent agreements found.</p>`;
-            return;
-        }
-        
-        html = `<ul class="space-y-3">`;
-        snapshot.forEach(doc => {
-            const data = doc.data();
-            const agreementDataJson = JSON.stringify({
-                ...data, 
-                firestoreId: doc.id,
-                createdAt: data.createdAt ? data.createdAt.toDate().toISOString() : new Date().toISOString()
-            });
-
-            html += `<li class="p-3 border rounded-lg bg-gray-50 flex flex-col sm:flex-row justify-between items-start sm:items-center">
-                        <div>
-                            <strong class="text-primary-blue">Agreement ID: ${doc.id.substring(0, 8)}...</strong><br>
-                            <span class="text-sm text-gray-700">Buyer: ${data.buyer.name} | Vehicle: ${data.vehicle.makeModel}</span>
-                            ${data.invoiceReference ? `<br><span class="text-xs text-green-600">Invoice Ref: ${data.invoiceReference}</span>` : ''}
-                        </div>
-                        <div class="mt-2 sm:mt-0 space-x-2">
-                            <button onclick='reDownloadAgreement(${agreementDataJson})' 
-                                    class="bg-gray-700 hover:bg-gray-600 text-white text-xs py-1 px-3 rounded-full transition duration-150">
-                                Re-Download PDF
-                            </button>
-                        </div>
-                    </li>`;
-        });
-        html += `</ul>`;
-        agreementList.innerHTML = html;
-    } catch (error) {
-        console.error("Error fetching agreements:", error);
-        agreementList.innerHTML = `<p class="text-red-500">Error loading agreements. Check console for details.</p>`;
-    }
-}
-
-/**
- * Re-downloads the PDF for a selected sales agreement document.
- * @param {object} data - The agreement data object retrieved from Firestore.
- */
-async function reDownloadAgreement(data) {
-    // 1. Check if bankDetails are already present
-    if (data.bankDetails && data.bankDetails.name) {
-        return generateAgreementPDF(data);
-    }
-
-    let bankDetails = null;
-    const bankIdValue = data.salesTerms?.bankId;
-
-    if (bankIdValue) {
-        // Check if the value is a stringified JSON object (to support old, bugged data)
-        if (bankIdValue.startsWith('{') && bankIdValue.endsWith('}')) {
-            try {
-                // If it's the bugged full JSON string, parse it
-                bankDetails = JSON.parse(bankIdValue);
-            } catch (e) {
-                console.warn("Could not parse old bankId JSON string. Falling back to ID fetch.");
-            }
-        }
-        
-        // If bankDetails is still null, assume it's the correct new format (just the ID) or the fallback failed
-        if (!bankDetails) {
-            const banks = await _getBankDetailsData();
-            bankDetails = banks.find(b => b.id === bankIdValue);
-        }
-    }
-    
-    // Attach the fetched/parsed details to the data object
-    data.bankDetails = bankDetails || {}; 
-    generateAgreementPDF(data);
-}
-
 
 /**
  * Generates and downloads the PDF for the Car Sales Agreement.
@@ -4020,7 +3214,7 @@ function generateAgreementPDF(data) {
     doc.text(`Phone: ${data.buyer.phone}`, margin + 100, y);
     y += lineSpacing + 4;
 
-       // =================================================================
+    // =================================================================
     // VEHICLE DETAILS
     // =================================================================
     drawText('VEHICLE DETAILS', margin, y, 12, 'bold', primaryColor);
@@ -4040,6 +3234,12 @@ function generateAgreementPDF(data) {
     if (data.invoiceReference) {
         y += lineSpacing;
         doc.text(`Invoice Reference: ${data.invoiceReference}`, margin + textIndent, y);
+    }
+    
+    // ADD THESE LINES FOR RECEIPT REFERENCE
+    if (data.receiptReference) {
+        y += lineSpacing;
+        doc.text(`Receipt Reference: ${data.receiptReference}`, margin + textIndent, y);
     }
     // END OF ADDED LINES
     
@@ -4096,7 +3296,7 @@ function generateAgreementPDF(data) {
     y += lineSpacing + 6;
 
     // =================================================================
-    // SIGNATURES
+    // SIGNATURES WITH STAMP
     // =================================================================
     drawText('AGREED AND ACCEPTED', margin, y, 12, 'bold', primaryColor);
     y += lineSpacing;
@@ -4113,14 +3313,25 @@ function generateAgreementPDF(data) {
     drawText(`Buyer Name: ${data.buyer.name}`, margin, sigNameY + 3, 10, 'bold', primaryColor);
     drawText(`Witness: ${data.signatures.buyerWitness}`, margin, sigNameY + 7, 10, 'normal', 0);
 
-    // Seller
+    // Seller with stamp
     const sellerX = pageW - margin - 70;
     doc.line(sellerX, sigY, pageW - margin, sigY);
-    drawText('Seller Signature', sellerX + 35, sigY + 2, 8, 'normal', 0, 'center');
-    doc.line(sellerX, sigDateY + 1, pageW - margin, sigDateY + 1);
-    drawText('Date', sellerX + 35, sigDateY + 3, 8, 'normal', 0, 'center');
-    drawText(`Seller: WANBITE INVESTMENTS CO. LTD`, sellerX, sigNameY + 3, 10, 'bold', primaryColor);
-    drawText(`Witness: ${data.signatures.sellerWitness}`, sellerX, sigNameY + 7, 10, 'normal', 0);
+    
+    // Add stamp date
+    const stampDate = new Date().toLocaleDateString('en-US');
+    doc.setFontSize(8);
+    doc.setTextColor(secondaryColor);
+    doc.text(stampDate, sellerX + 35, sigY + 2, null, null, "center");
+    
+    // Stamp text
+    doc.setFontSize(10);
+    doc.setTextColor(primaryColor);
+    doc.setFont("helvetica", "bold");
+    doc.text('Seller: WANBITE INVESTMENTS CO. LTD', sellerX + 35, sigY + 8, null, null, "center");
+    doc.setFontSize(8);
+    doc.setTextColor(0);
+    doc.text(`Witness: ${data.signatures.sellerWitness}`, sellerX + 35, sigY + 12, null, null, "center");
+    
     y += 30;
     
     // --- Global Footer ---
@@ -4133,6 +3344,501 @@ function generateAgreementPDF(data) {
     doc.text(footerText, pageW / 2, doc.internal.pageSize.getHeight() - 4, null, null, "center");
 
     doc.save(`Car_Sales_Agreement_${data.buyer.name.replace(/\s/g, '_')}.pdf`);
+}
+
+// =================================================================
+//                 ADDITIONAL FUNCTIONS
+// =================================================================
+
+/**
+ * Creates a receipt from invoice data
+ */
+function createReceiptFromInvoice(invoiceData) {
+    // Check if invoice is revoked
+    if (invoiceData.revoked) {
+        alert("Cannot create receipt from a revoked invoice.");
+        return;
+    }
+    
+    // Navigate to receipt form with invoice reference
+    renderReceiptForm(invoiceData.invoiceId);
+    
+    // Auto-populate fields from invoice data
+    setTimeout(() => {
+        const receivedFromField = document.getElementById('receivedFrom');
+        const beingPaidForField = document.getElementById('beingPaidFor');
+        const invoiceRefField = document.getElementById('invoiceReference');
+        const exchangeRateField = document.getElementById('exchangeRate');
+        
+        if (receivedFromField) receivedFromField.value = invoiceData.clientName;
+        if (beingPaidForField) beingPaidForField.value = `${invoiceData.carDetails.make} ${invoiceData.carDetails.model} ${invoiceData.carDetails.year}`;
+        if (invoiceRefField) {
+            invoiceRefField.value = invoiceData.invoiceId;
+            // Store exchange rate for calculations
+            invoiceRefField.dataset.exchangeRate = invoiceData.exchangeRate;
+            invoiceRefField.dataset.totalUSD = invoiceData.pricing.totalUSD;
+            invoiceRefField.dataset.balanceUSD = invoiceData.pricing.balanceUSD;
+        }
+        if (exchangeRateField) exchangeRateField.value = invoiceData.exchangeRate;
+        
+        // Trigger fetch invoice details
+        fetchInvoiceDetails();
+    }, 100);
+}
+
+/**
+ * Creates a car sales agreement from invoice data
+ */
+function createAgreementFromInvoice(invoiceData) {
+    // Check if invoice is revoked
+    if (invoiceData.revoked) {
+        alert("Cannot create agreement from a revoked invoice.");
+        return;
+    }
+    
+    // Navigate to agreement form
+    renderAgreementForm();
+    
+    // Auto-populate fields from invoice data
+    setTimeout(() => {
+        const buyerNameField = document.getElementById('buyerName');
+        const buyerPhoneField = document.getElementById('buyerPhone');
+        const carMakeModelField = document.getElementById('carMakeModel');
+        const carYearField = document.getElementById('carYear');
+        const carColorField = document.getElementById('carColor');
+        const carVINField = document.getElementById('carVIN');
+        const carFuelTypeField = document.getElementById('carFuelType');
+        const agreementDateInput = document.getElementById('agreementDateInput');
+        
+        // Set basic information
+        if (buyerNameField) buyerNameField.value = invoiceData.clientName;
+        if (buyerPhoneField) buyerPhoneField.value = invoiceData.clientPhone || '';
+        
+        // Set vehicle details
+        if (carMakeModelField) carMakeModelField.value = `${invoiceData.carDetails.make} ${invoiceData.carDetails.model}`;
+        if (carYearField) carYearField.value = invoiceData.carDetails.year || '';
+        if (carColorField) carColorField.value = invoiceData.carDetails.color || '';
+        if (carVINField) carVINField.value = invoiceData.carDetails.vin || '';
+        if (carFuelTypeField) carFuelTypeField.value = invoiceData.carDetails.fuel || '';
+        
+        // Set agreement date to today
+        if (agreementDateInput) agreementDateInput.value = new Date().toISOString().slice(0, 10);
+        
+        // Set payment details based on invoice pricing
+        const totalAmount = invoiceData.pricing.totalUSD || 0;
+        const depositAmount = invoiceData.pricing.depositUSD || (totalAmount * 0.5);
+        const balanceAmount = invoiceData.pricing.balanceUSD || (totalAmount * 0.5);
+        
+        // Set currency to USD (since invoice is in USD)
+        const currencySelect = document.getElementById('currencySelect');
+        if (currencySelect) currencySelect.value = 'USD';
+        
+        // Clear existing payment rows
+        const paymentRows = document.getElementById('payment-schedule-rows');
+        if (paymentRows) {
+            paymentRows.innerHTML = '';
+            
+            // Add deposit payment row
+            const depositRow = document.createElement('div');
+            depositRow.className = 'grid grid-cols-4 gap-2 payment-row';
+            depositRow.dataset.id = '1';
+            depositRow.innerHTML = `
+                <input type="text" required placeholder="e.g. Deposit" value="Deposit" class="p-2 border rounded-md col-span-2 text-sm">
+                <input type="number" step="0.01" required placeholder="Amount" value="${depositAmount.toFixed(2)}" oninput="calculatePaymentTotal()" class="payment-amount p-2 border rounded-md text-sm">
+                <input type="date" required value="${new Date().toISOString().slice(0, 10)}" class="payment-date p-2 border rounded-md text-sm">
+            `;
+            paymentRows.appendChild(depositRow);
+            
+            // Add balance payment row
+            if (balanceAmount > 0) {
+                const dueDate = invoiceData.dueDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+                const balanceRow = document.createElement('div');
+                balanceRow.className = 'grid grid-cols-4 gap-2 payment-row';
+                balanceRow.dataset.id = '2';
+                balanceRow.innerHTML = `
+                    <input type="text" required placeholder="e.g. Balance" value="Balance" class="p-2 border rounded-md col-span-2 text-sm">
+                    <input type="number" step="0.01" required placeholder="Amount" value="${balanceAmount.toFixed(2)}" oninput="calculatePaymentTotal()" class="payment-amount p-2 border rounded-md text-sm">
+                    <input type="date" required value="${dueDate}" class="payment-date p-2 border rounded-md text-sm">
+                    <button type="button" onclick="deletePaymentRow(2)" class="text-red-500 hover:text-red-700 text-sm">X</button>
+                `;
+                paymentRows.appendChild(balanceRow);
+            }
+        }
+        
+        // Update the total
+        calculatePaymentTotal();
+        
+        // Store the invoice reference in a hidden field or data attribute
+        const agreementForm = document.getElementById('agreement-form');
+        if (agreementForm) {
+            agreementForm.dataset.invoiceReference = invoiceData.invoiceId;
+            agreementForm.dataset.invoiceId = invoiceData.firestoreId;
+        }
+        
+        // Show notification
+        setTimeout(() => {
+            alert(`Invoice ${invoiceData.invoiceId} data has been loaded into the agreement form. The invoice number will be used as the agreement reference.`);
+        }, 300);
+        
+    }, 100);
+}
+
+/**
+ * Creates an agreement from receipt data
+ */
+function createAgreementFromReceipt(receiptData) {
+    // Navigate to agreement form
+    renderAgreementForm();
+    
+    // Wait for form to render, then auto-populate fields
+    setTimeout(() => {
+        const buyerNameField = document.getElementById('buyerName');
+        const buyerPhoneField = document.getElementById('buyerPhone');
+        const carMakeModelField = document.getElementById('carMakeModel');
+        const totalPriceField = document.getElementById('totalPrice');
+        
+        // Extract client name from receipt
+        if (buyerNameField) buyerNameField.value = receiptData.receivedFrom || '';
+        
+        // Extract vehicle information from "Being Paid For" field
+        if (receiptData.beingPaidFor && carMakeModelField) {
+            // Try to extract vehicle info from the description
+            const vehicleText = receiptData.beingPaidFor;
+            // Remove common prefixes
+            let cleanText = vehicleText
+                .replace(/deposit|payment|for|being paid for/gi, '')
+                .trim();
+            
+            carMakeModelField.value = cleanText;
+        }
+        
+        // Set total price based on receipt amount
+        if (totalPriceField && receiptData.amountReceived) {
+            // For receipts without invoice, use amount received as starting point
+            // Multiply by 2 assuming deposit is 50% (common for vehicle purchases)
+            const estimatedTotal = receiptData.amountReceived * 2;
+            totalPriceField.value = estimatedTotal.toFixed(2);
+            
+            // Set currency based on receipt
+            const currencySelect = document.getElementById('currencySelect');
+            if (currencySelect && receiptData.currency) {
+                currencySelect.value = receiptData.currency;
+            }
+        }
+        
+        // Store receipt reference in form dataset
+        const agreementForm = document.getElementById('agreement-form');
+        if (agreementForm) {
+            agreementForm.dataset.receiptReference = receiptData.receiptId;
+            agreementForm.dataset.receiptId = receiptData.firestoreId;
+        }
+        
+        // Calculate and update totals
+        calculatePaymentTotal();
+        
+        // Show notification
+        setTimeout(() => {
+            alert(`Receipt ${receiptData.receiptId} data has been loaded into the agreement form. Please verify and complete the remaining details.`);
+        }, 300);
+        
+    }, 100);
+}
+
+/**
+ * Re-downloads the PDF for a selected receipt document from history.
+ * @param {object} data - The receipt data object retrieved from Firestore.
+ */
+async function reDownloadReceipt(data) {
+    // Ensure data.receiptDate is set (should be from the save logic)
+    if (!data.receiptDate) {
+         data.receiptDate = new Date().toLocaleDateString('en-US'); // Fallback
+    }
+    
+    // If we have the firestoreId, fetch payment history
+    if (data.firestoreId) {
+        try {
+            const balances = await calculateReceiptBalances(data.firestoreId);
+            data.totalPaidUSD = balances.totalPaidUSD;
+            data.totalPaidKSH = balances.totalPaidKSH;
+            data.paymentCount = balances.paymentCount;
+            data.paymentHistory = balances.payments;
+        } catch (error) {
+            console.error("Error fetching payment history for PDF:", error);
+        }
+    }
+    
+    // Now generate the PDF with all the data
+    generateReceiptPDF(data);
+}
+
+/**
+ * View balances for a specific receipt
+ */
+function viewReceiptBalances(data) {
+    const modalHtml = `
+        <div id="balances-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+            <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+                <h3 class="text-lg font-semibold text-primary-blue mb-4">Receipt Balances</h3>
+                <p class="text-sm mb-3">
+                    <strong>Receipt:</strong> ${data.receiptId}<br>
+                    <strong>Client:</strong> ${data.receivedFrom}<br>
+                    <strong>Exchange Rate:</strong> USD 1 = KES ${data.exchangeRate || 130}
+                </p>
+                <div class="mb-4 p-3 bg-blue-50 rounded-lg">
+                    <h4 class="font-bold text-primary-blue mb-2">Payment Summary</h4>
+                    <p class="text-sm"><strong>Total Payments:</strong> ${data.paymentCount || 1}</p>
+                    <p class="text-sm"><strong>Total Paid (USD):</strong> <span class="font-bold text-green-600">${data.totalPaidUSD?.toFixed(2) || data.amountReceivedUSD?.toFixed(2) || (data.currency === 'USD' ? data.amountReceived.toFixed(2) : (data.amountReceived / (data.exchangeRate || 130)).toFixed(2))}</span></p>
+                    <p class="text-sm"><strong>Total Paid (KES):</strong> <span class="font-bold text-green-600">${data.totalPaidKSH?.toFixed(2) || data.amountReceivedKSH?.toFixed(2) || (data.currency === 'KSH' ? data.amountReceived.toFixed(2) : (data.amountReceived * (data.exchangeRate || 130)).toFixed(2))}</span></p>
+                </div>
+                <div class="mb-4 p-3 ${data.balanceDetails?.balanceRemaining > 0 ? 'bg-red-50' : 'bg-green-50'} rounded-lg">
+                    <h4 class="font-bold ${data.balanceDetails?.balanceRemaining > 0 ? 'text-secondary-red' : 'text-green-600'} mb-2">
+                        ${data.balanceDetails?.balanceRemaining > 0 ? 'Remaining Balance' : 'Fully Paid'}
+                    </h4>
+                    <p class="text-sm"><strong>USD Balance:</strong> <span class="font-bold">${data.balanceDetails?.balanceRemainingUSD?.toFixed(2) || data.balanceDetails?.balanceRemaining?.toFixed(2) || '0.00'}</span></p>
+                    <p class="text-sm"><strong>KES Balance:</strong> <span class="font-bold">${data.balanceDetails?.balanceRemainingKSH?.toFixed(2) || (data.balanceDetails?.balanceRemaining * (data.exchangeRate || 130)).toFixed(2) || '0.00'}</span></p>
+                    ${data.balanceDetails?.balanceDueDate ? `<p class="text-sm"><strong>Due Date:</strong> ${data.balanceDetails.balanceDueDate}</p>` : ''}
+                </div>
+                <div class="flex justify-end space-x-3">
+                    <button onclick="addPaymentToReceipt(${JSON.stringify(data)})" 
+                            class="bg-primary-blue hover:bg-blue-900 text-white font-bold py-2 px-4 rounded-md">
+                        Add Payment
+                    </button>
+                    <button onclick="document.getElementById('balances-modal').remove()" 
+                            class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-md">
+                        Close
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+}
+
+/**
+ * Add payment to receipt from receipt history
+ */
+function addPaymentToReceipt(receiptData) {
+    addPaymentToExistingReceipt(
+        receiptData.firestoreId,
+        receiptData.receiptId,
+        receiptData.receivedFrom,
+        receiptData.exchangeRate || 130
+    );
+}
+
+/**
+ * Marks invoice deposit as paid
+ */
+function markInvoiceDepositPaid(invoiceData) {
+    // Check if invoice is revoked
+    if (invoiceData.revoked) {
+        alert("Cannot mark deposit as paid on a revoked invoice.");
+        return;
+    }
+    
+    const modalHtml = `
+        <div id="deposit-paid-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+            <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+                <h3 class="text-lg font-semibold text-primary-blue mb-4">Mark Deposit as Paid</h3>
+                <p class="text-sm mb-3">
+                    <strong>Invoice:</strong> ${invoiceData.invoiceId}<br>
+                    <strong>Client:</strong> ${invoiceData.clientName}<br>
+                    <strong>Deposit Required:</strong> USD ${invoiceData.pricing.depositUSD.toFixed(2)} (KES ${invoiceData.pricing.depositKSH})
+                </p>
+                <form id="deposit-paid-form" onsubmit="event.preventDefault(); saveDepositPayment('${invoiceData.firestoreId}', ${invoiceData.pricing.depositUSD}, ${invoiceData.exchangeRate})">
+                    <div class="mb-3">
+                        <label class="block text-sm font-medium text-gray-700">Payment Date</label>
+                        <input type="date" id="depositDate" required value="${new Date().toISOString().slice(0, 10)}" class="mt-1 block w-full p-2 border rounded-md">
+                    </div>
+                    <div class="mb-3">
+                        <label class="block text-sm font-medium text-gray-700">Amount</label>
+                        <div class="grid grid-cols-3 gap-2">
+                            <select id="depositCurrency" required class="p-2 border rounded-md">
+                                <option value="USD">USD</option>
+                                <option value="KSH">KSH</option>
+                            </select>
+                            <input type="number" id="depositAmount" step="0.01" required placeholder="Amount" class="col-span-2 p-2 border rounded-md">
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="block text-sm font-medium text-gray-700">Exchange Rate (USD 1 = KES)</label>
+                        <input type="number" id="depositExchangeRate" step="0.01" required value="${invoiceData.exchangeRate || 130}" class="w-full p-2 border rounded-md">
+                    </div>
+                    <div class="mb-3">
+                        <label class="block text-sm font-medium text-gray-700">Bank Used</label>
+                        <select id="depositBankUsed" required class="mt-1 block w-full p-2 border rounded-md">
+                            <option value="" disabled selected>Select Bank</option>
+                            <option value="Cash">Cash</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="block text-sm font-medium text-gray-700">Reference/Description</label>
+                        <input type="text" id="depositDescription" required placeholder="e.g., Deposit Payment for Invoice ${invoiceData.invoiceId}" class="mt-1 block w-full p-2 border rounded-md">
+                    </div>
+                    <div class="mb-4 p-2 bg-yellow-50 rounded">
+                        <p class="text-xs text-gray-600">
+                            <strong>Note:</strong> This will create a receipt for the deposit payment.
+                        </p>
+                    </div>
+                    <div class="flex justify-end space-x-3">
+                        <button type="button" onclick="(() => { const modal = document.getElementById('deposit-paid-modal'); if (modal) modal.remove(); })()" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-md">
+                            Cancel
+                        </button>
+                        <button type="submit" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-md">
+                            Save Deposit Payment
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+    
+    // Set default amount based on currency
+    const depositCurrency = document.getElementById('depositCurrency');
+    const depositAmount = document.getElementById('depositAmount');
+    
+    if (depositCurrency && depositAmount) {
+        depositCurrency.addEventListener('change', function() {
+            if (this.value === 'USD') {
+                depositAmount.value = invoiceData.pricing.depositUSD.toFixed(2);
+            } else if (this.value === 'KSH') {
+                depositAmount.value = invoiceData.pricing.depositKSH;
+            }
+        });
+        
+        // Set initial value
+        depositAmount.value = invoiceData.pricing.depositUSD.toFixed(2);
+    }
+    
+    // Populate bank dropdown in the modal
+    populateBankDropdownForModal('depositBankUsed');
+}
+
+/**
+ * Saves deposit payment and creates receipt
+ */
+async function saveDepositPayment(invoiceDocId, depositAmountUSD, exchangeRate) {
+    const form = document.getElementById('deposit-paid-form');
+    if (!form.checkValidity()) {
+        form.reportValidity();
+        return;
+    }
+    
+    const depositDate = document.getElementById('depositDate').value;
+    const depositCurrency = document.getElementById('depositCurrency').value;
+    const depositAmount = parseFloat(document.getElementById('depositAmount').value);
+    const depositExchangeRate = parseFloat(document.getElementById('depositExchangeRate').value);
+    const depositBankUsed = document.getElementById('depositBankUsed').value;
+    const depositDescription = document.getElementById('depositDescription').value;
+    
+    if (isNaN(depositAmount) || depositAmount <= 0) {
+        alert("Please enter a valid deposit amount.");
+        return;
+    }
+    
+    // Get invoice data
+    const invoiceDoc = await db.collection("invoices").doc(invoiceDocId).get();
+    if (!invoiceDoc.exists) {
+        alert("Invoice not found!");
+        return;
+    }
+    
+    const invoiceData = invoiceDoc.data();
+    
+    // Calculate amounts in both currencies
+    let amountUSD = depositAmount;
+    let amountKSH = depositAmount;
+    
+    if (depositCurrency === 'KSH') {
+        amountUSD = depositAmount / depositExchangeRate;
+        amountKSH = depositAmount;
+    } else if (depositCurrency === 'USD') {
+        amountUSD = depositAmount;
+        amountKSH = depositAmount * depositExchangeRate;
+    }
+    
+    // Generate receipt ID
+    const receiptId = generateReceiptId("Deposit", invoiceData.clientName);
+    const receiptDate = depositDate || new Date().toLocaleDateString('en-US');
+    
+    // Create receipt data
+    const receiptData = {
+        receiptId,
+        receiptType: "Invoice Deposit",
+        receivedFrom: invoiceData.clientName,
+        currency: depositCurrency,
+        amountReceived: depositAmount,
+        amountReceivedUSD: amountUSD,
+        amountReceivedKSH: amountKSH,
+        amountWords: numberToWords(depositAmount).replace('only', depositCurrency === 'USD' ? 'US Dollars only.' : 'Kenya Shillings only.'),
+        beingPaidFor: `${invoiceData.carDetails.make} ${invoiceData.carDetails.model} ${invoiceData.carDetails.year} Deposit`,
+        paymentDetails: {
+            chequeNo: "",
+            rtgsTtNo: "",
+            bankUsed: depositBankUsed
+        },
+        balanceDetails: {
+            balanceRemaining: invoiceData.pricing.balanceUSD,
+            balanceDueDate: invoiceData.dueDate,
+            balanceRemainingUSD: invoiceData.pricing.balanceUSD,
+            balanceRemainingKSH: invoiceData.pricing.balanceUSD * depositExchangeRate
+        },
+        invoiceReference: invoiceData.invoiceId,
+        exchangeRate: depositExchangeRate,
+        receiptDate,
+        createdBy: currentUser.email,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    };
+    
+    try {
+        // Save receipt
+        const receiptRef = await db.collection("receipts").add(receiptData);
+        
+        // Save payment record
+        const paymentData = {
+            receiptId: receiptRef.id,
+            receiptNumber: receiptId,
+            paymentNumber: 1,
+            paymentDate: receiptDate,
+            amount: depositAmount,
+            currency: depositCurrency,
+            amountUSD: amountUSD,
+            amountKSH: amountKSH,
+            exchangeRate: depositExchangeRate,
+            description: depositDescription,
+            paymentMethod: depositBankUsed !== 'Cash' ? `Bank: ${depositBankUsed}` : "Cash",
+            createdBy: currentUser.email,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
+        
+        await db.collection("receipt_payments").add(paymentData);
+        
+        // Update invoice to mark deposit as paid
+        await db.collection("invoices").doc(invoiceDocId).update({
+            "pricing.depositPaid": true,
+            "pricing.depositPaidDate": receiptDate,
+            "pricing.depositPaidAmount": depositAmount,
+            "pricing.depositPaidCurrency": depositCurrency,
+            "pricing.remainingBalance": invoiceData.pricing.balanceUSD
+        });
+        
+        const modal = document.getElementById('deposit-paid-modal');
+        if (modal) {
+            modal.remove();
+        }
+        
+        alert(`Deposit payment of ${depositCurrency} ${depositAmount.toFixed(2)} saved successfully! Receipt ${receiptId} created.`);
+        
+        // Navigate to receipt form with the invoice reference
+        renderReceiptForm(invoiceData.invoiceId);
+        
+    } catch (error) {
+        console.error("Error saving deposit payment:", error);
+        alert("Failed to save deposit payment: " + error.message);
+    }
 }
 
 // =================================================================
@@ -4163,7 +3869,6 @@ function handleFleetManagement() {
 /**
 * Search receipts by various fields
 */
-
 async function searchReceipts(searchTerm) {
     try {
         // Convert to lowercase for case-insensitive search
@@ -4248,7 +3953,8 @@ async function searchAgreements(searchTerm) {
                 (data.buyer.phone && data.buyer.phone.includes(searchTerm)) ||
                 (data.vehicle.makeModel && data.vehicle.makeModel.toLowerCase().includes(searchTerm)) ||
                 (data.vehicle.vin && data.vehicle.vin.toLowerCase().includes(searchTerm)) ||
-                (data.invoiceReference && data.invoiceReference.toLowerCase().includes(searchTerm));
+                (data.invoiceReference && data.invoiceReference.toLowerCase().includes(searchTerm)) ||
+                (data.receiptReference && data.receiptReference.toLowerCase().includes(searchTerm));
             
             if (matches) {
                 results.push({ id: doc.id, ...data });
@@ -4361,3 +4067,215 @@ async function performSearch(searchTerm, docTypeFilter) {
         `;
     }
 }
+
+// =================================================================
+//                 ADDITIONAL HELPER FUNCTIONS
+// =================================================================
+
+/**
+ * Populates bank dropdown for modal
+ */
+async function populateBankDropdownForModal(dropdownId) {
+    const bankSelect = document.getElementById(dropdownId);
+    if (!bankSelect) return;
+
+    // Clear existing options except the first one
+    while (bankSelect.options.length > 1) {
+        bankSelect.remove(1);
+    }
+
+    try {
+        const snapshot = await db.collection("bankDetails").orderBy("createdAt", "desc").get();
+        
+        if (snapshot.empty) {
+            const option = document.createElement('option');
+            option.value = "";
+            option.textContent = "No banks configured. Add banks first.";
+            option.disabled = true;
+            bankSelect.appendChild(option);
+            return;
+        }
+
+        snapshot.forEach(doc => {
+            const data = doc.data();
+            const option = document.createElement('option');
+            option.value = `${data.name} - ${data.branch || 'No Branch'} (${data.currency})`;
+            option.textContent = `${data.name} - ${data.branch || 'No Branch'} (${data.currency})`;
+            bankSelect.appendChild(option);
+        });
+
+    } catch (error) {
+        console.error("Error loading banks for modal:", error);
+        const option = document.createElement('option');
+        option.value = "";
+        option.textContent = "Error loading banks";
+        option.disabled = true;
+        bankSelect.appendChild(option);
+    }
+}
+
+/**
+ * Adds a payment to an existing receipt
+ */
+function addPaymentToExistingReceipt(receiptDocId, receiptNumber, clientName, exchangeRate = 130) {
+    const modalHtml = `
+        <div id="add-payment-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+            <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+                <h3 class="text-lg font-semibold text-primary-blue mb-4">Add Payment to Receipt</h3>
+                <p class="text-sm mb-3">
+                    <strong>Receipt:</strong> ${receiptNumber}<br>
+                    <strong>Client:</strong> ${clientName}<br>
+                    <strong>Exchange Rate:</strong> USD 1 = KES ${exchangeRate}
+                </p>
+                <form id="add-payment-form" onsubmit="event.preventDefault(); saveAdditionalPayment('${receiptDocId}', '${receiptNumber}', ${exchangeRate})">
+                    <div class="mb-3">
+                        <label class="block text-sm font-medium text-gray-700">Payment Date</label>
+                        <input type="date" id="paymentDate" required value="${new Date().toISOString().slice(0, 10)}" class="mt-1 block w-full p-2 border rounded-md">
+                    </div>
+                    <div class="mb-3">
+                        <label class="block text-sm font-medium text-gray-700">Amount</label>
+                        <div class="grid grid-cols-3 gap-2">
+                            <select id="paymentCurrency" required class="p-2 border rounded-md">
+                                <option value="KSH">KSH</option>
+                                <option value="USD">USD</option>
+                            </select>
+                            <input type="number" id="paymentAmount" step="0.01" required placeholder="Amount" class="col-span-2 p-2 border rounded-md">
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="block text-sm font-medium text-gray-700">Exchange Rate (USD 1 = KES)</label>
+                        <input type="number" id="paymentExchangeRate" step="0.01" required value="${exchangeRate}" class="w-full p-2 border rounded-md">
+                    </div>
+                    <div class="mb-3">
+                        <label class="block text-sm font-medium text-gray-700">Bank Used</label>
+                        <select id="paymentBankUsed" required class="mt-1 block w-full p-2 border rounded-md">
+                            <option value="" disabled selected>Select Bank</option>
+                            <option value="Cash">Cash</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="block text-sm font-medium text-gray-700">Reference/Description</label>
+                        <input type="text" id="paymentDescription" required placeholder="e.g., Balance Payment, Additional Payment" class="mt-1 block w-full p-2 border rounded-md">
+                    </div>
+                    <div class="mb-4 p-2 bg-yellow-50 rounded">
+                        <p class="text-xs text-gray-600">
+                            <strong>Note:</strong> Amount will be auto-converted using exchange rate: USD 1 = KES ${exchangeRate}
+                        </p>
+                    </div>
+                    <div class="flex justify-end space-x-3">
+                       <button type="button" onclick="(() => { const modal = document.getElementById('add-payment-modal'); if (modal) modal.remove(); })()" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-md">
+    Cancel
+</button>
+                        <button type="submit" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-md">
+                            Add Payment
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+    
+    // Populate bank dropdown in the modal
+    populateBankDropdownForModal('paymentBankUsed');
+}
+
+/**
+ * Saves an additional payment to an existing receipt
+ */
+async function saveAdditionalPayment(receiptDocId, receiptNumber, exchangeRate) {
+    const form = document.getElementById('add-payment-form');
+    if (!form.checkValidity()) {
+        form.reportValidity();
+        return;
+    }
+    
+    const paymentDate = document.getElementById('paymentDate').value;
+    const paymentCurrency = document.getElementById('paymentCurrency').value;
+    const paymentAmount = parseFloat(document.getElementById('paymentAmount').value);
+    const paymentExchangeRate = parseFloat(document.getElementById('paymentExchangeRate').value);
+    const paymentBankUsed = document.getElementById('paymentBankUsed').value;
+    const paymentDescription = document.getElementById('paymentDescription').value;
+    
+    if (isNaN(paymentAmount) || paymentAmount <= 0) {
+        alert("Please enter a valid payment amount.");
+        return;
+    }
+    
+    // Calculate amounts in both currencies
+    let amountUSD = paymentAmount;
+    let amountKSH = paymentAmount;
+    
+    if (paymentCurrency === 'KSH') {
+        amountUSD = paymentAmount / paymentExchangeRate;
+        amountKSH = paymentAmount;
+    } else if (paymentCurrency === 'USD') {
+        amountUSD = paymentAmount;
+        amountKSH = paymentAmount * paymentExchangeRate;
+    }
+    
+    // Get next payment number
+    const paymentsSnapshot = await db.collection("receipt_payments")
+        .where("receiptId", "==", receiptDocId)
+        .get();
+    
+    const nextPaymentNumber = paymentsSnapshot.size + 1;
+    
+    // Save payment record
+    const paymentData = {
+        receiptId: receiptDocId,
+        receiptNumber: receiptNumber,
+        paymentNumber: nextPaymentNumber,
+        paymentDate: paymentDate,
+        amount: paymentAmount,
+        currency: paymentCurrency,
+        amountUSD: amountUSD,
+        amountKSH: amountKSH,
+        exchangeRate: paymentExchangeRate,
+        description: paymentDescription,
+        paymentMethod: paymentBankUsed !== 'Cash' ? `Bank: ${paymentBankUsed}` : "Cash",
+        createdBy: currentUser.email,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    };
+    
+    try {
+        await db.collection("receipt_payments").add(paymentData);
+        
+        // Update receipt balance
+        const receiptDoc = await db.collection("receipts").doc(receiptDocId).get();
+        const receiptData = receiptDoc.data();
+        
+        const currentBalanceUSD = receiptData.balanceDetails?.balanceRemainingUSD || 0;
+        const newBalanceUSD = Math.max(0, currentBalanceUSD - amountUSD);
+        const newBalanceKSH = newBalanceUSD * paymentExchangeRate;
+        
+        await db.collection("receipts").doc(receiptDocId).update({
+            "balanceDetails.balanceRemaining": newBalanceUSD,
+            "balanceDetails.balanceRemainingUSD": newBalanceUSD,
+            "balanceDetails.balanceRemainingKSH": newBalanceKSH
+        });
+        
+        const modal = document.getElementById('add-payment-modal');
+        if (modal) {
+            modal.remove();
+        }
+        
+        alert(`Additional payment of ${paymentCurrency} ${paymentAmount.toFixed(2)} added successfully!`);
+        
+        // Refresh the view
+        if (document.getElementById('receipt-balances-list')) {
+            fetchAllReceiptBalances();
+        } else {
+            fetchReceipts();
+        }
+        
+    } catch (error) {
+        console.error("Error saving additional payment:", error);
+        alert("Failed to save payment: " + error.message);
+    }
+}
+
+// Note: Some functions like renderReceiptBalancesView, fetchAllReceiptBalances, filterReceiptBalances, 
+// and other receipt balance related functions are referenced but not defined in the provided code.
+// They should be added if needed for full functionality.
