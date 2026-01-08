@@ -2861,7 +2861,7 @@ function generateReceiptPDF(data) {
         doc.text(stampDate, sigX + 25, y + 19, null, null, "center");
         
         // Add stamp image
-        doc.addImage('STAMP.jpeg', 'JPEG', sigX, y + 21, 50, 25);
+        doc.addImage('STAMP.png', 'JPEG', sigX, y + 21, 50, 25);
         
         // Add stamp text below image
         doc.setFontSize(10);
@@ -2939,10 +2939,10 @@ function generateInvoicePDF(data) {
             doc.setTextColor(secondaryColor);
             doc.text(dateText, x, y - 2, null, null, "center");
             
-            // Add stamp image - this assumes STAMP.jpeg is in the same directory
+            // Add stamp image - this assumes STAMP.png is in the same directory
             // Note: In a real implementation, you would need to load the image properly
             // This is a placeholder - you'll need to implement actual image loading
-            doc.addImage('STAMP.jpeg', 'JPEG', x - 15, y, 30, 15);
+            doc.addImage('STAMP.png', 'JPEG', x - 15, y, 30, 15);
             
             // Add stamp text below image
             doc.setFontSize(10);
@@ -3325,7 +3325,7 @@ function generateAgreementPDF(data) {
             doc.text(dateText, x, y - 2, null, null, "center");
             
             // Add stamp image
-            doc.addImage('STAMP.jpeg', 'JPEG', x - 15, y, 30, 15);
+            doc.addImage('STAMP.png', 'JPEG', x - 15, y, 30, 15);
             
             // Add stamp text below image
             doc.setFontSize(10);
