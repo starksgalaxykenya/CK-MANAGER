@@ -2556,7 +2556,7 @@ async function deleteBank(bankId) {
 }
 
 // =================================================================
-//                 PDF GENERATION FUNCTIONS (UPDATED)
+//                 PDF GENERATION FUNCTIONS (MOVED TO TOP)
 // =================================================================
 
 /**
@@ -2833,8 +2833,6 @@ function generateReceiptPDF(data) {
         y += 5;
     }
 
-// In the generateReceiptPDF function, replace the signature section:
-
     // =================================================================
     // FOOTER/SIGNATURES WITH SIGNATURE STAMP
     // =================================================================
@@ -2860,7 +2858,7 @@ function generateReceiptPDF(data) {
         const stampHeight = 30; // Maintain aspect ratio for 500x500
         
         // Add stamp image first
-        doc.addImage('STAMP.png', 'JPEG', sigX, y + 18, stampWidth, stampHeight);
+        doc.addImage('STAMP.jpeg', 'JPEG', sigX, y + 18, stampWidth, stampHeight);
         
         // Add date text OVER the stamp image (centered)
         doc.setFontSize(12); // Larger but not too large
@@ -2876,7 +2874,7 @@ function generateReceiptPDF(data) {
         // Add company text below stamp
         doc.setFontSize(10);
         doc.setTextColor(primaryColor);
-        doc.text('For WanBite Investment Co. LTD', sigX + (stampWidth/2), y + 18 + stampHeight + 8, null, null, "center");
+        doc.text('For WanBite Investment Co. LTD', textX, y + 18 + stampHeight + 8, null, null, "center");
     } catch (error) {
         console.error("Error adding stamp:", error);
         // Fallback to text only
@@ -2889,6 +2887,7 @@ function generateReceiptPDF(data) {
     }
     
     y += 30;
+
     // =================================================================
     // GLOBAL FOOTER
     // =================================================================
@@ -2901,6 +2900,407 @@ function generateReceiptPDF(data) {
     doc.text(footerText, pageW / 2, pageH - 4, null, null, "center");
 
     doc.save(`Receipt_${data.receiptId}.pdf`);
+}
+
+/**
+ * Generates and downloads a custom PDF for the Invoice/Proforma.
+ */
+function generateInvoicePDF(data) {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF('p', 'mm', 'a4'); 
+
+    const primaryColor = '#183263'; // WanBite Blue
+    const secondaryColor = '#D96359'; // Red
+    
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    let y = 10; 
+    const margin = 10;
+    const lineHeight = 5; 
+    const termIndent = 5;
+
+    // Add REVOKED watermark if invoice is revoked
+    if (data.revoked) {
+        doc.setFontSize(60);
+        doc.setTextColor(255, 0, 0, 30); // Red with transparency
+        doc.setFont("helvetica", "bold");
+        doc.text('REVOKED', pageW / 2, pageH / 2, null, null, "center");
+        doc.setTextColor(255, 0, 0, 30);
+        doc.text('INVALID', pageW / 2, pageH / 2 + 20, null, null, "center");
+        doc.setTextColor(0); // Reset text color
+    }
+
+    // --- HELPER FUNCTIONS ---
+    const drawText = (text, x, y, size, style = 'normal', color = primaryColor, align = 'left') => {
+        doc.setFontSize(size);
+        doc.setFont("helvetica", style);
+        doc.setTextColor(color);
+        doc.text(text, x, y, { align: align });
+    };
+
+    // Function to add stamp image with date OVERLAY
+    const addStampWithDate = (x, y, dateText) => {
+        try {
+            // Calculate position for 500x500 image to fit properly
+            const stampWidth = 30; // Reduced width for better scaling
+            const stampHeight = 30; // Maintain aspect ratio for 500x500
+            
+            // Add stamp image first
+            doc.addImage('STAMP.jpeg', 'JPEG', x - (stampWidth/2), y, stampWidth, stampHeight);
+            
+            // Add date text OVER the stamp image (centered)
+            doc.setFontSize(12); // Larger but not too large
+            doc.setTextColor(255, 255, 255); // White text for contrast
+            doc.setFont("helvetica", "bold");
+            
+            // Calculate text position to be centered over the stamp
+            const textX = x;
+            const textY = y + (stampHeight/2) + 2; // Center vertically
+            
+            doc.text(dateText, textX, textY, null, null, "center");
+            
+            // Add company text below stamp
+            doc.setFontSize(10);
+            doc.setTextColor(primaryColor);
+            doc.text('For WanBite Investment Co. LTD', x, y + stampHeight + 8, null, null, "center");
+            
+        } catch (error) {
+            console.error("Error adding stamp:", error);
+            // Fallback to text only if image fails
+            doc.setFontSize(9);
+            doc.setTextColor(secondaryColor);
+            doc.text(dateText, x, y - 2, null, null, "center");
+            doc.setFontSize(10);
+            doc.setTextColor(primaryColor);
+            doc.text('For WanBite Investment Co. LTD', x, y + 5, null, null, "center");
+        }
+    };
+
+    // Advanced Text Wrapper for Terms & Conditions (handles bolding of prices)
+    const drawTerm = (doc, yStart, prefix, text, textWidth = 188 - termIndent) => {
+        doc.setFontSize(9);
+        doc.setTextColor(primaryColor);
+        doc.setFont("helvetica", "bold");
+        doc.text(prefix, margin, yStart);
+        
+        // Start text after prefix
+        let textX = margin + 5; 
+        
+        // Ensure standard text wrapping is used for the rest
+        const lines = doc.splitTextToSize(text, textWidth);
+        let currentY = yStart;
+        const lineSpacing = 4.5;
+        
+        lines.forEach((line, index) => {
+            let currentX = margin + termIndent; 
+            if (index === 0) {
+                // If the first line, draw it right after the prefix
+                currentX = textX; 
+            } else {
+                currentX = margin + termIndent;
+            }
+
+            // Calculate where the text should start on the first line after the prefix
+            if (index === 0) {
+                const prefixWidth = doc.getStringUnitWidth(prefix) * doc.getFontSize() / doc.internal.scaleFactor;
+                currentX = margin + prefixWidth + 1; // Start right after the bold prefix
+            } else {
+                currentX = margin + termIndent;
+            }
+
+            doc.setTextColor(primaryColor);
+            doc.setFont("helvetica", "normal");
+            doc.text(line, currentX, currentY);
+
+            currentY += lineSpacing;
+        });
+        
+        return currentY + 1; // Advance Y position by a little extra padding
+    };
+
+    // =================================================================
+    // HEADER SECTION
+    // =================================================================
+    
+    // Top Bar (Color #183263)
+    doc.setFillColor(primaryColor);
+    doc.rect(0, 0, pageW, 15, 'F');
+    
+    drawText('WanBite Investments Co. Ltd.', pageW / 2, 8, 18, 'bold', '#FFFFFF', 'center');
+    drawText('carskenya.co.ke', pageW / 2, 13, 10, 'normal', '#FFFFFF', 'center');
+    
+    y = 25;
+
+    // INVOICE TITLE
+    doc.setTextColor(secondaryColor);
+    doc.setFontSize(24);
+    doc.setFont("helvetica", "bold");
+    doc.text(data.docType.toUpperCase(), pageW / 2, y, null, null, "center");
+    y += 10;
+    
+    // Invoice/Date/Due Box - FIXED OVERLAPPING
+    doc.setDrawColor(primaryColor);
+    doc.setLineWidth(0.5);
+    doc.rect(margin, y, 188, 18); // Increased height
+    
+    drawText('INVOICE NO:', margin + 3, y + 6, 10, 'bold', secondaryColor);
+    drawText(data.invoiceId, margin + 3, y + 13, 12, 'bold', primaryColor); // Smaller font
+    
+    drawText('ISSUE DATE:', pageW - margin - 80, y + 6, 10, 'bold', secondaryColor);
+    drawText(data.issueDate, pageW - margin - 80, y + 13, 10, 'bold', primaryColor);
+    
+    drawText('DUE DATE:', pageW - margin - 15, y + 6, 10, 'bold', secondaryColor, 'right');
+    drawText(data.dueDate, pageW - margin - 15, y + 13, 10, 'bold', primaryColor, 'right');
+    y += 23;
+
+    // =================================================================
+    // BILLING & SELLER INFO - UPDATED TO SHOW ONLY CLIENT NAME
+    // =================================================================
+    
+    // Bill To Box (Left)
+    doc.setDrawColor(primaryColor);
+    doc.setLineWidth(0.2);
+    doc.rect(margin, y, 90, 15); // Smaller height
+    drawText('BILL TO:', margin + 3, y + 5, 10, 'bold', secondaryColor);
+    drawText(data.clientName, margin + 3, y + 11, 10, 'bold', 0);
+    
+    // Seller Info Box (Right)
+    doc.rect(pageW / 2 + 5, y, 90, 15); // Smaller height
+    drawText('FROM:', pageW / 2 + 8, y + 5, 10, 'bold', secondaryColor);
+    drawText('WANBITE INVESTMENTS COMPANY LIMITED', pageW / 2 + 8, y + 11, 8, 'bold', 0); // Smaller font
+    
+    y += 20;
+
+    // =================================================================
+    // ITEM TABLE (Vehicle Details) - REMOVED QTY COLUMN
+    // =================================================================
+    
+    // Table Header
+    doc.setFillColor(primaryColor);
+    doc.rect(margin, y, 188, 8, 'F');
+    doc.setTextColor(255);
+    drawText('MAKE & MODEL', 12, y + 5.5, 9, 'bold', 255);
+    drawText('VIN / YEAR', 60, y + 5.5, 9, 'bold', 255); // Adjusted position
+    drawText('Specs (CC/Fuel/Trans)', 100, y + 5.5, 9, 'bold', 255); // Adjusted position
+    drawText('Mileage/Color', 150, y + 5.5, 9, 'bold', 255); // Adjusted position
+    drawText('PRICE (USD)', 185, y + 5.5, 9, 'bold', 255, 'right');
+    y += 8;
+
+    // Table Row
+    doc.setFillColor(255);
+    doc.rect(margin, y, 188, 8, 'F');
+    doc.setTextColor(0);
+    drawText(`${data.carDetails.make} ${data.carDetails.model}`, 12, y + 5.5, 10);
+    drawText(`${data.carDetails.vin} / ${data.carDetails.year}`, 60, y + 5.5, 10);
+    drawText(`${data.carDetails.cc} CC / ${data.carDetails.fuel} / ${data.carDetails.transmission}`, 100, y + 5.5, 10);
+    drawText(`${data.carDetails.mileage}km / ${data.carDetails.color}`, 150, y + 5.5, 10);
+    drawText(`${data.carDetails.priceUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })}`, 185, y + 5.5, 10, 'normal', 0, "right");
+    y += 8;
+
+    // Description of Goods
+    doc.setTextColor(primaryColor);
+    drawText('DESCRIPTION:', margin, y + 5, 9, 'bold');
+    doc.setTextColor(0);
+    doc.setFontSize(9);
+    const descriptionLines = doc.splitTextToSize(data.carDetails.goodsDescription || 'N/A', 188);
+    descriptionLines.forEach((line, index) => {
+        doc.text(line, margin, y + 5 + (index + 1) * 4);
+    });
+    y += descriptionLines.length * 4 + 7;
+
+    // =================================================================
+    // TOTALS & PAYMENTS (Bottom Right)
+    // =================================================================
+    const totalBoxW = 60;
+    const totalsX = pageW - margin - totalBoxW;
+
+    // Line 1: Subtotal
+    doc.setDrawColor(200);
+    doc.setLineWidth(0.1);
+    doc.rect(totalsX, y, totalBoxW, lineHeight);
+    drawText('SUBTOTAL (USD)', totalsX + 2, y + 3.5, 9, 'normal', 0);
+    drawText(data.pricing.totalUSD.toLocaleString('en-US', { minimumFractionDigits: 2 }), totalsX + totalBoxW - 2, y + 3.5, 9, 'bold', 0, 'right');
+    y += lineHeight;
+
+    // Line 2: Deposit
+    doc.rect(totalsX, y, totalBoxW, lineHeight);
+    drawText(`DEPOSIT (${data.pricing.depositPercentage || 50}% USD)`, totalsX + 2, y + 3.5, 9, 'normal', 0);
+    drawText(data.pricing.depositUSD.toLocaleString('en-US', { minimumFractionDigits: 2 }), totalsX + totalBoxW - 2, y + 3.5, 9, 'bold', secondaryColor, 'right');
+    y += lineHeight;
+
+    // Line 3: Balance
+    doc.rect(totalsX, y, totalBoxW, lineHeight);
+    drawText('BALANCE DUE (USD)', totalsX + 2, y + 3.5, 9, 'normal', 0);
+    drawText(data.pricing.balanceUSD.toLocaleString('en-US', { minimumFractionDigits: 2 }), totalsX + totalBoxW - 2, y + 3.5, 9, 'bold', primaryColor, 'right');
+    y += lineHeight;
+
+    // Line 4: Deposit KES Equivalent
+    doc.setFillColor(230, 240, 255);
+    doc.rect(totalsX, y, totalBoxW, lineHeight, 'F');
+    doc.rect(totalsX, y, totalBoxW, lineHeight);
+    drawText('DEPOSIT (KES EQUIV)', totalsX + 2, y + 3.5, 9, 'bold', primaryColor);
+    drawText(parseFloat(data.pricing.depositKSH).toLocaleString('en-US', { minimumFractionDigits: 2 }), totalsX + totalBoxW - 2, y + 3.5, 9, 'bold', primaryColor, 'right');
+    y += lineHeight;
+    y += 5; // Extra space
+
+    // =================================================================
+    // TERMS & CONDITIONS (Left) - NOW UNDERLINED
+    // =================================================================
+    drawText('TERMS & CONDITIONS', margin, y, 12, 'bold', primaryColor);
+    // Add underline
+    doc.setDrawColor(primaryColor);
+    doc.setLineWidth(0.5);
+    const textWidth = doc.getStringUnitWidth('TERMS & CONDITIONS') * 12 / doc.internal.scaleFactor;
+    doc.line(margin, y + 1, margin + textWidth, y + 1);
+    y += lineHeight + 2;
+    
+    // Check if it's an auction invoice
+    if (data.docType === 'Auction Invoice') {
+        // AUCTION INVOICE TERMS
+        const auctionPrice = data.auctionPrice || data.pricing.totalUSD;
+        
+        // Term 1: Currency Clause
+        const term1 = `All payments under this contract shall be made in USD. If payments are made in any other currency, the amount will be converted at the prevailing exchange rate of the seller's bank on the date of payment.`;
+        y = drawTerm(doc, y, '1.', term1);
+
+        // Term 2: Auction Bid Security
+        const term2 = `Wanbite Investments Ltd will arrange the auction bid once the Buyer deposits USD ${auctionPrice.toLocaleString('en-US', { minimumFractionDigits: 2 })} as bid security. This deposit is refundable.`;
+        y = drawTerm(doc, y, '2.', term2);
+
+        // Term 3: Balance Payment
+        y = drawTerm(doc, y, '3.', 'The remaining balance must be paid within 10 days of the bill of lading issuance date.');
+
+        // Term 4: BOL Release
+        y = drawTerm(doc, y, '4.', 'The original Bill of Lading will be sent to the Buyer within 20 business days after full payment is received.');
+
+        // Term 5: As Is Condition
+        y = drawTerm(doc, y, '5.', 'All vehicles are sold on an "AS IS" basis, with no warranties, expressed or implied. Shipment booking will be arranged once the AGREED PAYMENT amount is paid by the Buyer.');
+
+        // Term 6: Third Party Payment
+        y = drawTerm(doc, y, '6.', 'If a third party makes the payment, the Buyer must inform the Seller in writing of the relationship before the payment is made, for security reasons.');
+
+        // Term 7: Import Responsibility
+        y = drawTerm(doc, y, '7.', 'The Seller is not responsible for any losses arising from the Buyer\'s failure to comply with import regulations and/or restrictions in the Buyer\'s country.');
+        
+    } else {
+        // REGULAR INVOICE TERMS
+        // Term 1: Total Price
+        const totalPriceText = `The total price of the vehicle is USD ${data.pricing.totalUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+        y = drawTerm(doc, y, '1.', totalPriceText, 188 - termIndent);
+
+        // Term 2: Payment Schedule
+        const depositText = `A deposit of USD ${data.pricing.depositUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })} (KES ${data.pricing.depositKSH.toLocaleString('en-US', { minimumFractionDigits: 2 })} equivalent) is required to secure the vehicle and begin shipping/clearing. The balance of USD ${data.pricing.balanceUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })} is due on or before ${data.dueDate} or upon production of the Bill of Lading. The seller shall promptly notify the buyer of the date for due compliance.`;
+        y = drawTerm(doc, y, '2.', depositText);
+
+        // Term 3: BOL Release
+        y = drawTerm(doc, y, '3.', 'The original Bill of Lading will be issued to the buyer upon confirmation of full receipt of the purchase price.');
+
+        // Term 4: Cancellation/Forfeiture
+        y = drawTerm(doc, y, '4.', 'If you cancel to buy before or after shipment after purchase is confirmed, your deposit is to be forfeited.');
+
+        // Term 5: As Is Condition
+        y = drawTerm(doc, y, '5.', 'All the vehicles are subject to AS IS CONDITION.');
+
+        // Term 6: Third Party Payment
+        y = drawTerm(doc, y, '6.', 'Payment will be made by the invoiced person. If a third party makes a payment, please kindly inform us the relationship due to security reasons.');
+    }
+    
+    y += 5;
+
+    // Add revocation note if revoked
+    if (data.revoked) {
+        y += 10;
+        doc.setFontSize(12);
+        doc.setTextColor(255, 0, 0);
+        doc.setFont("helvetica", "bold");
+        doc.text('*** THIS INVOICE HAS BEEN REVOKED AND IS NO LONGER VALID ***', pageW / 2, y, null, null, "center");
+        doc.setTextColor(0);
+        y += 10;
+    }
+
+    // =================================================================
+    // PAYMENT INSTRUCTIONS 
+    // =================================================================
+    doc.setFillColor(255, 245, 230);
+    doc.rect(margin, y, 188, 40, 'F'); // Increased height for more lines
+    doc.setDrawColor(secondaryColor);
+    doc.setLineWidth(0.5);
+    doc.rect(margin, y, 188, 40);
+    let currentY_bank = y + 5;
+    
+    // Title
+    drawText('KINDLY PAY USD / KSH TO THE FOLLOWING BANK ACCOUNT:', 15, currentY_bank, 11, 'bold', primaryColor);
+    currentY_bank += 5; // Move down after the title
+    
+    // Exchange Rate Note - far right
+    doc.setFontSize(8);
+    doc.setTextColor(primaryColor);
+    doc.text(`Exchange rate used USD 1 = KES ${data.exchangeRate.toFixed(2)}`, 190 - margin, currentY_bank - 2, null, null, "right");
+    
+    // Bank Details
+    doc.setFontSize(10);
+    doc.setTextColor(0);
+    const bank = data.bankDetails;
+    const branchText = bank.branch ? `(Branch: ${bank.branch})` : '';
+
+    doc.text(`Bank Name: ${bank.name || 'N/A'} ${branchText}`, margin + 5, currentY_bank);
+    currentY_bank += 4;
+    doc.text(`Account Name: ${bank.accountName || 'N/A'}`, margin + 5, currentY_bank);
+    currentY_bank += 4;
+    doc.text(`Account Number: ${bank.accountNumber || 'N/A'}`, margin + 5, currentY_bank);
+    currentY_bank += 4;
+    if (bank.paybillNumber) {
+        doc.text(`Paybill Number: ${bank.paybillNumber || 'N/A'}`, margin + 5, currentY_bank);
+        currentY_bank += 4;
+    }
+    doc.text(`SWIFT/BIC Code: ${bank.swiftCode || 'N/A'} | Currency: ${bank.currency || 'N/A'}`, margin + 5, currentY_bank);
+
+    drawText('**NOTE: Buyer Should bear the cost of Bank Charge when remitting T/T', margin, y + 40 - 5, 9, 'bold', secondaryColor);
+    y += 45;
+
+    // =================================================================
+    // CONFIRMATION SIGNATURES WITH STAMP - UPDATED FOR BETTER LAYOUT
+    // =================================================================
+    doc.setDrawColor(primaryColor);
+    
+    // Buyer Signature Section - UPDATED (REMOVED DATE)
+    // Buyer Name above the line (in bold)
+    doc.setFontSize(10);
+    doc.setTextColor(primaryColor);
+    doc.setFont("helvetica", "bold");
+    doc.text(`${data.buyerNameConfirmation}`, margin + 35, y + 5, null, null, "center");
+    
+    // Line for signature
+    doc.line(margin, y + 10, 90, y + 10);
+    
+    // "Accepted and Confirmed by Buyer" below the line
+    doc.setFontSize(8);
+    doc.setTextColor(0);
+    doc.setFont("helvetica", "normal");
+    doc.text('Accepted and Confirmed by Buyer', margin + 35, y + 14, null, null, "center");
+    
+    // REMOVED DATE LINE AND DATE TEXT
+    
+    // Seller Signature with stamp
+    const sellerSigX = 110;
+    
+    // Add stamp with date OVERLAY
+    const stampDate = new Date().toLocaleDateString('en-US');
+    addStampWithDate(sellerSigX + 40, y + 5, stampDate);
+    
+    y += 30;
+
+    // =================================================================
+    // FOOTER
+    // =================================================================
+    doc.setFillColor(primaryColor);
+    doc.rect(0, doc.internal.pageSize.getHeight() - 10, pageW, 10, 'F');
+    doc.setTextColor(255);
+    doc.setFontSize(9);
+    const footerText = `Location: Ngong Road, Kilimani, Nairobi. | Email: sales@carskenya.co.ke | Phone: 0713147136`;
+    doc.text(footerText, pageW / 2, doc.internal.pageSize.getHeight() - 4, null, null, "center");
+
+    doc.save(`${data.docType}_${data.invoiceId}.pdf`);
 }
 
 /**
@@ -2935,7 +3335,7 @@ function generateAgreementPDF(data) {
             const stampHeight = 30; // Maintain aspect ratio for 500x500
             
             // Add stamp image first
-            doc.addImage('STAMP.png', 'JPEG', x - (stampWidth/2), y, stampWidth, stampHeight);
+            doc.addImage('STAMP.jpeg', 'JPEG', x - (stampWidth/2), y, stampWidth, stampHeight);
             
             // Add date text OVER the stamp image (centered)
             doc.setFontSize(12); // Larger but not too large
