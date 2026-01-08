@@ -1680,18 +1680,26 @@ function autoFillBuyerConfirmation() {
 /**
  * Renders the Invoice/Proforma form.
  */
+// =================================================================
+//                 6. INVOICE MODULE (UPDATED WITH DEPOSIT PERCENTAGE & AUCTION INVOICE)
+// =================================================================
+
+/**
+ * Renders the Invoice/Proforma form.
+ */
 function renderInvoiceForm() {
     const formArea = document.getElementById('document-form-area');
     formArea.innerHTML = `
         <div class="p-6 border border-gray-300 rounded-xl bg-white shadow-lg">
             <h3 class="text-xl font-semibold mb-4 text-primary-blue">Create Sales Invoice/Proforma</h3>
             <form id="invoice-form" onsubmit="event.preventDefault(); saveInvoice(false);">
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 p-4 bg-blue-50 rounded-lg">
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6 p-4 bg-blue-50 rounded-lg">
                     <div>
                         <label class="block text-sm font-medium text-gray-700">Document Type</label>
-                        <select id="docType" required class="mt-1 block w-full p-2 border rounded-md">
+                        <select id="docType" required class="mt-1 block w-full p-2 border rounded-md" onchange="toggleAuctionFields()">
                             <option value="Invoice">Invoice</option>
                             <option value="Proforma Invoice">Proforma Invoice</option>
+                            <option value="Auction Invoice">Auction Invoice</option>
                         </select>
                     </div>
                     <div>
@@ -1702,6 +1710,16 @@ function renderInvoiceForm() {
                         <label for="dueDate" class="block text-sm font-medium text-gray-700">Due Date</label>
                         <input type="date" id="dueDate" required class="mt-1 block w-full p-2 border rounded-md">
                     </div>
+                    <div>
+                        <label for="depositPercentage" class="block text-sm font-medium text-gray-700">Deposit Percentage (%)</label>
+                        <input type="number" id="depositPercentage" step="0.01" required value="50.00" min="0" max="100" class="mt-1 block w-full p-2 border rounded-md">
+                    </div>
+                </div>
+                
+                <div id="auction-price-field" class="hidden mb-4 p-4 bg-yellow-50 rounded-lg border border-yellow-300">
+                    <label for="auctionPrice" class="block text-sm font-medium text-gray-700 mb-2">Auction Price (USD)</label>
+                    <input type="number" id="auctionPrice" step="0.01" placeholder="Enter auction price in USD" class="w-full p-2 border rounded-md">
+                    <p class="text-xs text-gray-600 mt-2">Note: For auction invoices, this is the bid security deposit amount.</p>
                 </div>
                 
                 <fieldset class="border p-4 rounded-lg mb-6">
@@ -1753,7 +1771,7 @@ function renderInvoiceForm() {
                             <select id="bankDetailsSelect" required class="mt-1 block w-full p-2 border rounded-md"></select>
                         </div>
                         <div>
-                            <label for="buyerNameConfirmation" class="block text-sm font-medium text-gray-700">Accepted & Confirmed by Buyer (Full Name)</label>
+                            <label for="buyerNameConfirmation" class="block text-sm font-medium text-gray-700">Buyer's Full Name (for signature)</label>
                             <input type="text" id="buyerNameConfirmation" required placeholder="Buyer's Full Name" class="mt-1 block w-full p-2 border rounded-md">
                         </div>
                     </div>
@@ -1778,7 +1796,27 @@ function renderInvoiceForm() {
     // Call autoFill function after form renders
     setTimeout(() => {
         autoFillBuyerConfirmation();
+        toggleAuctionFields(); // Initial check
     }, 100);
+}
+
+/**
+ * Toggles auction-specific fields based on document type
+ */
+function toggleAuctionFields() {
+    const docType = document.getElementById('docType').value;
+    const auctionField = document.getElementById('auction-price-field');
+    const priceField = document.getElementById('price');
+    
+    if (docType === 'Auction Invoice') {
+        auctionField.classList.remove('hidden');
+        priceField.placeholder = "Total Price (USD)";
+        document.getElementById('depositPercentage').value = "100.00"; // Auction invoices are 100% deposit
+    } else {
+        auctionField.classList.add('hidden');
+        priceField.placeholder = "Unit Price (USD C&F MSA)";
+        document.getElementById('depositPercentage').value = "50.00";
+    }
 }
 
 /**
@@ -1798,6 +1836,7 @@ async function saveInvoice(onlySave) {
     const clientPhone = document.getElementById('clientPhone').value;
     const dueDate = document.getElementById('dueDate').value;
     const exchangeRate = parseFloat(document.getElementById('exchangeRate').value);
+    const depositPercentage = parseFloat(document.getElementById('depositPercentage').value);
     
     const carMake = document.getElementById('carMake').value;
     const carModel = document.getElementById('carModel').value;
@@ -1811,6 +1850,9 @@ async function saveInvoice(onlySave) {
     const quantity = parseInt(document.getElementById('quantity').value);
     const priceUSD = parseFloat(document.getElementById('price').value);
     const goodsDescription = document.getElementById('goodsDescription').value;
+    
+    // Auction price for auction invoices
+    const auctionPrice = docType === 'Auction Invoice' ? parseFloat(document.getElementById('auctionPrice').value) : 0;
     
     // Bank Details are stored as JSON string in the value, so we parse it
     let bankDetails;
@@ -1834,10 +1876,19 @@ async function saveInvoice(onlySave) {
     
     const buyerNameConfirmation = document.getElementById('buyerNameConfirmation').value;
 
-    // 2. Calculate Pricing
-    const totalPriceUSD = quantity * priceUSD;
-    const depositUSD = totalPriceUSD * 0.50;
-    const balanceUSD = totalPriceUSD * 0.50;
+    // 2. Calculate Pricing based on document type
+    let totalPriceUSD, depositUSD, balanceUSD;
+    
+    if (docType === 'Auction Invoice') {
+        totalPriceUSD = auctionPrice;
+        depositUSD = auctionPrice; // 100% deposit for auction invoices
+        balanceUSD = 0;
+    } else {
+        totalPriceUSD = quantity * priceUSD;
+        depositUSD = totalPriceUSD * (depositPercentage / 100);
+        balanceUSD = totalPriceUSD - depositUSD;
+    }
+    
     const depositKSH = depositUSD * exchangeRate;
     
     // 3. Generate sequential invoice number
@@ -1851,6 +1902,7 @@ async function saveInvoice(onlySave) {
         issueDate: new Date().toLocaleDateString('en-US'),
         dueDate,
         exchangeRate,
+        depositPercentage,
         carDetails: {
             make: carMake,
             model: carModel,
@@ -1871,14 +1923,17 @@ async function saveInvoice(onlySave) {
             balanceUSD,
             depositKSH: depositKSH.toFixed(2),
             depositPaid: false,
-            remainingBalance: totalPriceUSD
+            remainingBalance: totalPriceUSD,
+            depositPercentage: depositPercentage
         },
         bankDetails, // Save the full object for easy reference
         buyerNameConfirmation,
         createdBy: currentUser.email,
         createdAt: firebase.firestore.FieldValue.serverTimestamp(),
         invoiceId: generatedInvoiceId,
-        revoked: false // Add revoked flag
+        revoked: false, // Add revoked flag
+        isAuctionInvoice: docType === 'Auction Invoice',
+        auctionPrice: docType === 'Auction Invoice' ? auctionPrice : null
     };
 
     // 5. Save to Firestore
@@ -2365,7 +2420,7 @@ async function reDownloadAgreement(data) {
 }
 
 // =================================================================
-//                 7. BANK MANAGEMENT MODULE (NEW)
+//                 7. BANK MANAGEMENT MODULE (UPDATED WITH PAYBILL)
 // =================================================================
 
 /**
@@ -2382,6 +2437,7 @@ function renderBankManagement() {
                     <input type="text" id="bankBranch" required placeholder="Bank Branch (e.g., Kilimani Branch)" class="mt-2 block w-full p-2 border rounded-md">
                     <input type="text" id="accountName" required placeholder="Account Name" value="WANBITE INVESTMENTS CO. LTD" class="mt-2 block w-full p-2 border rounded-md">
                     <input type="text" id="accountNumber" required placeholder="Account Number" class="mt-2 block w-full p-2 border rounded-md">
+                    <input type="text" id="paybillNumber" placeholder="Paybill Number (Optional)" class="mt-2 block w-full p-2 border rounded-md">
                     <input type="text" id="swiftCode" required placeholder="SWIFT/BIC Code" class="mt-2 block w-full p-2 border rounded-md">
                     <select id="currency" required class="mt-2 block w-full p-2 border rounded-md">
                         <option value="" disabled selected>Select Currency</option>
@@ -2410,17 +2466,19 @@ function renderBankManagement() {
  */
 async function addBankDetails() {
     const bankName = document.getElementById('bankName').value;
-    const bankBranch = document.getElementById('bankBranch').value; // <-- NEW FIELD
+    const bankBranch = document.getElementById('bankBranch').value;
     const accountName = document.getElementById('accountName').value;
     const accountNumber = document.getElementById('accountNumber').value;
+    const paybillNumber = document.getElementById('paybillNumber').value;
     const swiftCode = document.getElementById('swiftCode').value;
     const currency = document.getElementById('currency').value;
 
     const newBank = {
         name: bankName,
-        branch: bankBranch, // <-- NEW FIELD SAVED TO FIRESTORE
+        branch: bankBranch,
         accountName,
         accountNumber,
+        paybillNumber,
         swiftCode,
         currency,
         createdAt: firebase.firestore.FieldValue.serverTimestamp()
@@ -2439,7 +2497,6 @@ async function addBankDetails() {
 
 /**
  * Fetches and displays all saved bank details in the list.
- * (Updated to display the branch)
  */
 async function fetchAndDisplayBankDetails() {
     const listElement = document.getElementById('saved-banks-list');
@@ -2467,6 +2524,7 @@ async function fetchAndDisplayBankDetails() {
                     <p class="text-sm text-gray-700">Branch: ${data.branch || 'N/A'}</p>
                     <p class="text-sm text-gray-700">Account: ${data.accountName}</p>
                     <p class="text-sm text-gray-600">No: ${data.accountNumber} | SWIFT: ${data.swiftCode}</p>
+                    ${data.paybillNumber ? `<p class="text-sm text-gray-600">Paybill: ${data.paybillNumber}</p>` : ''}
                 </li>
             `;
         });
@@ -2775,6 +2833,8 @@ function generateReceiptPDF(data) {
         y += 5;
     }
 
+// In the generateReceiptPDF function, replace the signature section:
+
     // =================================================================
     // FOOTER/SIGNATURES WITH SIGNATURE STAMP
     // =================================================================
@@ -2792,20 +2852,35 @@ function generateReceiptPDF(data) {
     const sigX = pageW - margin - 50;
     doc.line(sigX, y + 15, pageW - margin, y + 15);
     
-    // Add signature stamp with date
+    // Add stamp with date
     const stampDate = new Date().toLocaleDateString('en-US');
-    doc.setFontSize(10);
-    doc.setTextColor(primaryColor);
-    doc.setFont("helvetica", "bold");
-    
-    // Add current date for stamp
-    doc.text(stampDate, sigX + 25, y + 19, null, null, "center");
-    
-    // Stamp text
-    doc.text('For WanBite Investment Co. LTD', sigX + 25, y + 23, null, null, "center");
+    try {
+        // Add date text above the stamp
+        doc.setFontSize(8);
+        doc.setTextColor(secondaryColor);
+        doc.text(stampDate, sigX + 25, y + 19, null, null, "center");
+        
+        // Add stamp image
+        doc.addImage('STAMP.jpeg', 'JPEG', sigX, y + 21, 50, 25);
+        
+        // Add stamp text below image
+        doc.setFontSize(10);
+        doc.setTextColor(primaryColor);
+        doc.setFont("helvetica", "bold");
+        doc.text('For WanBite Investment Co. LTD', sigX + 25, y + 48, null, null, "center");
+    } catch (error) {
+        console.error("Error adding stamp:", error);
+        // Fallback to text only
+        doc.setFontSize(9);
+        doc.setTextColor(secondaryColor);
+        doc.text(stampDate, sigX + 25, y + 19, null, null, "center");
+        doc.setFontSize(10);
+        doc.setTextColor(primaryColor);
+        doc.setFont("helvetica", "bold");
+        doc.text('For WanBite Investment Co. LTD', sigX + 25, y + 23, null, null, "center");
+    }
     
     y += 30;
-
     // =================================================================
     // GLOBAL FOOTER
     // =================================================================
@@ -2854,6 +2929,36 @@ function generateInvoicePDF(data) {
         doc.setFont("helvetica", style);
         doc.setTextColor(color);
         doc.text(text, x, y, { align: align });
+    };
+
+    // Function to add stamp image with date
+    const addStampWithDate = (x, y, dateText) => {
+        try {
+            // Add date text above the stamp
+            doc.setFontSize(8);
+            doc.setTextColor(secondaryColor);
+            doc.text(dateText, x, y - 2, null, null, "center");
+            
+            // Add stamp image - this assumes STAMP.jpeg is in the same directory
+            // Note: In a real implementation, you would need to load the image properly
+            // This is a placeholder - you'll need to implement actual image loading
+            doc.addImage('STAMP.jpeg', 'JPEG', x - 15, y, 30, 15);
+            
+            // Add stamp text below image
+            doc.setFontSize(10);
+            doc.setTextColor(primaryColor);
+            doc.setFont("helvetica", "bold");
+            doc.text('For WanBite Investment Co. LTD', x, y + 18, null, null, "center");
+        } catch (error) {
+            console.error("Error adding stamp:", error);
+            // Fallback to text only if image fails
+            doc.setFontSize(9);
+            doc.setTextColor(secondaryColor);
+            doc.text(dateText, x, y - 2, null, null, "center");
+            doc.setFontSize(10);
+            doc.setTextColor(primaryColor);
+            doc.text('For WanBite Investment Co. LTD', x, y + 5, null, null, "center");
+        }
     };
 
     // Advanced Text Wrapper for Terms & Conditions (handles bolding of prices)
@@ -2918,41 +3023,38 @@ function generateInvoicePDF(data) {
     doc.text(data.docType.toUpperCase(), pageW / 2, y, null, null, "center");
     y += 10;
     
-    // Invoice/Date/Due Box
+    // Invoice/Date/Due Box - FIXED OVERLAPPING
     doc.setDrawColor(primaryColor);
     doc.setLineWidth(0.5);
-    doc.rect(margin, y, 188, 15);
+    doc.rect(margin, y, 188, 18); // Increased height
     
-    drawText('INVOICE NO:', margin + 3, y + 5, 10, 'bold', secondaryColor);
-    drawText(data.invoiceId, margin + 3, y + 11, 14, 'bold', primaryColor);
+    drawText('INVOICE NO:', margin + 3, y + 6, 10, 'bold', secondaryColor);
+    drawText(data.invoiceId, margin + 3, y + 13, 12, 'bold', primaryColor); // Smaller font
     
-    drawText('ISSUE DATE:', pageW - margin - 50, y + 5, 10, 'bold', secondaryColor);
-    drawText(data.issueDate, pageW - margin - 50, y + 11, 10, 'bold', primaryColor);
+    drawText('ISSUE DATE:', pageW - margin - 80, y + 6, 10, 'bold', secondaryColor);
+    drawText(data.issueDate, pageW - margin - 80, y + 13, 10, 'bold', primaryColor);
     
-    drawText('DUE DATE:', pageW - margin - 15, y + 5, 10, 'bold', secondaryColor, 'right');
-    drawText(data.dueDate, pageW - margin - 15, y + 11, 10, 'bold', primaryColor, 'right');
-    y += 20;
+    drawText('DUE DATE:', pageW - margin - 15, y + 6, 10, 'bold', secondaryColor, 'right');
+    drawText(data.dueDate, pageW - margin - 15, y + 13, 10, 'bold', primaryColor, 'right');
+    y += 23;
 
     // =================================================================
-    // BILLING & SELLER INFO
+    // BILLING & SELLER INFO - UPDATED TO SHOW ONLY CLIENT NAME
     // =================================================================
     
     // Bill To Box (Left)
     doc.setDrawColor(primaryColor);
     doc.setLineWidth(0.2);
-    doc.rect(margin, y, 90, 25);
+    doc.rect(margin, y, 90, 15); // Smaller height
     drawText('BILL TO:', margin + 3, y + 5, 10, 'bold', secondaryColor);
-    drawText(data.clientName, margin + 3, y + 10, 10, 'bold', 0);
-    drawText(data.clientPhone, margin + 3, y + 15, 10, 'normal', 0);
+    drawText(data.clientName, margin + 3, y + 11, 10, 'bold', 0);
     
     // Seller Info Box (Right)
-    doc.rect(pageW / 2 + 5, y, 90, 25);
+    doc.rect(pageW / 2 + 5, y, 90, 15); // Smaller height
     drawText('FROM:', pageW / 2 + 8, y + 5, 10, 'bold', secondaryColor);
-    drawText('WANBITE INVESTMENTS COMPANY LIMITED', pageW / 2 + 8, y + 10, 10, 'bold', 0);
-    drawText('Ngong Road, Kilimani, Nairobi | sales@carskenya.co.ke', pageW / 2 + 8, y + 15, 8, 'normal', 0);
-    drawText('Phone: 0713147136', pageW / 2 + 8, y + 20, 8, 'normal', 0);
+    drawText('WANBITE INVESTMENTS COMPANY LIMITED', pageW / 2 + 8, y + 11, 8, 'bold', 0); // Smaller font
     
-    y += 30;
+    y += 20;
 
     // =================================================================
     // ITEM TABLE (Vehicle Details)
@@ -3009,7 +3111,7 @@ function generateInvoicePDF(data) {
 
     // Line 2: Deposit
     doc.rect(totalsX, y, totalBoxW, lineHeight);
-    drawText('DEPOSIT (50% USD)', totalsX + 2, y + 3.5, 9, 'normal', 0);
+    drawText(`DEPOSIT (${data.pricing.depositPercentage || 50}% USD)`, totalsX + 2, y + 3.5, 9, 'normal', 0);
     drawText(data.pricing.depositUSD.toLocaleString('en-US', { minimumFractionDigits: 2 }), totalsX + totalBoxW - 2, y + 3.5, 9, 'bold', secondaryColor, 'right');
     y += lineHeight;
 
@@ -3029,30 +3131,66 @@ function generateInvoicePDF(data) {
     y += 5; // Extra space
 
     // =================================================================
-    // TERMS & CONDITIONS (Left)
+    // TERMS & CONDITIONS (Left) - NOW UNDERLINED
     // =================================================================
     drawText('TERMS & CONDITIONS', margin, y, 12, 'bold', primaryColor);
-    y += lineHeight;
+    // Add underline
+    doc.setDrawColor(primaryColor);
+    doc.setLineWidth(0.5);
+    const textWidth = doc.getStringUnitWidth('TERMS & CONDITIONS') * 12 / doc.internal.scaleFactor;
+    doc.line(margin, y + 1, margin + textWidth, y + 1);
+    y += lineHeight + 2;
     
-    // Term 1: Total Price
-    const totalPriceText = `The total price of the vehicle is USD ${data.pricing.totalUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
-    y = drawTerm(doc, y, '1.', totalPriceText, 188 - termIndent);
+    // Check if it's an auction invoice
+    if (data.docType === 'Auction Invoice') {
+        // AUCTION INVOICE TERMS
+        const auctionPrice = data.auctionPrice || data.pricing.totalUSD;
+        
+        // Term 1: Currency Clause
+        const term1 = `All payments under this contract shall be made in USD. If payments are made in any other currency, the amount will be converted at the prevailing exchange rate of the seller's bank on the date of payment.`;
+        y = drawTerm(doc, y, '1.', term1);
 
-    // Term 2: Payment Schedule
-    const depositText = `A deposit of USD ${data.pricing.depositUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })} (KES ${data.pricing.depositKSH.toLocaleString('en-US', { minimumFractionDigits: 2 })} equivalent) is required to secure the vehicle and begin shipping/clearing. The balance of USD ${data.pricing.balanceUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })} is due on or before ${data.dueDate} or upon production of the Bill of Lading. The seller shall promptly notify the buyer of the date for due compliance.`;
-    y = drawTerm(doc, y, '2.', depositText);
+        // Term 2: Auction Bid Security
+        const term2 = `Wanbite Investments Ltd will arrange the auction bid once the Buyer deposits USD ${auctionPrice.toLocaleString('en-US', { minimumFractionDigits: 2 })} as bid security. This deposit is refundable.`;
+        y = drawTerm(doc, y, '2.', term2);
 
-    // Term 3: BOL Release
-    y = drawTerm(doc, y, '3.', 'The original Bill of Lading will be issued to the buyer upon confirmation of full receipt of the purchase price.');
+        // Term 3: Balance Payment
+        y = drawTerm(doc, y, '3.', 'The remaining balance must be paid within 10 days of the bill of lading issuance date.');
 
-    // Term 4: Cancellation/Forfeiture
-    y = drawTerm(doc, y, '4.', 'If you cancel to buy before or after shipment after purchase is confirmed, your deposit is to be forfeited.');
+        // Term 4: BOL Release
+        y = drawTerm(doc, y, '4.', 'The original Bill of Lading will be sent to the Buyer within 20 business days after full payment is received.');
 
-    // Term 5: As Is Condition
-    y = drawTerm(doc, y, '5.', 'All the vehicles are subject to AS IS CONDITION.');
+        // Term 5: As Is Condition
+        y = drawTerm(doc, y, '5.', 'All vehicles are sold on an "AS IS" basis, with no warranties, expressed or implied. Shipment booking will be arranged once the AGREED PAYMENT amount is paid by the Buyer.');
 
-    // Term 6: Third Party Payment
-    y = drawTerm(doc, y, '6.', 'Payment will be made by the invoiced person. If a third party makes a payment, please kindly inform us the relationship due to security reasons.');
+        // Term 6: Third Party Payment
+        y = drawTerm(doc, y, '6.', 'If a third party makes the payment, the Buyer must inform the Seller in writing of the relationship before the payment is made, for security reasons.');
+
+        // Term 7: Import Responsibility
+        y = drawTerm(doc, y, '7.', 'The Seller is not responsible for any losses arising from the Buyer\'s failure to comply with import regulations and/or restrictions in the Buyer\'s country.');
+        
+    } else {
+        // REGULAR INVOICE TERMS
+        // Term 1: Total Price
+        const totalPriceText = `The total price of the vehicle is USD ${data.pricing.totalUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+        y = drawTerm(doc, y, '1.', totalPriceText, 188 - termIndent);
+
+        // Term 2: Payment Schedule
+        const depositText = `A deposit of USD ${data.pricing.depositUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })} (KES ${data.pricing.depositKSH.toLocaleString('en-US', { minimumFractionDigits: 2 })} equivalent) is required to secure the vehicle and begin shipping/clearing. The balance of USD ${data.pricing.balanceUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })} is due on or before ${data.dueDate} or upon production of the Bill of Lading. The seller shall promptly notify the buyer of the date for due compliance.`;
+        y = drawTerm(doc, y, '2.', depositText);
+
+        // Term 3: BOL Release
+        y = drawTerm(doc, y, '3.', 'The original Bill of Lading will be issued to the buyer upon confirmation of full receipt of the purchase price.');
+
+        // Term 4: Cancellation/Forfeiture
+        y = drawTerm(doc, y, '4.', 'If you cancel to buy before or after shipment after purchase is confirmed, your deposit is to be forfeited.');
+
+        // Term 5: As Is Condition
+        y = drawTerm(doc, y, '5.', 'All the vehicles are subject to AS IS CONDITION.');
+
+        // Term 6: Third Party Payment
+        y = drawTerm(doc, y, '6.', 'Payment will be made by the invoiced person. If a third party makes a payment, please kindly inform us the relationship due to security reasons.');
+    }
     
     y += 5;
 
@@ -3098,35 +3236,47 @@ function generateInvoicePDF(data) {
     currentY_bank += 4;
     doc.text(`Account Number: ${bank.accountNumber || 'N/A'}`, margin + 5, currentY_bank);
     currentY_bank += 4;
+    if (bank.paybillNumber) {
+        doc.text(`Paybill Number: ${bank.paybillNumber || 'N/A'}`, margin + 5, currentY_bank);
+        currentY_bank += 4;
+    }
     doc.text(`SWIFT/BIC Code: ${bank.swiftCode || 'N/A'} | Currency: ${bank.currency || 'N/A'}`, margin + 5, currentY_bank);
 
     drawText('**NOTE: Buyer Should bear the cost of Bank Charge when remitting T/T', margin, y + 40 - 5, 9, 'bold', secondaryColor);
     y += 45;
 
     // =================================================================
-    // CONFIRMATION SIGNATURES WITH STAMP
+    // CONFIRMATION SIGNATURES WITH STAMP - UPDATED FOR BETTER LAYOUT
     // =================================================================
     doc.setDrawColor(primaryColor);
     
-    // Buyer Signature
-    doc.line(margin, y + 15, 90, y + 15);
-    drawText(`Accepted and Confirmed by Buyer: ${data.buyerNameConfirmation}`, margin, y + 19, 10);
-    
-    // Seller Signature with stamp
-    const sellerSigX = 110;
-    doc.line(sellerSigX, y + 15, 190, y + 15);
-    
-    // Add stamp date
-    const stampDate = new Date().toLocaleDateString('en-US');
-    doc.setFontSize(9);
-    doc.setTextColor(secondaryColor);
-    doc.text(stampDate, sellerSigX + 40, y + 19, null, null, "center");
-    
-    // Stamp text
+    // Buyer Signature Section - UPDATED
+    // Buyer Name above the line (in bold)
     doc.setFontSize(10);
     doc.setTextColor(primaryColor);
     doc.setFont("helvetica", "bold");
-    doc.text('For WanBite Investment Co. LTD', sellerSigX + 40, y + 23, null, null, "center");
+    doc.text(`${data.buyerNameConfirmation}`, margin + 35, y + 5, null, null, "center");
+    
+    // Line for signature
+    doc.line(margin, y + 10, 90, y + 10);
+    
+    // "Accepted and Confirmed by Buyer" below the line
+    doc.setFontSize(8);
+    doc.setTextColor(0);
+    doc.setFont("helvetica", "normal");
+    doc.text('Accepted and Confirmed by Buyer', margin + 35, y + 14, null, null, "center");
+    
+    // Date line below
+    doc.line(margin, y + 16, 90, y + 16);
+    doc.text('Date', margin + 35, y + 20, null, null, "center");
+    
+    // Seller Signature with stamp
+    const sellerSigX = 110;
+    
+    // Add stamp with date
+    const stampDate = new Date().toLocaleDateString('en-US');
+    addStampWithDate(sellerSigX + 40, y + 10, stampDate);
+    
     y += 30;
 
     // =================================================================
@@ -3164,6 +3314,34 @@ function generateAgreementPDF(data) {
         doc.setFont("helvetica", style);
         doc.setTextColor(color);
         doc.text(text, x, y, { align: align });
+    };
+
+    // Function to add stamp image with date
+    const addStampWithDate = (x, y, dateText) => {
+        try {
+            // Add date text above the stamp
+            doc.setFontSize(8);
+            doc.setTextColor(secondaryColor);
+            doc.text(dateText, x, y - 2, null, null, "center");
+            
+            // Add stamp image
+            doc.addImage('STAMP.jpeg', 'JPEG', x - 15, y, 30, 15);
+            
+            // Add stamp text below image
+            doc.setFontSize(10);
+            doc.setTextColor(primaryColor);
+            doc.setFont("helvetica", "bold");
+            doc.text('For WanBite Investment Co. LTD', x, y + 18, null, null, "center");
+        } catch (error) {
+            console.error("Error adding stamp:", error);
+            // Fallback to text only
+            doc.setFontSize(9);
+            doc.setTextColor(secondaryColor);
+            doc.text(dateText, x, y - 2, null, null, "center");
+            doc.setFontSize(10);
+            doc.setTextColor(primaryColor);
+            doc.text('For WanBite Investment Co. LTD', x, y + 5, null, null, "center");
+        }
     };
 
     // =================================================================
@@ -3218,6 +3396,11 @@ function generateAgreementPDF(data) {
     // VEHICLE DETAILS
     // =================================================================
     drawText('VEHICLE DETAILS', margin, y, 12, 'bold', primaryColor);
+    // Add underline
+    doc.setDrawColor(primaryColor);
+    doc.setLineWidth(0.5);
+    const vehicleTitleWidth = doc.getStringUnitWidth('VEHICLE DETAILS') * 12 / doc.internal.scaleFactor;
+    doc.line(margin, y + 1, margin + vehicleTitleWidth, y + 1);
     y += lineSpacing;
     doc.setFontSize(10);
     doc.setTextColor(0);
@@ -3249,6 +3432,9 @@ function generateAgreementPDF(data) {
     // PAYMENT DETAILS & SCHEDULE
     // =================================================================
     drawText('SALES AGREEMENT & PAYMENT TERMS', margin, y, 12, 'bold', primaryColor);
+    // Add underline
+    const paymentTitleWidth = doc.getStringUnitWidth('SALES AGREEMENT & PAYMENT TERMS') * 12 / doc.internal.scaleFactor;
+    doc.line(margin, y + 1, margin + paymentTitleWidth, y + 1);
     y += lineSpacing;
 
     // Purchase Price
@@ -3281,11 +3467,17 @@ function generateAgreementPDF(data) {
     doc.text(`Account Name: ${bank.accountName || 'N/A'}`, margin + 90, y + 4);
     doc.text(`Account No: ${bank.accountNumber || 'N/A'}`, margin + 3, y + 9);
     doc.text(`SWIFT/BIC: ${bank.swiftCode || 'N/A'}`, margin + 90, y + 9);
-    doc.text(`Branch: ${bank.branch || 'N/A'} | Currency: ${data.salesTerms.currency}`, margin + 3, y + 14);
+    if (bank.paybillNumber) {
+        doc.text(`Paybill No: ${bank.paybillNumber}`, margin + 3, y + 14);
+    }
+    doc.text(`Branch: ${bank.branch || 'N/A'} | Currency: ${data.salesTerms.currency}`, margin + (bank.paybillNumber ? 90 : 3), y + (bank.paybillNumber ? 14 : 14));
     y += 25;
 
     // Additional Terms
     drawText('GENERAL TERMS', margin, y, 12, 'bold', primaryColor);
+    // Add underline
+    const generalTermsWidth = doc.getStringUnitWidth('GENERAL TERMS') * 12 / doc.internal.scaleFactor;
+    doc.line(margin, y + 1, margin + generalTermsWidth, y + 1);
     y += lineSpacing;
 
     doc.setFontSize(10);
@@ -3299,38 +3491,39 @@ function generateAgreementPDF(data) {
     // SIGNATURES WITH STAMP
     // =================================================================
     drawText('AGREED AND ACCEPTED', margin, y, 12, 'bold', primaryColor);
+    // Add underline
+    const agreedWidth = doc.getStringUnitWidth('AGREED AND ACCEPTED') * 12 / doc.internal.scaleFactor;
+    doc.line(margin, y + 1, margin + agreedWidth, y + 1);
     y += lineSpacing;
 
     const sigY = y + 10;
     const sigDateY = sigY + 5;
     const sigNameY = sigY + 10;
     
-    // Buyer
+    // Buyer - UPDATED LAYOUT
+    // Buyer Name above the line (in bold)
+    doc.setFontSize(10);
+    doc.setTextColor(primaryColor);
+    doc.setFont("helvetica", "bold");
+    doc.text(`${data.buyer.name}`, margin + 35, sigY - 5, null, null, "center");
+    
+    // Line for signature
     doc.line(margin, sigY, margin + 70, sigY);
     drawText('Buyer Signature', margin + 35, sigY + 2, 8, 'normal', 0, 'center');
     doc.line(margin, sigDateY + 1, margin + 70, sigDateY + 1);
     drawText('Date', margin + 35, sigDateY + 3, 8, 'normal', 0, 'center');
-    drawText(`Buyer Name: ${data.buyer.name}`, margin, sigNameY + 3, 10, 'bold', primaryColor);
-    drawText(`Witness: ${data.signatures.buyerWitness}`, margin, sigNameY + 7, 10, 'normal', 0);
+    drawText(`Witness: ${data.signatures.buyerWitness}`, margin, sigNameY + 3, 10, 'normal', 0);
 
     // Seller with stamp
     const sellerX = pageW - margin - 70;
-    doc.line(sellerX, sigY, pageW - margin, sigY);
     
-    // Add stamp date
+    // Add stamp with date
     const stampDate = new Date().toLocaleDateString('en-US');
-    doc.setFontSize(8);
-    doc.setTextColor(secondaryColor);
-    doc.text(stampDate, sellerX + 35, sigY + 2, null, null, "center");
+    addStampWithDate(sellerX + 35, sigY, stampDate);
     
-    // Stamp text
-    doc.setFontSize(10);
-    doc.setTextColor(primaryColor);
-    doc.setFont("helvetica", "bold");
-    doc.text('Seller: WANBITE INVESTMENTS CO. LTD', sellerX + 35, sigY + 8, null, null, "center");
     doc.setFontSize(8);
     doc.setTextColor(0);
-    doc.text(`Witness: ${data.signatures.sellerWitness}`, sellerX + 35, sigY + 12, null, null, "center");
+    doc.text(`Witness: ${data.signatures.sellerWitness}`, sellerX + 35, sigY + 20, null, null, "center");
     
     y += 30;
     
@@ -3345,7 +3538,6 @@ function generateAgreementPDF(data) {
 
     doc.save(`Car_Sales_Agreement_${data.buyer.name.replace(/\s/g, '_')}.pdf`);
 }
-
 // =================================================================
 //                 ADDITIONAL FUNCTIONS
 // =================================================================
