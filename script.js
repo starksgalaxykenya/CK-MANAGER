@@ -2860,7 +2860,7 @@ function generateReceiptPDF(data) {
         const stampHeight = 30; // Maintain aspect ratio for 500x500
         
         // Add stamp image first
-        doc.addImage('STAMP.jpeg', 'JPEG', sigX, y + 18, stampWidth, stampHeight);
+        doc.addImage('STAMP.png', 'JPEG', sigX, y + 18, stampWidth, stampHeight);
         
         // Add date text OVER the stamp image (centered)
         doc.setFontSize(12); // Larger but not too large
@@ -2935,7 +2935,7 @@ function generateAgreementPDF(data) {
             const stampHeight = 30; // Maintain aspect ratio for 500x500
             
             // Add stamp image first
-            doc.addImage('STAMP.jpeg', 'JPEG', x - (stampWidth/2), y, stampWidth, stampHeight);
+            doc.addImage('STAMP.png', 'JPEG', x - (stampWidth/2), y, stampWidth, stampHeight);
             
             // Add date text OVER the stamp image (centered)
             doc.setFontSize(12); // Larger but not too large
