@@ -2850,41 +2850,41 @@ function generateReceiptPDF(data) {
     const sigX = pageW - margin - 50;
     doc.line(sigX, y + 15, pageW - margin, y + 15);
     
-    // Add stamp with date OVERLAY
-    const stampDate = new Date().toLocaleDateString('en-US');
-    try {
-        // Calculate position for 500x500 image to fit properly
-        const stampWidth = 30; // Reduced width for better scaling
-        const stampHeight = 30; // Maintain aspect ratio for 500x500
-        
-        // Add stamp image first
-        doc.addImage('STAMP.png', 'JPEG', sigX, y + 18, stampWidth, stampHeight);
-        
-        // Add date text OVER the stamp image (centered)
-        doc.setFontSize(14); // Larger but not too large
-        doc.setTextColor(255, 0, 0); // White text for contrast
-        doc.setFont("helvetica", "bold");
-        
-        // Calculate text position to be centered over the stamp
-        const textX = sigX + (stampWidth/2);
-        const textY = y + 18 + (stampHeight/2) + 2; // Center vertically
-        
-        doc.text(stampDate, textX, textY, null, null, "center");
-        
-        // Add company text below stamp
-        doc.setFontSize(10);
-        doc.setTextColor(primaryColor);
-        doc.text('For WanBite Investment Co. LTD', textX, y + 18 + stampHeight + 8, null, null, "center");
-    } catch (error) {
-        console.error("Error adding stamp:", error);
-        // Fallback to text only
-        doc.setFontSize(9);
-        doc.setTextColor(secondaryColor);
-        doc.text(stampDate, sigX + 25, y + 19, null, null, "center");
-        doc.setFontSize(10);
-        doc.setTextColor(primaryColor);
-        doc.text('For WanBite Investment Co. LTD', sigX + 25, y + 23, null, null, "center");
-    }
+   // Add stamp with date OVERLAY
+const stampDate = data.receiptDate || new Date().toLocaleDateString('en-US'); // Use receipt date
+try {
+    // Calculate position for 500x500 image to fit properly
+    const stampWidth = 30; // Reduced width for better scaling
+    const stampHeight = 30; // Maintain aspect ratio for 500x500
+    
+    // Add stamp image first
+    doc.addImage('STAMP.png', 'JPEG', sigX, y + 18, stampWidth, stampHeight);
+    
+    // Add date text OVER the stamp image (centered)
+    doc.setFontSize(14); // LARGER FONT SIZE AS REQUESTED
+    doc.setTextColor(255, 0, 0); // RED COLOR AS REQUESTED
+    doc.setFont("helvetica", "bold");
+    
+    // Calculate text position to be centered over the stamp
+    const textX = sigX + (stampWidth/2);
+    const textY = y + 18 + (stampHeight/2) + 2; // Center vertically
+    
+    doc.text(stampDate, textX, textY, null, null, "center");
+    
+    // Add company text below stamp
+    doc.setFontSize(10);
+    doc.setTextColor(primaryColor);
+    doc.text('For WanBite Investment Co. LTD', textX, y + 18 + stampHeight + 8, null, null, "center");
+} catch (error) {
+    console.error("Error adding stamp:", error);
+    // Fallback to text only
+    doc.setFontSize(14); // Larger fallback
+    doc.setTextColor(255, 0, 0); // Red fallback
+    doc.text(stampDate, sigX + 25, y + 19, null, null, "center");
+    doc.setFontSize(10);
+    doc.setTextColor(primaryColor);
+    doc.text('For WanBite Investment Co. LTD', sigX + 25, y + 23, null, null, "center");
+}
     
     y += 30;
 
@@ -2938,43 +2938,43 @@ function generateInvoicePDF(data) {
         doc.text(text, x, y, { align: align });
     };
 
-    // Function to add stamp image with date OVERLAY
-    const addStampWithDate = (x, y, dateText) => {
-        try {
-            // Calculate position for 500x500 image to fit properly
-            const stampWidth = 30; // Reduced width for better scaling
-            const stampHeight = 30; // Maintain aspect ratio for 500x500
-            
-            // Add stamp image first
-            doc.addImage('STAMP.png', 'JPEG', x - (stampWidth/2), y, stampWidth, stampHeight);
-            
-            // Add date text OVER the stamp image (centered)
-            doc.setFontSize(14); // Larger but not too large
-            doc.setTextColor(255, 0, 0); // White text for contrast
-            doc.setFont("helvetica", "bold");
-            
-            // Calculate text position to be centered over the stamp
-            const textX = x;
-            const textY = y + (stampHeight/2) + 2; // Center vertically
-            
-            doc.text(dateText, textX, textY, null, null, "center");
-            
-            // Add company text below stamp
-            doc.setFontSize(10);
-            doc.setTextColor(primaryColor);
-            doc.text('For WanBite Investment Co. LTD', x, y + stampHeight + 8, null, null, "center");
-            
-        } catch (error) {
-            console.error("Error adding stamp:", error);
-            // Fallback to text only if image fails
-            doc.setFontSize(9);
-            doc.setTextColor(secondaryColor);
-            doc.text(dateText, x, y - 2, null, null, "center");
-            doc.setFontSize(10);
-            doc.setTextColor(primaryColor);
-            doc.text('For WanBite Investment Co. LTD', x, y + 5, null, null, "center");
-        }
-    };
+  // Function to add stamp image with date OVERLAY
+const addStampWithDate = (x, y, dateText) => {
+    try {
+        // Calculate position for 500x500 image to fit properly
+        const stampWidth = 30; // Reduced width for better scaling
+        const stampHeight = 30; // Maintain aspect ratio for 500x500
+        
+        // Add stamp image first
+        doc.addImage('STAMP.png', 'JPEG', x - (stampWidth/2), y, stampWidth, stampHeight);
+        
+        // Add date text OVER the stamp image (centered)
+        doc.setFontSize(14); // LARGER FONT SIZE AS REQUESTED
+        doc.setTextColor(255, 0, 0); // RED COLOR AS REQUESTED
+        doc.setFont("helvetica", "bold");
+        
+        // Calculate text position to be centered over the stamp
+        const textX = x;
+        const textY = y + (stampHeight/2) + 2; // Center vertically
+        
+        doc.text(dateText, textX, textY, null, null, "center");
+        
+        // Add company text below stamp
+        doc.setFontSize(10);
+        doc.setTextColor(primaryColor);
+        doc.text('For WanBite Investment Co. LTD', x, y + stampHeight + 8, null, null, "center");
+        
+    } catch (error) {
+        console.error("Error adding stamp:", error);
+        // Fallback to text only if image fails
+        doc.setFontSize(14); // Larger fallback
+        doc.setTextColor(255, 0, 0); // Red fallback
+        doc.text(dateText, x, y - 2, null, null, "center");
+        doc.setFontSize(10);
+        doc.setTextColor(primaryColor);
+        doc.text('For WanBite Investment Co. LTD', x, y + 5, null, null, "center");
+    }
+};
 
     // Advanced Text Wrapper for Terms & Conditions (handles bolding of prices)
     const drawTerm = (doc, yStart, prefix, text, textWidth = 188 - termIndent) => {
@@ -3054,59 +3054,93 @@ function generateInvoicePDF(data) {
     y += 23;
 
     // =================================================================
-    // BILLING & SELLER INFO - UPDATED TO SHOW ONLY CLIENT NAME
-    // =================================================================
-    
-    // Bill To Box (Left)
-    doc.setDrawColor(primaryColor);
-    doc.setLineWidth(0.2);
-    doc.rect(margin, y, 90, 15); // Smaller height
-    drawText('BILL TO:', margin + 3, y + 5, 10, 'bold', secondaryColor);
-    drawText(data.clientName, margin + 3, y + 11, 10, 'bold', 0);
-    
-    // Seller Info Box (Right)
-    doc.rect(pageW / 2 + 5, y, 90, 15); // Smaller height
-    drawText('FROM:', pageW / 2 + 8, y + 5, 10, 'bold', secondaryColor);
-    drawText('WANBITE INVESTMENTS COMPANY LIMITED', pageW / 2 + 8, y + 11, 8, 'bold', 0); // Smaller font
-    
-    y += 20;
+// BILLING & SELLER INFO - UPDATED WITH TEXT WRAPPING
+// =================================================================
 
-    // =================================================================
-    // ITEM TABLE (Vehicle Details) - REMOVED QTY COLUMN
-    // =================================================================
-    
-    // Table Header
-    doc.setFillColor(primaryColor);
-    doc.rect(margin, y, 188, 8, 'F');
-    doc.setTextColor(255);
-    drawText('MAKE & MODEL', 12, y + 5.5, 9, 'bold', 255);
-    drawText('VIN / YEAR', 60, y + 5.5, 9, 'bold', 255); // Adjusted position
-    drawText('Specs (CC/Fuel/Trans)', 100, y + 5.5, 9, 'bold', 255); // Adjusted position
-    drawText('Mileage/Color', 150, y + 5.5, 9, 'bold', 255); // Adjusted position
-    drawText('PRICE (USD)', 185, y + 5.5, 9, 'bold', 255, 'right');
-    y += 8;
+// Bill To Box (Left) - IMPROVED TEXT WRAPPING
+doc.setDrawColor(primaryColor);
+doc.setLineWidth(0.2);
+doc.rect(margin, y, 90, 15);
+drawText('BILL TO:', margin + 3, y + 5, 10, 'bold', secondaryColor);
 
-    // Table Row
-    doc.setFillColor(255);
-    doc.rect(margin, y, 188, 8, 'F');
-    doc.setTextColor(0);
-    drawText(`${data.carDetails.make} ${data.carDetails.model}`, 12, y + 5.5, 10);
-    drawText(`${data.carDetails.vin} / ${data.carDetails.year}`, 60, y + 5.5, 10);
-    drawText(`${data.carDetails.cc} CC / ${data.carDetails.fuel} / ${data.carDetails.transmission}`, 100, y + 5.5, 10);
-    drawText(`${data.carDetails.mileage}km / ${data.carDetails.color}`, 150, y + 5.5, 10);
-    drawText(`${data.carDetails.priceUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })}`, 185, y + 5.5, 10, 'normal', 0, "right");
-    y += 8;
+// Split client name into multiple lines if too long
+const maxNameWidth = 80; // Maximum width in mm for the name
+const clientNameLines = doc.splitTextToSize(data.clientName, maxNameWidth);
+let nameY = y + 11;
+clientNameLines.forEach(line => {
+    drawText(line, margin + 3, nameY, 10, 'bold', 0);
+    nameY += 4; // Line height
+});
 
-    // Description of Goods
-    doc.setTextColor(primaryColor);
-    drawText('DESCRIPTION:', margin, y + 5, 9, 'bold');
-    doc.setTextColor(0);
-    doc.setFontSize(9);
-    const descriptionLines = doc.splitTextToSize(data.carDetails.goodsDescription || 'N/A', 188);
-    descriptionLines.forEach((line, index) => {
-        doc.text(line, margin, y + 5 + (index + 1) * 4);
+// Seller Info Box (Right) - IMPROVED TEXT WRAPPING
+doc.rect(pageW / 2 + 5, y, 90, 15);
+drawText('FROM:', pageW / 2 + 8, y + 5, 10, 'bold', secondaryColor);
+
+// Split seller name into multiple lines
+const sellerName = 'WANBITE INVESTMENTS COMPANY LIMITED';
+const sellerLines = doc.splitTextToSize(sellerName, 80);
+let sellerY = y + 11;
+sellerLines.forEach(line => {
+    drawText(line, pageW / 2 + 8, sellerY, 8, 'bold', 0);
+    sellerY += 4;
+});
+
+// Adjust y position based on number of lines
+y += Math.max(clientNameLines.length * 4, sellerLines.length * 4) + 10;
+
+   // =================================================================
+// ITEM TABLE (Vehicle Details) - UPDATED WITH VIN BELOW MAKE & MODEL
+// =================================================================
+
+// Table Header with better column distribution
+doc.setFillColor(primaryColor);
+doc.rect(margin, y, 188, 8, 'F');
+doc.setTextColor(255);
+drawText('MAKE & MODEL / VIN', 12, y + 5.5, 9, 'bold', 255);
+drawText('YEAR', 70, y + 5.5, 9, 'bold', 255); // Adjusted to left
+drawText('SPECS', 90, y + 5.5, 9, 'bold', 255); // Shorter label
+drawText('MILEAGE/COLOR', 130, y + 5.5, 9, 'bold', 255); // Adjusted position
+drawText('PRICE (USD)', 185, y + 5.5, 9, 'bold', 255, 'right');
+y += 8;
+
+// Table Row with adjusted positions
+doc.setFillColor(255);
+doc.rect(margin, y, 188, 16, 'F');
+doc.setTextColor(0);
+
+// Make & Model and VIN
+drawText(`${data.carDetails.make} ${data.carDetails.model}`, 12, y + 5.5, 10);
+drawText(`VIN: ${data.carDetails.vin}`, 12, y + 12, 8, 'normal', '#666');
+
+// Year - centered
+drawText(`${data.carDetails.year}`, 70, y + 9, 10, 'normal', 0, 'center');
+
+// Specs - slightly smaller font
+const specsText = `${data.carDetails.cc} CC / ${data.carDetails.fuel} / ${data.carDetails.transmission}`;
+const specsLines = doc.splitTextToSize(specsText, 25); // Allow wrapping
+if (specsLines.length > 1) {
+    specsLines.forEach((line, index) => {
+        drawText(line, 90, y + 7 + (index * 4), 7, 'normal', 0, 'center');
     });
-    y += descriptionLines.length * 4 + 7;
+} else {
+    drawText(specsText, 90, y + 9, 8, 'normal', 0, 'center');
+}
+
+// Mileage/Color - allow wrapping
+const mileageColorText = `${data.carDetails.mileage}km / ${data.carDetails.color}`;
+const mileageLines = doc.splitTextToSize(mileageColorText, 30);
+if (mileageLines.length > 1) {
+    mileageLines.forEach((line, index) => {
+        drawText(line, 130, y + 7 + (index * 4), 7, 'normal', 0, 'center');
+    });
+} else {
+    drawText(mileageColorText, 130, y + 9, 8, 'normal', 0, 'center');
+}
+
+// Price - right aligned
+drawText(`${data.carDetails.priceUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })}`, 185, y + 9, 10, 'normal', 0, "right");
+
+y += 16;
 
     // =================================================================
     // TOTALS & PAYMENTS (Bottom Right)
@@ -3258,31 +3292,64 @@ function generateInvoicePDF(data) {
     drawText('**NOTE: Buyer Should bear the cost of Bank Charge when remitting T/T', margin, y + 40 - 5, 9, 'bold', secondaryColor);
     y += 45;
 
-    // =================================================================
-    // CONFIRMATION SIGNATURES WITH STAMP - UPDATED FOR BETTER LAYOUT
-    // =================================================================
-    doc.setDrawColor(primaryColor);
-    
-    // Buyer Signature Section - UPDATED (REMOVED DATE)
-    // Buyer Name above the line (in bold)
+  // =================================================================
+// CONFIRMATION SIGNATURES WITH STAMP - UPDATED FOR BETTER LAYOUT
+// =================================================================
+doc.setDrawColor(primaryColor);
+
+// Buyer Signature Section - UPDATED WITH TEXT WRAPPING
+// Split buyer name into multiple lines if needed
+const maxBuyerWidth = 70; // Width of the signature box
+const buyerNameLines = doc.splitTextToSize(data.buyerNameConfirmation, maxBuyerWidth);
+let buyerNameY = y + 5;
+
+// Draw each line of the buyer's name
+buyerNameLines.forEach((line, index) => {
     doc.setFontSize(10);
     doc.setTextColor(primaryColor);
     doc.setFont("helvetica", "bold");
-    doc.text(`${data.buyerNameConfirmation}`, margin + 35, y + 5, null, null, "center");
-    
-    // Line for signature
-    doc.line(margin, y + 10, 90, y + 10);
-    
-    // "Accepted and Confirmed by Buyer" below the line
-    doc.setFontSize(8);
-    doc.setTextColor(0);
-    doc.setFont("helvetica", "normal");
-    doc.text('Accepted and Confirmed by Buyer', margin + 35, y + 14, null, null, "center");
+    doc.text(line, margin + 35, buyerNameY, null, null, "center");
+    buyerNameY += 4;
+});
+
+// Line for signature
+doc.line(margin, buyerNameY, 90, buyerNameY);
+
+// "Accepted and Confirmed by Buyer" below the line
+doc.setFontSize(8);
+doc.setTextColor(0);
+doc.setFont("helvetica", "normal");
+doc.text('Accepted and Confirmed by Buyer', margin + 35, buyerNameY + 4, null, null, "center");
+
+// Adjust Y position based on number of name lines
+y = buyerNameY + 10;
     
     // REMOVED DATE LINE AND DATE TEXT
     
-    // Seller Signature with stamp
-    const sellerSigX = 110;
+   // Seller Signature with stamp
+const sellerSigX = 110;
+
+// Use document creation date (issueDate) instead of current date
+let stampDate = data.issueDate; // This is already stored when invoice was created
+
+// If issueDate is in a different format, convert it
+if (stampDate) {
+    try {
+        // Try to format the date properly
+        const dateObj = new Date(stampDate);
+        if (!isNaN(dateObj.getTime())) {
+            stampDate = dateObj.toLocaleDateString('en-US');
+        }
+    } catch (e) {
+        // Fallback to original date
+        console.log("Using original issue date format");
+    }
+} else {
+    // Fallback to today's date
+    stampDate = new Date().toLocaleDateString('en-US');
+}
+
+addStampWithDate(sellerSigX + 40, y + 5, stampDate);
     
     // Add stamp with date OVERLAY
     const stampDate = new Date().toLocaleDateString('en-US');
@@ -3327,43 +3394,43 @@ function generateAgreementPDF(data) {
         doc.text(text, x, y, { align: align });
     };
 
-    // Function to add stamp image with date OVERLAY
-    const addStampWithDate = (x, y, dateText) => {
-        try {
-            // Calculate position for 500x500 image to fit properly
-            const stampWidth = 30; // Reduced width for better scaling
-            const stampHeight = 30; // Maintain aspect ratio for 500x500
-            
-            // Add stamp image first
-            doc.addImage('STAMP.png', 'JPEG', x - (stampWidth/2), y, stampWidth, stampHeight);
-            
-            // Add date text OVER the stamp image (centered)
-            doc.setFontSize(14); // Larger but not too large
-            doc.setTextColor(255, 0, 0); // White text for contrast
-            doc.setFont("helvetica", "bold");
-            
-            // Calculate text position to be centered over the stamp
-            const textX = x;
-            const textY = y + (stampHeight/2) + 2; // Center vertically
-            
-            doc.text(dateText, textX, textY, null, null, "center");
-            
-            // Add company text below stamp
-            doc.setFontSize(10);
-            doc.setTextColor(primaryColor);
-            doc.text('For WanBite Investment Co. LTD', x, y + stampHeight + 8, null, null, "center");
-            
-        } catch (error) {
-            console.error("Error adding stamp:", error);
-            // Fallback to text only
-            doc.setFontSize(9);
-            doc.setTextColor(secondaryColor);
-            doc.text(dateText, x, y - 2, null, null, "center");
-            doc.setFontSize(10);
-            doc.setTextColor(primaryColor);
-            doc.text('For WanBite Investment Co. LTD', x, y + 5, null, null, "center");
-        }
-    };
+  // Function to add stamp image with date OVERLAY
+const addStampWithDate = (x, y, dateText) => {
+    try {
+        // Calculate position for 500x500 image to fit properly
+        const stampWidth = 30; // Reduced width for better scaling
+        const stampHeight = 30; // Maintain aspect ratio for 500x500
+        
+        // Add stamp image first
+        doc.addImage('STAMP.png', 'JPEG', x - (stampWidth/2), y, stampWidth, stampHeight);
+        
+        // Add date text OVER the stamp image (centered)
+        doc.setFontSize(14); // LARGER FONT SIZE AS REQUESTED
+        doc.setTextColor(255, 0, 0); // RED COLOR AS REQUESTED
+        doc.setFont("helvetica", "bold");
+        
+        // Calculate text position to be centered over the stamp
+        const textX = x;
+        const textY = y + (stampHeight/2) + 2; // Center vertically
+        
+        doc.text(dateText, textX, textY, null, null, "center");
+        
+        // Add company text below stamp
+        doc.setFontSize(10);
+        doc.setTextColor(primaryColor);
+        doc.text('For WanBite Investment Co. LTD', x, y + stampHeight + 8, null, null, "center");
+        
+    } catch (error) {
+        console.error("Error adding stamp:", error);
+        // Fallback to text only if image fails
+        doc.setFontSize(14); // Larger fallback
+        doc.setTextColor(255, 0, 0); // Red fallback
+        doc.text(dateText, x, y - 2, null, null, "center");
+        doc.setFontSize(10);
+        doc.setTextColor(primaryColor);
+        doc.text('For WanBite Investment Co. LTD', x, y + 5, null, null, "center");
+    }
+};
 
     // =================================================================
     // HEADER SECTION
@@ -3535,8 +3602,24 @@ function generateAgreementPDF(data) {
     
     drawText(`Witness: ${data.signatures.buyerWitness}`, margin, sigNameY + 3, 10, 'normal', 0);
 
-    // Seller with stamp
-    const sellerX = pageW - margin - 70;
+   // Seller with stamp
+const sellerX = pageW - margin - 70;
+
+// Use agreement creation date instead of current date
+let stampDate = data.agreementDate; // This should be stored when agreement was created
+
+// If agreementDate is in YYYY-MM-DD format, convert it
+if (stampDate && stampDate.includes('-')) {
+    try {
+        const [year, month, day] = stampDate.split('-');
+        const dateObj = new Date(year, month - 1, day);
+        stampDate = dateObj.toLocaleDateString('en-US');
+    } catch (e) {
+        // Keep original format
+    }
+}
+
+addStampWithDate(sellerX + 35, sigY - 5, stampDate);
     
     // Add stamp with date OVERLAY
     const stampDate = new Date().toLocaleDateString('en-US');
