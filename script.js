@@ -2861,8 +2861,8 @@ function generateReceiptPDF(data) {
         doc.addImage('STAMP.png', 'JPEG', sigX, y + 18, stampWidth, stampHeight);
         
         // Add date text OVER the stamp image (centered)
-        doc.setFontSize(12); // Larger but not too large
-        doc.setTextColor(255, 255, 255); // White text for contrast
+        doc.setFontSize(14); // Larger but not too large
+        doc.setTextColor(255, 0, 0); // White text for contrast
         doc.setFont("helvetica", "bold");
         
         // Calculate text position to be centered over the stamp
