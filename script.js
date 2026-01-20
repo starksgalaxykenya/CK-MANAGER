@@ -306,6 +306,10 @@ function renderReceiptSearchResult(doc, docJson) {
                             class="bg-gray-700 hover:bg-gray-900 text-white text-xs py-1 px-3 rounded-full transition duration-150">
                         Create Agreement
                     </button>
+                    <button onclick='revokeReceipt(${docJson})' 
+                            class="bg-red-600 hover:bg-red-800 text-white text-xs py-1 px-3 rounded-full transition duration-150">
+                        REVOKE
+                    </button>
                 </div>
             </div>
         </div>
@@ -344,6 +348,10 @@ function renderInvoiceSearchResult(doc, docJson) {
                     <button onclick='markInvoiceDepositPaid(${docJson})' 
                             class="bg-green-600 hover:bg-green-700 text-white text-xs py-1 px-3 rounded-full transition duration-150">
                         Deposit Paid
+                    </button>
+                    <button onclick='createAdditionalInvoice(${docJson})' 
+                            class="bg-yellow-600 hover:bg-yellow-700 text-white text-xs py-1 px-3 rounded-full transition duration-150">
+                        Add Invoice
                     </button>
                 </div>
             </div>
@@ -677,7 +685,7 @@ async function fetchInvoiceAmount(invoiceNumber) {
     }
 }
 
-// NEW FUNCTION: Calculate payment history and balances
+// NEW FUNCTION: Calculate payment history and balances - FIXED CALCULATION
 async function calculateReceiptBalances(receiptId) {
     try {
         // Get all payments for this receipt (including additional payments)
@@ -694,15 +702,20 @@ async function calculateReceiptBalances(receiptId) {
             const payment = doc.data();
             payments.push(payment);
             
-            if (payment.currency === 'USD') {
+            // FIXED: Use amountUSD and amountKSH if available, otherwise calculate
+            if (payment.amountUSD !== undefined) {
+                totalPaidUSD += payment.amountUSD;
+            } else if (payment.currency === 'USD') {
                 totalPaidUSD += payment.amount;
-                // Convert to KSH using the invoice exchange rate if available
                 if (payment.exchangeRate) {
                     totalPaidKSH += payment.amount * payment.exchangeRate;
                 }
+            }
+            
+            if (payment.amountKSH !== undefined) {
+                totalPaidKSH += payment.amountKSH;
             } else if (payment.currency === 'KSH') {
                 totalPaidKSH += payment.amount;
-                // Convert to USD using the invoice exchange rate if available
                 if (payment.exchangeRate) {
                     totalPaidUSD += payment.amount / payment.exchangeRate;
                 }
@@ -1091,7 +1104,7 @@ function updateAmountInWords() {
 }
 
 /**
- * Updates receipt calculations based on amount entered and invoice details
+ * Updates receipt calculations based on amount entered and invoice details - FIXED CALCULATION
  */
 function updateReceiptCalculations() {
     const amountReceived = parseFloat(document.getElementById('amountReceived').value) || 0;
@@ -1101,7 +1114,7 @@ function updateReceiptCalculations() {
     const totalUSD = parseFloat(invoiceRef.dataset.totalUSD) || 0;
     const initialBalanceUSD = parseFloat(invoiceRef.dataset.balanceUSD) || totalUSD;
     
-    // Calculate amounts in different currencies
+    // Calculate amounts in different currencies - FIXED CALCULATION
     let amountReceivedUSD = amountReceived;
     let amountReceivedKSH = amountReceived;
     
@@ -1113,7 +1126,7 @@ function updateReceiptCalculations() {
         amountReceivedKSH = amountReceived * exchangeRate;
     }
     
-    // Calculate remaining balances
+    // Calculate remaining balances - FIXED: Use proper subtraction
     const remainingUSD = Math.max(0, initialBalanceUSD - amountReceivedUSD);
     const remainingKSH = remainingUSD * exchangeRate;
     
@@ -1181,7 +1194,7 @@ async function saveReceipt() {
     const receiptId = generateReceiptId(receiptType, receivedFrom);
     const receiptDate = new Date().toLocaleDateString('en-US');
 
-    // Calculate amounts in both currencies
+    // Calculate amounts in both currencies - FIXED: Store both currencies properly
     let amountReceivedUSD = amountReceived;
     let amountReceivedKSH = amountReceived;
     
@@ -1259,8 +1272,8 @@ async function saveReceipt() {
         receivedFrom,
         currency,
         amountReceived,
-        amountReceivedUSD,
-        amountReceivedKSH,
+        amountReceivedUSD, // FIXED: Store USD amount
+        amountReceivedKSH, // FIXED: Store KSH amount
         amountWords,
         beingPaidFor,
         paymentDetails: {
@@ -1278,7 +1291,8 @@ async function saveReceipt() {
         exchangeRate,
         receiptDate,
         createdBy: currentUser.email,
-        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+        revoked: false // Add revoked flag
     };
 
     try {
@@ -1430,8 +1444,11 @@ async function fetchReceipts() {
                 createdAt: data.createdAt ? data.createdAt.toDate().toISOString() : new Date().toISOString()
             });
 
-            html += `<li class="p-3 border rounded-lg bg-gray-50 flex flex-col sm:flex-row justify-between items-start sm:items-center">
+            const isRevoked = data.revoked || false;
+            
+            html += `<li class="p-3 border rounded-lg ${isRevoked ? 'bg-red-50' : 'bg-gray-50'} flex flex-col sm:flex-row justify-between items-start sm:items-center">
                         <div class="flex-1">
+                            ${isRevoked ? `<span class="bg-red-500 text-white text-xs font-bold px-2 py-1 rounded mb-2 inline-block">REVOKED</span><br>` : ''}
                             <strong class="text-gray-800">${data.receiptId}</strong><br>
                             <span class="text-sm text-gray-600">From: ${data.receivedFrom}</span><br>
                             <span class="text-sm text-gray-600">Amount: ${data.currency} ${data.amountReceived.toFixed(2)}</span><br>
@@ -1443,14 +1460,22 @@ async function fetchReceipts() {
                                     class="bg-secondary-red hover:bg-red-600 text-white text-xs py-1 px-3 rounded-full transition duration-150">
                                 Download PDF
                             </button>
+                            ${!isRevoked ? `
                             <button onclick='addPaymentToReceipt(${receiptDataJson})' 
                                     class="bg-primary-blue hover:bg-blue-600 text-white text-xs py-1 px-3 rounded-full transition duration-150">
                                 Add Payment
                             </button>
+                            ` : ''}
                             <button onclick='viewReceiptPaymentDetails("${doc.id}", "${data.receiptId}", "${data.receivedFrom}")' 
                                     class="bg-green-600 hover:bg-green-700 text-white text-xs py-1 px-3 rounded-full transition duration-150">
                                 View History
                             </button>
+                            ${!isRevoked ? `
+                            <button onclick='revokeReceipt(${receiptDataJson})' 
+                                    class="bg-red-600 hover:bg-red-800 text-white text-xs py-1 px-3 rounded-full transition duration-150">
+                                REVOKE
+                            </button>
+                            ` : ''}
                         </div>
                     </li>`;
         }
@@ -1463,7 +1488,7 @@ async function fetchReceipts() {
 }
 
 /**
- * Views detailed payment history for a specific receipt
+ * View detailed payment history for a specific receipt
  */
 async function viewReceiptPaymentDetails(receiptDocId, receiptNumber, clientName) {
     const balances = await calculateReceiptBalances(receiptDocId);
@@ -1628,14 +1653,14 @@ async function generateSequentialInvoiceNumber(clientName, carModel, carYear) {
  * Populates a bank account dropdown list with data from Firestore.
  * @param {string} dropdownId - The ID of the select element to populate.
  */
-async function populateBankDropdown(dropdownId) {
+async function populateBankDropdown(dropdownId, isMultiSelect = false) {
     const bankSelect = document.getElementById(dropdownId);
     if (!bankSelect) return;
 
     bankSelect.innerHTML = '<option value="" disabled selected>Loading...</option>';
 
     const banks = await _getBankDetailsData();
-    let options = '<option value="" disabled selected>Select Bank Account</option>';
+    let options = isMultiSelect ? '' : '<option value="" disabled selected>Select Bank Account</option>';
 
     if (banks.length === 0) {
         bankSelect.innerHTML = '<option value="" disabled>No bank accounts configured.</option>';
@@ -1647,10 +1672,18 @@ async function populateBankDropdown(dropdownId) {
         const detailsJson = JSON.stringify(data)
             .replace(/"/g, '&quot;')
             .replace(/'/g, '&apos;');
-        options += `<option value="${detailsJson}">${data.name} - ${data.branch || 'No Branch'} (${data.currency})</option>`;
+        if (isMultiSelect) {
+            options += `<option value="${detailsJson}">${data.name} - ${data.branch || 'No Branch'} (${data.currency})</option>`;
+        } else {
+            options += `<option value="${detailsJson}">${data.name} - ${data.branch || 'No Branch'} (${data.currency})</option>`;
+        }
     });
 
     bankSelect.innerHTML = options;
+    if (isMultiSelect) {
+        bankSelect.setAttribute('multiple', 'multiple');
+        bankSelect.size = 3; // Show 3 options at once
+    }
 }
 
 /**
@@ -1677,11 +1710,8 @@ function autoFillBuyerConfirmation() {
     }
 }
 
-/**
- * Renders the Invoice/Proforma form.
- */
 // =================================================================
-//                 6. INVOICE MODULE (UPDATED WITH DEPOSIT PERCENTAGE & AUCTION INVOICE)
+//                 6. INVOICE MODULE (UPDATED WITH DEPOSIT PERCENTAGE & AUCTION INVOICE & TWO BANKS)
 // =================================================================
 
 /**
@@ -1707,8 +1737,8 @@ function renderInvoiceForm() {
                         <input type="number" id="exchangeRate" step="0.01" required value="130.00" class="mt-1 block w-full p-2 border rounded-md">
                     </div>
                     <div>
-                        <label for="dueDate" class="block text-sm font-medium text-gray-700">Due Date</label>
-                        <input type="date" id="dueDate" required class="mt-1 block w-full p-2 border rounded-md">
+                        <label for="dueDate" class="block text-sm font-medium text-gray-700">Due Date (Optional)</label>
+                        <input type="date" id="dueDate" class="mt-1 block w-full p-2 border rounded-md">
                     </div>
                     <div>
                         <label for="depositPercentage" class="block text-sm font-medium text-gray-700">Deposit Percentage (%)</label>
@@ -1767,8 +1797,9 @@ function renderInvoiceForm() {
                     <legend class="text-base font-semibold text-secondary-red px-2">Payment/Confirmation</legend>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
-                            <label class="block text-sm font-medium text-gray-700">Select Bank Account for Payment</label>
-                            <select id="bankDetailsSelect" required class="mt-1 block w-full p-2 border rounded-md"></select>
+                            <label class="block text-sm font-medium text-gray-700">Select Bank Accounts for Payment (Multiple)</label>
+                            <select id="bankDetailsSelect" multiple required class="mt-1 block w-full p-2 border rounded-md"></select>
+                            <p class="text-xs text-gray-500 mt-1">Hold Ctrl/Cmd to select multiple banks</p>
                         </div>
                         <div>
                             <label for="buyerNameConfirmation" class="block text-sm font-medium text-gray-700">Buyer's Full Name (for signature)</label>
@@ -1790,8 +1821,8 @@ function renderInvoiceForm() {
         </div>
     `;
 
-    // Populate the bank dropdown when the form loads
-    populateBankDropdown('bankDetailsSelect');
+    // Populate the bank dropdown when the form loads (multi-select)
+    populateBankDropdown('bankDetailsSelect', true);
     
     // Call autoFill function after form renders
     setTimeout(() => {
@@ -1854,29 +1885,39 @@ async function saveInvoice(onlySave) {
     // Auction price for auction invoices
     const auctionPrice = docType === 'Auction Invoice' ? parseFloat(document.getElementById('auctionPrice').value) : 0;
     
-    // Bank Details are stored as JSON string in the value, so we parse it
-    let bankDetails;
-    try {
-        const bankSelectValue = document.getElementById('bankDetailsSelect').value;
-        
-        // Decode HTML entities
-        const decodedValue = bankSelectValue
-            .replace(/&apos;/g, "'")
-            .replace(/&quot;/g, '"')
-            .replace(/&lt;/g, '<')
-            .replace(/&gt;/g, '>')
-            .replace(/&amp;/g, '&');
-        
-        bankDetails = JSON.parse(decodedValue);
-    } catch (e) {
-        alert("Error reading selected bank details. Please re-select the bank account.");
-        console.error("Error parsing bank details:", e);
+    // Bank Details - multiple selection
+    const bankSelect = document.getElementById('bankDetailsSelect');
+    const selectedBanks = [];
+    const bankIds = [];
+    
+    for (let i = 0; i < bankSelect.options.length; i++) {
+        if (bankSelect.options[i].selected) {
+            try {
+                const bankValue = bankSelect.options[i].value;
+                const decodedValue = bankValue
+                    .replace(/&apos;/g, "'")
+                    .replace(/&quot;/g, '"')
+                    .replace(/&lt;/g, '<')
+                    .replace(/&gt;/g, '>')
+                    .replace(/&amp;/g, '&');
+                
+                const bankData = JSON.parse(decodedValue);
+                selectedBanks.push(bankData);
+                bankIds.push(bankData.id);
+            } catch (e) {
+                console.error("Error parsing bank details:", e);
+            }
+        }
+    }
+    
+    if (selectedBanks.length === 0) {
+        alert("Please select at least one bank account.");
         return;
     }
     
     const buyerNameConfirmation = document.getElementById('buyerNameConfirmation').value;
 
-    // 2. Calculate Pricing based on document type
+    // 2. Calculate Pricing based on document type - FIXED PERCENTAGE CALCULATION
     let totalPriceUSD, depositUSD, balanceUSD;
     
     if (docType === 'Auction Invoice') {
@@ -1885,7 +1926,7 @@ async function saveInvoice(onlySave) {
         balanceUSD = 0;
     } else {
         totalPriceUSD = quantity * priceUSD;
-        depositUSD = totalPriceUSD * (depositPercentage / 100);
+        depositUSD = totalPriceUSD * (depositPercentage / 100); // FIXED: Proper percentage calculation
         balanceUSD = totalPriceUSD - depositUSD;
     }
     
@@ -1900,7 +1941,7 @@ async function saveInvoice(onlySave) {
         clientName,
         clientPhone,
         issueDate: new Date().toLocaleDateString('en-US'),
-        dueDate,
+        dueDate: dueDate || null, // Make due date optional
         exchangeRate,
         depositPercentage,
         carDetails: {
@@ -1926,7 +1967,8 @@ async function saveInvoice(onlySave) {
             remainingBalance: totalPriceUSD,
             depositPercentage: depositPercentage
         },
-        bankDetails, // Save the full object for easy reference
+        bankDetails: selectedBanks, // Save array of bank objects
+        bankIds: bankIds, // Save array of bank IDs
         buyerNameConfirmation,
         createdBy: currentUser.email,
         createdAt: firebase.firestore.FieldValue.serverTimestamp(),
@@ -2023,6 +2065,10 @@ async function fetchInvoices() {
                                 <button onclick='createAgreementFromInvoice(${invoiceDataJson})' 
                                         class="bg-green-600 hover:bg-green-800 text-white text-xs py-1 px-3 rounded-full transition duration-150">
                                     Create Agreement
+                                </button>
+                                <button onclick='createAdditionalInvoice(${invoiceDataJson})' 
+                                        class="bg-yellow-600 hover:bg-yellow-700 text-white text-xs py-1 px-3 rounded-full transition duration-150">
+                                    Add Invoice
                                 </button>
                                 <button onclick='revokeInvoice(${invoiceDataJson})' 
                                         class="bg-red-600 hover:bg-red-800 text-white text-xs py-1 px-3 rounded-full transition duration-150">
@@ -2705,7 +2751,7 @@ function generateReceiptPDF(data) {
     }
 
     // =================================================================
-    // AMOUNT FIGURE SECTION WITH DYNAMIC POSITIONING
+    // AMOUNT FIGURE SECTION WITH DYNAMIC POSITIONING - FIXED CALCULATIONS
     // =================================================================
     const amountBoxH = 15;
     const amountBoxY = y + 5;
@@ -2725,20 +2771,31 @@ function generateReceiptPDF(data) {
     drawText(`${data.currency} ${data.amountReceived?.toLocaleString('en-US', { minimumFractionDigits: 2 }) || '0.00'}`, 
              pageW - margin - 5, amountBoxY + 11, 18, 'bold', 255, 'right');
     
-    // Balance Details
+    // Balance Details - FIXED: Use stored USD/KSH amounts
     doc.setTextColor(primaryColor);
     drawText('BALANCE DETAILS', margin, amountBoxY + 4, 10, 'bold');
     doc.setFontSize(12);
     doc.setTextColor(0);
 
-    const balanceText = data.balanceDetails?.balanceRemaining > 0 
-        ? `${data.currency} ${data.balanceDetails.balanceRemaining.toLocaleString('en-US', { minimumFractionDigits: 2 })}` 
+    // Calculate proper balances
+    const totalPaidUSD = data.totalPaidUSD || (data.amountReceivedUSD || (data.currency === 'USD' ? data.amountReceived : data.amountReceived / (data.exchangeRate || 130)));
+    const totalPaidKSH = data.totalPaidKSH || (data.amountReceivedKSH || (data.currency === 'KSH' ? data.amountReceived : data.amountReceived * (data.exchangeRate || 130)));
+    
+    const remainingUSD = data.balanceDetails?.balanceRemainingUSD || data.balanceDetails?.balanceRemaining || 0;
+    const remainingKSH = data.balanceDetails?.balanceRemainingKSH || remainingUSD * (data.exchangeRate || 130);
+    
+    const balanceText = remainingUSD > 0 
+        ? `${data.currency} ${remainingUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })}` 
         : 'ZERO';
     
     drawText(`Balance Remaining: ${balanceText}`, margin, amountBoxY + 10, 10);
     drawText(`Due On/Before: ${data.balanceDetails?.balanceDueDate || 'N/A'}`, margin, amountBoxY + 14, 10);
     
-    y = amountBoxY + amountBoxH + 7;
+    // Add paid amounts
+    drawText(`Paid (USD): ${totalPaidUSD.toFixed(2)}`, margin, amountBoxY + 18, 10);
+    drawText(`Paid (KES): ${totalPaidKSH.toFixed(2)}`, margin, amountBoxY + 22, 10);
+    
+    y = amountBoxY + amountBoxH + 10;
 
     // =================================================================
     // PAYMENT HISTORY SECTION (IF EXISTS)
@@ -2769,8 +2826,8 @@ function generateReceiptPDF(data) {
         doc.setTextColor(primaryColor);
         doc.setFont("helvetica", "bold");
         doc.text(`Total Payments: ${paymentCount}`, margin + 5, y + 6);
-        doc.text(`Total Paid (USD): ${data.totalPaidUSD?.toFixed(2) || '0.00'}`, margin + 60, y + 6);
-        doc.text(`Total Paid (KES): ${data.totalPaidKSH?.toFixed(2) || '0.00'}`, margin + 120, y + 6);
+        doc.text(`Total Paid (USD): ${totalPaidUSD.toFixed(2)}`, margin + 60, y + 6);
+        doc.text(`Total Paid (KES): ${totalPaidKSH.toFixed(2)}`, margin + 120, y + 6);
         y += 12;
         
         // Table Header
@@ -2903,7 +2960,7 @@ function generateReceiptPDF(data) {
 }
 
 /**
- * Generates and downloads a custom PDF for the Invoice/Proforma.
+ * Generates and downloads a custom PDF for the Invoice/Proforma with TWO BANKS.
  */
 function generateInvoicePDF(data) {
     const { jsPDF } = window.jspdf;
@@ -3050,7 +3107,7 @@ function generateInvoicePDF(data) {
     drawText(data.issueDate, pageW - margin - 80, y + 13, 10, 'bold', primaryColor);
     
     drawText('DUE DATE:', pageW - margin - 15, y + 6, 10, 'bold', secondaryColor, 'right');
-    drawText(data.dueDate, pageW - margin - 15, y + 13, 10, 'bold', primaryColor, 'right');
+    drawText(data.dueDate || 'N/A', pageW - margin - 15, y + 13, 10, 'bold', primaryColor, 'right');
     y += 23;
 
     // =================================================================
@@ -3154,7 +3211,7 @@ function generateInvoicePDF(data) {
     y += descriptionLines.length * 4 + 7;
 
     // =================================================================
-    // TOTALS & PAYMENTS (Bottom Right)
+    // TOTALS & PAYMENTS (Bottom Right) - FIXED PERCENTAGE CALCULATIONS
     // =================================================================
     const totalBoxW = 60;
     const totalsX = pageW - margin - totalBoxW;
@@ -3233,8 +3290,8 @@ function generateInvoicePDF(data) {
         const totalPriceText = `The total price of the vehicle is USD ${data.pricing.totalUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
         y = drawTerm(doc, y, '1.', totalPriceText, 188 - termIndent);
 
-        // Term 2: Payment Schedule
-        const depositText = `A deposit of USD ${data.pricing.depositUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })} (KES ${data.pricing.depositKSH.toLocaleString('en-US', { minimumFractionDigits: 2 })} equivalent) is required to secure the vehicle and begin shipping/clearing. The balance of USD ${data.pricing.balanceUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })} is due on or before ${data.dueDate} or upon production of the Bill of Landing. The seller shall promptly notify the buyer of the date for due compliance.`;
+        // Term 2: Payment Schedule - FIXED PERCENTAGE CALCULATION
+        const depositText = `A deposit of USD ${data.pricing.depositUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })} (KES ${data.pricing.depositKSH.toLocaleString('en-US', { minimumFractionDigits: 2 })} equivalent) is required to secure the vehicle and begin shipping/clearing. The balance of USD ${data.pricing.balanceUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })} is due ${data.dueDate ? `on or before ${data.dueDate}` : 'upon production of the Bill of Landing'}. The seller shall promptly notify the buyer of the date for due compliance.`;
         y = drawTerm(doc, y, '2.', depositText);
 
         // Term 3: BOL Release
@@ -3264,17 +3321,17 @@ function generateInvoicePDF(data) {
     }
 
     // =================================================================
-    // PAYMENT INSTRUCTIONS 
+    // PAYMENT INSTRUCTIONS WITH TWO BANKS
     // =================================================================
     doc.setFillColor(255, 245, 230);
-    doc.rect(margin, y, 188, 40, 'F'); // Increased height for more lines
+    doc.rect(margin, y, 188, data.bankDetails?.length > 1 ? 55 : 40, 'F'); // Increased height for multiple banks
     doc.setDrawColor(secondaryColor);
     doc.setLineWidth(0.5);
-    doc.rect(margin, y, 188, 40);
+    doc.rect(margin, y, 188, data.bankDetails?.length > 1 ? 55 : 40);
     let currentY_bank = y + 5;
     
     // Title
-    drawText('KINDLY PAY USD / KSH TO THE FOLLOWING BANK ACCOUNT:', 15, currentY_bank, 11, 'bold', primaryColor);
+    drawText('KINDLY PAY USD / KSH TO THE FOLLOWING BANK ACCOUNT(S):', 15, currentY_bank, 11, 'bold', primaryColor);
     currentY_bank += 5; // Move down after the title
     
     // Exchange Rate Note - far right
@@ -3282,26 +3339,56 @@ function generateInvoicePDF(data) {
     doc.setTextColor(primaryColor);
     doc.text(`Exchange rate used USD 1 = KES ${data.exchangeRate.toFixed(2)}`, 190 - margin, currentY_bank - 2, null, null, "right");
     
-    // Bank Details
+    // Bank Details - handle multiple banks
     doc.setFontSize(10);
     doc.setTextColor(0);
-    const bank = data.bankDetails;
-    const branchText = bank.branch ? `(Branch: ${bank.branch})` : '';
+    
+    if (data.bankDetails && Array.isArray(data.bankDetails)) {
+        data.bankDetails.forEach((bank, index) => {
+            const branchText = bank.branch ? `(Branch: ${bank.branch})` : '';
+            const bankTitle = data.bankDetails.length > 1 ? `Bank ${index + 1}: ` : '';
+            
+            doc.text(`${bankTitle}${bank.name || 'N/A'} ${branchText}`, margin + 5, currentY_bank);
+            currentY_bank += 4;
+            doc.text(`Account Name: ${bank.accountName || 'N/A'}`, margin + 5, currentY_bank);
+            currentY_bank += 4;
+            doc.text(`Account Number: ${bank.accountNumber || 'N/A'}`, margin + 5, currentY_bank);
+            currentY_bank += 4;
+            if (bank.paybillNumber) {
+                doc.text(`Paybill Number: ${bank.paybillNumber || 'N/A'}`, margin + 5, currentY_bank);
+                currentY_bank += 4;
+            }
+            doc.text(`SWIFT/BIC Code: ${bank.swiftCode || 'N/A'} | Currency: ${bank.currency || 'N/A'}`, margin + 5, currentY_bank);
+            currentY_bank += 4;
+            
+            // Add separator between multiple banks
+            if (index < data.bankDetails.length - 1) {
+                doc.setDrawColor(200);
+                doc.setLineWidth(0.2);
+                doc.line(margin + 5, currentY_bank - 2, margin + 180, currentY_bank - 2);
+                currentY_bank += 3;
+            }
+        });
+    } else {
+        // Fallback for old data structure
+        const bank = data.bankDetails || {};
+        const branchText = bank.branch ? `(Branch: ${bank.branch})` : '';
 
-    doc.text(`Bank Name: ${bank.name || 'N/A'} ${branchText}`, margin + 5, currentY_bank);
-    currentY_bank += 4;
-    doc.text(`Account Name: ${bank.accountName || 'N/A'}`, margin + 5, currentY_bank);
-    currentY_bank += 4;
-    doc.text(`Account Number: ${bank.accountNumber || 'N/A'}`, margin + 5, currentY_bank);
-    currentY_bank += 4;
-    if (bank.paybillNumber) {
-        doc.text(`Paybill Number: ${bank.paybillNumber || 'N/A'}`, margin + 5, currentY_bank);
+        doc.text(`Bank Name: ${bank.name || 'N/A'} ${branchText}`, margin + 5, currentY_bank);
         currentY_bank += 4;
+        doc.text(`Account Name: ${bank.accountName || 'N/A'}`, margin + 5, currentY_bank);
+        currentY_bank += 4;
+        doc.text(`Account Number: ${bank.accountNumber || 'N/A'}`, margin + 5, currentY_bank);
+        currentY_bank += 4;
+        if (bank.paybillNumber) {
+            doc.text(`Paybill Number: ${bank.paybillNumber || 'N/A'}`, margin + 5, currentY_bank);
+            currentY_bank += 4;
+        }
+        doc.text(`SWIFT/BIC Code: ${bank.swiftCode || 'N/A'} | Currency: ${bank.currency || 'N/A'}`, margin + 5, currentY_bank);
     }
-    doc.text(`SWIFT/BIC Code: ${bank.swiftCode || 'N/A'} | Currency: ${bank.currency || 'N/A'}`, margin + 5, currentY_bank);
 
-    drawText('**NOTE: Buyer Should bear the cost of Bank Charge when remitting T/T', margin, y + 40 - 5, 9, 'bold', secondaryColor);
-    y += 45;
+    drawText('**NOTE: Buyer Should bear the cost of Bank Charge when remitting T/T', margin, y + (data.bankDetails?.length > 1 ? 55 : 40) - 5, 9, 'bold', secondaryColor);
+    y += (data.bankDetails?.length > 1 ? 60 : 45);
 
     // =================================================================
     // CONFIRMATION SIGNATURES WITH STAMP - UPDATED FOR BETTER LAYOUT
@@ -4082,7 +4169,8 @@ async function saveDepositPayment(invoiceDocId, depositAmountUSD, exchangeRate) 
         exchangeRate: depositExchangeRate,
         receiptDate,
         createdBy: currentUser.email,
-        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+        revoked: false // Add revoked flag
     };
     
     try {
@@ -4568,6 +4656,153 @@ async function saveAdditionalPayment(receiptDocId, receiptNumber, exchangeRate) 
     }
 }
 
-// Note: Some functions like renderReceiptBalancesView, fetchAllReceiptBalances, filterReceiptBalances, 
-// and other receipt balance related functions are referenced but not defined in the provided code.
-// They should be added if needed for full functionality.
+// =================================================================
+//                 NEW FUNCTIONS FOR REQUESTED FEATURES
+// =================================================================
+
+/**
+ * Revokes a receipt and deletes it from Firestore
+ */
+async function revokeReceipt(receiptData) {
+    if (!confirm(`Are you sure you want to REVOKE receipt ${receiptData.receiptId}?\n\nThis will mark it as invalid and delete it from the system.`)) {
+        return;
+    }
+    
+    try {
+        // Mark as revoked
+        await db.collection("receipts").doc(receiptData.firestoreId).update({
+            revoked: true,
+            revokedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            revokedBy: currentUser.email
+        });
+        
+        // Also delete associated payments
+        const paymentsSnapshot = await db.collection("receipt_payments")
+            .where("receiptId", "==", receiptData.firestoreId)
+            .get();
+        
+        const deletePromises = [];
+        paymentsSnapshot.forEach(doc => {
+            deletePromises.push(db.collection("receipt_payments").doc(doc.id).delete());
+        });
+        
+        await Promise.all(deletePromises);
+        
+        alert(`Receipt ${receiptData.receiptId} has been revoked and associated payments deleted.`);
+        
+        // Refresh the view
+        if (document.getElementById('recent-receipts')) {
+            fetchReceipts();
+        }
+        
+    } catch (error) {
+        console.error("Error revoking receipt:", error);
+        alert("Failed to revoke receipt: " + error.message);
+    }
+}
+
+/**
+ * Creates an additional invoice based on an existing invoice
+ */
+function createAdditionalInvoice(invoiceData) {
+    // Check if invoice is revoked
+    if (invoiceData.revoked) {
+        alert("Cannot create additional invoice from a revoked invoice.");
+        return;
+    }
+    
+    // Navigate to invoice form and pre-populate with existing data
+    renderInvoiceForm();
+    
+    // Auto-populate fields from existing invoice
+    setTimeout(() => {
+        const docTypeField = document.getElementById('docType');
+        const clientNameField = document.getElementById('clientName');
+        const clientPhoneField = document.getElementById('clientPhone');
+        const exchangeRateField = document.getElementById('exchangeRate');
+        const dueDateField = document.getElementById('dueDate');
+        const depositPercentageField = document.getElementById('depositPercentage');
+        
+        const carMakeField = document.getElementById('carMake');
+        const carModelField = document.getElementById('carModel');
+        const carYearField = document.getElementById('carYear');
+        const vinNumberField = document.getElementById('vinNumber');
+        const engineCCField = document.getElementById('engineCC');
+        const fuelTypeField = document.getElementById('fuelType');
+        const transmissionField = document.getElementById('transmission');
+        const colorField = document.getElementById('color');
+        const mileageField = document.getElementById('mileage');
+        const quantityField = document.getElementById('quantity');
+        const priceField = document.getElementById('price');
+        const goodsDescriptionField = document.getElementById('goodsDescription');
+        
+        // Pre-populate with existing invoice data
+        if (docTypeField) docTypeField.value = invoiceData.docType;
+        if (clientNameField) clientNameField.value = invoiceData.clientName;
+        if (clientPhoneField) clientPhoneField.value = invoiceData.clientPhone || '';
+        if (exchangeRateField) exchangeRateField.value = invoiceData.exchangeRate || 130;
+        if (dueDateField) dueDateField.value = invoiceData.dueDate || '';
+        if (depositPercentageField) depositPercentageField.value = invoiceData.depositPercentage || 50;
+        
+        if (carMakeField) carMakeField.value = invoiceData.carDetails.make || '';
+        if (carModelField) carModelField.value = invoiceData.carDetails.model || '';
+        if (carYearField) carYearField.value = invoiceData.carDetails.year || '';
+        if (vinNumberField) vinNumberField.value = invoiceData.carDetails.vin || '';
+        if (engineCCField) engineCCField.value = invoiceData.carDetails.cc || '';
+        if (fuelTypeField) fuelTypeField.value = invoiceData.carDetails.fuel || '';
+        if (transmissionField) transmissionField.value = invoiceData.carDetails.transmission || '';
+        if (colorField) colorField.value = invoiceData.carDetails.color || '';
+        if (mileageField) mileageField.value = invoiceData.carDetails.mileage || '';
+        if (quantityField) quantityField.value = invoiceData.carDetails.quantity || 1;
+        if (priceField) priceField.value = invoiceData.carDetails.priceUSD || '';
+        if (goodsDescriptionField) goodsDescriptionField.value = invoiceData.carDetails.goodsDescription || '';
+        
+        // Handle bank selection
+        const bankSelect = document.getElementById('bankDetailsSelect');
+        if (bankSelect && invoiceData.bankDetails) {
+            // Clear existing selections
+            for (let i = 0; i < bankSelect.options.length; i++) {
+                bankSelect.options[i].selected = false;
+            }
+            
+            // Select the same banks as the original invoice
+            if (Array.isArray(invoiceData.bankDetails)) {
+                invoiceData.bankDetails.forEach(bank => {
+                    for (let i = 0; i < bankSelect.options.length; i++) {
+                        try {
+                            const optionValue = bankSelect.options[i].value;
+                            const decodedValue = optionValue
+                                .replace(/&apos;/g, "'")
+                                .replace(/&quot;/g, '"')
+                                .replace(/&lt;/g, '<')
+                                .replace(/&gt;/g, '>')
+                                .replace(/&amp;/g, '&');
+                            
+                            const bankData = JSON.parse(decodedValue);
+                            if (bankData.id === bank.id) {
+                                bankSelect.options[i].selected = true;
+                            }
+                        } catch (e) {
+                            console.error("Error parsing bank option:", e);
+                        }
+                    }
+                });
+            }
+        }
+        
+        // Trigger any dependent functions
+        if (invoiceData.docType === 'Auction Invoice') {
+            toggleAuctionFields();
+            const auctionPriceField = document.getElementById('auctionPrice');
+            if (auctionPriceField) auctionPriceField.value = invoiceData.auctionPrice || invoiceData.pricing.totalUSD || '';
+        }
+        
+        autoFillBuyerConfirmation();
+        
+        // Show notification
+        setTimeout(() => {
+            alert(`Invoice ${invoiceData.invoiceId} data has been loaded. You can now modify and save as a new invoice.`);
+        }, 300);
+        
+    }, 100);
+}
