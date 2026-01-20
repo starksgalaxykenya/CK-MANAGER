@@ -3213,10 +3213,10 @@ function generateInvoicePDF(data) {
         y = drawTerm(doc, y, '2.', term2);
 
         // Term 3: Balance Payment
-        y = drawTerm(doc, y, '3.', 'The remaining balance must be paid within 10 days of the bill of lading issuance date.');
+        y = drawTerm(doc, y, '3.', 'The remaining balance must be paid within 10 days of the bill of landing issuance date.');
 
         // Term 4: BOL Release
-        y = drawTerm(doc, y, '4.', 'The original Bill of Lading will be sent to the Buyer within 20 business days after full payment is received.');
+        y = drawTerm(doc, y, '4.', 'The original Bill of Landing will be sent to the Buyer within 20 business days after full payment is received.');
 
         // Term 5: As Is Condition
         y = drawTerm(doc, y, '5.', 'All vehicles are sold on an "AS IS" basis, with no warranties, expressed or implied. Shipment booking will be arranged once the AGREED PAYMENT amount is paid by the Buyer.');
@@ -3234,11 +3234,11 @@ function generateInvoicePDF(data) {
         y = drawTerm(doc, y, '1.', totalPriceText, 188 - termIndent);
 
         // Term 2: Payment Schedule
-        const depositText = `A deposit of USD ${data.pricing.depositUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })} (KES ${data.pricing.depositKSH.toLocaleString('en-US', { minimumFractionDigits: 2 })} equivalent) is required to secure the vehicle and begin shipping/clearing. The balance of USD ${data.pricing.balanceUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })} is due on or before ${data.dueDate} or upon production of the Bill of Lading. The seller shall promptly notify the buyer of the date for due compliance.`;
+        const depositText = `A deposit of USD ${data.pricing.depositUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })} (KES ${data.pricing.depositKSH.toLocaleString('en-US', { minimumFractionDigits: 2 })} equivalent) is required to secure the vehicle and begin shipping/clearing. The balance of USD ${data.pricing.balanceUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })} is due on or before ${data.dueDate} or upon production of the Bill of Landing. The seller shall promptly notify the buyer of the date for due compliance.`;
         y = drawTerm(doc, y, '2.', depositText);
 
         // Term 3: BOL Release
-        y = drawTerm(doc, y, '3.', 'The original Bill of Lading will be issued to the buyer upon confirmation of full receipt of the purchase price.');
+        y = drawTerm(doc, y, '3.', 'The original Bill of Landing will be issued to the buyer upon confirmation of full receipt of the purchase price.');
 
         // Term 4: Cancellation/Forfeiture
         y = drawTerm(doc, y, '4.', 'If you cancel to buy before or after shipment after purchase is confirmed, your deposit is to be forfeited.');
