@@ -19,6 +19,14 @@ const app = firebase.initializeApp(firebaseConfig);
 const auth = app.auth();
 const db = app.firestore();
 
+/**
+ * Helper function to remove decimals and return whole numbers
+ */
+function toWholeNumber(num) {
+    if (typeof num !== 'number' || isNaN(num)) return 0;
+    return Math.round(num);
+}
+
 // Global Elements & State
 const appContent = document.getElementById('app-content');
 const authStatus = document.getElementById('auth-status');
@@ -286,7 +294,7 @@ function renderReceiptSearchResult(doc, docJson) {
                     <h4 class="font-bold text-gray-800">${doc.receiptId}</h4>
                     <p class="text-sm text-gray-700 mt-1"><strong>From:</strong> ${doc.receivedFrom}</p>
                     <p class="text-sm text-gray-600"><strong>For:</strong> ${doc.beingPaidFor || 'N/A'}</p>
-                    <p class="text-sm text-gray-600"><strong>Amount:</strong> ${doc.currency} ${doc.amountReceived?.toFixed(2) || '0.00'}</p>
+                   <p class="text-sm text-gray-600"><strong>Amount:</strong> ${doc.currency} ${toWholeNumber(doc.amountReceived || 0)}</p>
                     ${doc.invoiceReference ? `<p class="text-sm text-gray-600"><strong>Invoice Ref:</strong> ${doc.invoiceReference}</p>` : ''}
                 </div>
                 <div class="flex flex-col gap-2 ml-4">
@@ -630,10 +638,10 @@ function handleDocumentGenerator() {
  */
 function numberToWords(n) {
     if (typeof n !== 'number' || isNaN(n)) return '';
-
-    const whole = Math.floor(n);
-    const decimal = Math.round((n - whole) * 100);
-
+    
+    // Convert to whole number
+    const whole = Math.round(n);
+    
     const a = ['', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen'];
     const b = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
     
@@ -647,14 +655,8 @@ function numberToWords(n) {
     };
 
     let result = numToWords(whole).replace(/\s\s+/g, ' ').trim();
-
-    if (decimal > 0) {
-        result += ` and ${numToWords(decimal)} cents`;
-    }
-
-    return result.charAt(0).toUpperCase() + result.slice(1) + ' only.';
+    return result.charAt(0).toUpperCase() + result + ' only.';
 }
-
 // NEW FUNCTION: Fetch invoice amount based on invoice number
 async function fetchInvoiceAmount(invoiceNumber) {
     try {
@@ -810,7 +812,7 @@ function renderReceiptForm(invoiceReference = '') {
                                 <option value="KSH">KSH</option>
                                 <option value="USD">USD</option>
                             </select>
-                            <input type="number" id="amountReceived" step="0.01" required placeholder="Amount Figure" class="p-2 border rounded-md col-span-2" oninput="updateAmountInWords(); checkForManualTotal();">
+                           <input type="number" id="amountReceived" required placeholder="Amount Figure" class="p-2 border rounded-md col-span-2" oninput="updateAmountInWords(); checkForManualTotal();">
                         </div>
                         <div class="mt-2">
                             <label for="amountWords" class="block text-sm font-medium text-gray-700">Amount in Words:</label>
@@ -1131,7 +1133,7 @@ function updateReceiptCalculations() {
     const remainingKSH = remainingUSD * exchangeRate;
     
     // Update display fields
-    document.getElementById('balanceRemaining').value = remainingUSD.toFixed(2);
+    document.getElementById('balanceRemaining').value = toWholeNumber(remainingUSD);
     
     const balanceKES = document.getElementById('calculated-balance-kes');
     const balanceUSD = document.getElementById('calculated-balance-usd');
@@ -1149,13 +1151,60 @@ function updateReceiptCalculations() {
 }
 
 /**
- * Generates a custom receipt ID based on date, type, and name.
+ * Generates a custom receipt ID based on new format:
+ * If from invoice: RCT-[YYMMDD]-[serial]-[client]-[car]-[YY]-[order]
+ * If no invoice: RNI-[YYMMDD]-[serial]-[client]-[type]-[counter]
  */
-function generateReceiptId(type, name) {
-    const datePart = new Date().toISOString().slice(0, 10).replace(/-/g, ''); // YYYYMMDD
-    const typePart = type.split(' ')[0].toUpperCase().substring(0, 3);
+async function generateReceiptId(type, name, invoiceReference = '') {
+    const now = new Date();
+    const year = now.getFullYear().toString().slice(-2); // YY
+    const month = (now.getMonth() + 1).toString().padStart(2, '0');
+    const day = now.getDate().toString().padStart(2, '0');
+    const datePart = `${year}${month}${day}`;
+    
+    const serialPart = "01"; // Fixed serial as per requirement
     const namePart = name.split(' ')[0].toUpperCase().substring(0, 3);
-    return `RCPT-${datePart}-${typePart}-${namePart}`;
+    const typePart = type.split(' ')[0].toUpperCase().substring(0, 3);
+    
+    // If receipt is created from an invoice
+    if (invoiceReference) {
+        // Parse invoice reference to extract parts
+        const invParts = invoiceReference.split('-');
+        if (invParts.length >= 7) {
+            // Extract client, car, year, and order from invoice reference
+            const clientPart = invParts[3]; // Already 3 letters
+            const carPart = invParts[4];    // Already 3 letters
+            const yearPart = invParts[5];   // Already YY
+            const orderPart = invParts[6];  // Order number
+            
+            // Count existing receipts from this invoice
+            const receiptsSnapshot = await db.collection("receipts")
+                .where("invoiceReference", "==", invoiceReference)
+                .get();
+            
+            // For subsequent receipts from same invoice, increment counter
+            const receiptCount = receiptsSnapshot.size + 1;
+            
+            return `RCT-${datePart}-${serialPart}-${clientPart}-${carPart}-${yearPart}-${receiptCount}`;
+        }
+    }
+    
+    // For receipts without invoice reference
+    // Count receipts without invoice for this client on same day
+    const today = new Date();
+    const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const endOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
+    
+    const snapshot = await db.collection("receipts")
+        .where("receivedFrom", "==", name)
+        .where("invoiceReference", "==", "")
+        .where("createdAt", ">=", firebase.firestore.Timestamp.fromDate(startOfDay))
+        .where("createdAt", "<", firebase.firestore.Timestamp.fromDate(endOfDay))
+        .get();
+    
+    const counter = snapshot.size + 1;
+    
+    return `RNI-${datePart}-${serialPart}-${namePart}-${typePart}-${counter}`;
 }
 
 /**
@@ -1191,7 +1240,7 @@ async function saveReceipt() {
         return;
     }
 
-    const receiptId = generateReceiptId(receiptType, receivedFrom);
+    const receiptId = await generateReceiptId(receiptType, receivedFrom, invoiceReference);
     const receiptDate = new Date().toLocaleDateString('en-US');
 
     // Calculate amounts in both currencies - FIXED: Store both currencies properly
@@ -1623,30 +1672,74 @@ async function _getBankDetailsData() {
 }
 
 /**
- * Generates a sequential invoice number that resets on the 1st of each month
+ * Generates an invoice number with the new format:
+ * [3-letter doc type]-[YYMMDD]-[2-digit serial]-[3-letter client]-[3-letter car]-[YY]-[order]
  */
-async function generateSequentialInvoiceNumber(clientName, carModel, carYear) {
+async function generateSequentialInvoiceNumber(clientName, carModel, carYear, docType, isAdditional = false, baseInvoiceRef = '') {
     const now = new Date();
-    const year = now.getFullYear();
+    const year = now.getFullYear().toString().slice(-2); // YY
     const month = (now.getMonth() + 1).toString().padStart(2, '0');
+    const day = now.getDate().toString().padStart(2, '0');
+    const datePart = `${year}${month}${day}`; // YYMMDD
     
-    // Get the first day of current month
-    const firstDayOfMonth = new Date(year, now.getMonth(), 1);
+    // Get document type prefix (first 3 letters)
+    let typePrefix;
+    switch(docType) {
+        case 'Invoice':
+            typePrefix = 'INV';
+            break;
+        case 'Proforma Invoice':
+            typePrefix = 'PRO';
+            break;
+        case 'Auction Invoice':
+            typePrefix = 'AUX';
+            break;
+        default:
+            typePrefix = docType.substring(0, 3).toUpperCase();
+    }
     
-    // Query invoices from this month
-    const monthStart = firebase.firestore.Timestamp.fromDate(firstDayOfMonth);
-    const snapshot = await db.collection("invoices")
-        .where("createdAt", ">=", monthStart)
-        .get();
+    // Get client initials (first 3 letters)
+    const clientPart = clientName.split(' ')[0].toUpperCase().substring(0, 3);
     
-    // Calculate next sequential number
-    const nextNumber = (snapshot.size + 1).toString().padStart(4, '0');
+    // Get car model initials (first 3 letters)
+    const carPart = carModel.toUpperCase().substring(0, 3);
     
-    // Get name and model parts for reference
-    const namePart = clientName.split(' ')[0].toUpperCase().substring(0, 3);
-    const modelPart = carModel.toUpperCase().substring(0, 3);
+    // Get car year (YY format)
+    const carYearPart = carYear.toString().slice(-2);
     
-    return `${year}${month}-${nextNumber}-${namePart}-${modelPart}-${carYear}`;
+    // If this is an additional invoice, extract order from base invoice
+    let orderPart = '1'; // Default to 1 for first invoice
+    
+    if (isAdditional && baseInvoiceRef) {
+        // Extract order number from existing invoice reference
+        const parts = baseInvoiceRef.split('-');
+        if (parts.length >= 7) {
+            const lastPart = parts[6];
+            orderPart = (parseInt(lastPart) + 1).toString();
+        }
+    } else {
+        // For new invoices, check for existing invoices for same client/car on same day
+        const today = new Date();
+        const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+        const endOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
+        
+        const snapshot = await db.collection("invoices")
+            .where("clientName", "==", clientName)
+            .where("carDetails.model", "==", carModel)
+            .where("carDetails.year", "==", carYear)
+            .where("createdAt", ">=", firebase.firestore.Timestamp.fromDate(startOfDay))
+            .where("createdAt", "<", firebase.firestore.Timestamp.fromDate(endOfDay))
+            .get();
+        
+        if (!snapshot.empty) {
+            orderPart = (snapshot.size + 1).toString();
+        }
+    }
+    
+    // Generate serial number (2 digits)
+    const serialPart = "01"; // Fixed as 01 as per requirement
+    
+    return `${typePrefix}-${datePart}-${serialPart}-${clientPart}-${carPart}-${carYearPart}-${orderPart}`;
 }
 
 /**
@@ -1932,8 +2025,15 @@ async function saveInvoice(onlySave) {
     
     const depositKSH = depositUSD * exchangeRate;
     
-    // 3. Generate sequential invoice number
-    const generatedInvoiceId = await generateSequentialInvoiceNumber(clientName, carModel, carYear);
+  // 3. Generate sequential invoice number for additional invoice
+const generatedInvoiceId = await generateSequentialInvoiceNumber(
+    clientName, 
+    carModel, 
+    carYear, 
+    docType,
+    true, // This is an additional invoice
+    invoiceData.invoiceId // Pass the base invoice reference
+);
     
     // 4. Construct Invoice Data Object
     const invoiceData = {
@@ -2768,7 +2868,7 @@ function generateReceiptPDF(data) {
     
     doc.setTextColor(255);
     drawText('AMOUNT FIGURE', pageW - margin - 65, amountBoxY + 4, 8, 'bold', 255);
-    drawText(`${data.currency} ${data.amountReceived?.toLocaleString('en-US', { minimumFractionDigits: 2 }) || '0.00'}`, 
+   drawText(`${data.currency} ${toWholeNumber(data.amountReceived || 0)}`,
              pageW - margin - 5, amountBoxY + 11, 18, 'bold', 255, 'right');
     
     // Balance Details - FIXED: Use stored USD/KSH amounts
@@ -3221,7 +3321,7 @@ function generateInvoicePDF(data) {
     doc.setLineWidth(0.1);
     doc.rect(totalsX, y, totalBoxW, lineHeight);
     drawText('SUBTOTAL (USD)', totalsX + 2, y + 3.5, 9, 'normal', 0);
-    drawText(data.pricing.totalUSD.toLocaleString('en-US', { minimumFractionDigits: 2 }), totalsX + totalBoxW - 2, y + 3.5, 9, 'bold', 0, 'right');
+    drawText(toWholeNumber(data.pricing.totalUSD), totalsX + totalBoxW - 2, y + 3.5, 9, 'bold', 0, 'right');
     y += lineHeight;
 
     // Line 2: Deposit
@@ -3617,7 +3717,7 @@ function generateAgreementPDF(data) {
     doc.setTextColor(0);
     doc.text("The Purchase Price of ", margin, y);
     doc.setFont("helvetica", "bold");
-    let totalText = `${data.salesTerms.currency} ${data.salesTerms.price.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+   let totalText = `${data.salesTerms.currency} ${toWholeNumber(data.salesTerms.price)}`;
     doc.text(totalText, margin + doc.getStringUnitWidth("The Purchase Price of ") * doc.getFontSize() / doc.internal.scaleFactor, y);
     doc.setTextColor(0);
     doc.setFont("helvetica", "normal");
@@ -4139,9 +4239,12 @@ async function saveDepositPayment(invoiceDocId, depositAmountUSD, exchangeRate) 
         amountKSH = depositAmount * depositExchangeRate;
     }
     
-    // Generate receipt ID
-    const receiptId = generateReceiptId("Deposit", invoiceData.clientName);
-    const receiptDate = depositDate || new Date().toLocaleDateString('en-US');
+// Generate receipt ID using invoice reference
+const receiptId = await generateReceiptId(
+    "Invoice Deposit", 
+    invoiceData.clientName, 
+    invoiceData.invoiceId
+);
     
     // Create receipt data
     const receiptData = {
