@@ -14,11 +14,6 @@ const firebaseConfig = {
   measurementId: "G-7Z71W1NSX4"
 };
 
-// Initialize Firebase
-const app = firebase.initializeApp(firebaseConfig);
-const auth = app.auth();
-const db = app.firestore();
-
 /**
  * Helper function to remove decimals and return whole numbers
  */
@@ -26,6 +21,12 @@ function toWholeNumber(num) {
     if (typeof num !== 'number' || isNaN(num)) return 0;
     return Math.round(num);
 }
+
+// Initialize Firebase
+const app = firebase.initializeApp(firebaseConfig);
+const auth = app.auth();
+const db = app.firestore();
+
 
 // Global Elements & State
 const appContent = document.getElementById('app-content');
@@ -2025,15 +2026,15 @@ async function saveInvoice(onlySave) {
     
     const depositKSH = depositUSD * exchangeRate;
     
-  // 3. Generate sequential invoice number for additional invoice
-const generatedInvoiceId = await generateSequentialInvoiceNumber(
-    clientName, 
-    carModel, 
-    carYear, 
-    docType,
-    true, // This is an additional invoice
-    invoiceData.invoiceId // Pass the base invoice reference
-);
+    // 3. Generate sequential invoice number with new format
+    const generatedInvoiceId = await generateSequentialInvoiceNumber(
+        clientName, 
+        carModel, 
+        carYear, 
+        docType,
+        false, // Not an additional invoice
+        '' // No base invoice
+    );
     
     // 4. Construct Invoice Data Object
     const invoiceData = {
@@ -2055,16 +2056,16 @@ const generatedInvoiceId = await generateSequentialInvoiceNumber(
             color,
             mileage,
             quantity,
-            priceUSD,
+            priceUSD: toWholeNumber(priceUSD), // Use whole numbers
             goodsDescription
         },
         pricing: {
-            totalUSD: totalPriceUSD,
-            depositUSD,
-            balanceUSD,
-            depositKSH: depositKSH.toFixed(2),
+            totalUSD: toWholeNumber(totalPriceUSD), // Use whole numbers
+            depositUSD: toWholeNumber(depositUSD), // Use whole numbers
+            balanceUSD: toWholeNumber(balanceUSD), // Use whole numbers
+            depositKSH: toWholeNumber(depositKSH), // Use whole numbers
             depositPaid: false,
-            remainingBalance: totalPriceUSD,
+            remainingBalance: toWholeNumber(totalPriceUSD), // Use whole numbers
             depositPercentage: depositPercentage
         },
         bankDetails: selectedBanks, // Save array of bank objects
@@ -2075,7 +2076,7 @@ const generatedInvoiceId = await generateSequentialInvoiceNumber(
         invoiceId: generatedInvoiceId,
         revoked: false, // Add revoked flag
         isAuctionInvoice: docType === 'Auction Invoice',
-        auctionPrice: docType === 'Auction Invoice' ? auctionPrice : null
+        auctionPrice: docType === 'Auction Invoice' ? toWholeNumber(auctionPrice) : null // Use whole numbers
     };
 
     // 5. Save to Firestore
