@@ -1140,8 +1140,8 @@ function updateReceiptCalculations() {
         const totalPaidUSD = totalUSD - remainingUSD;
         const totalPaidKSH = totalPaidUSD * exchangeRate;
         
-        balanceKES.textContent = `KES Balance: ${remainingKSH.toLocaleString('en-US', { minimumFractionDigits: 2 })} (Paid: ${totalPaidKSH.toLocaleString('en-US', { minimumFractionDigits: 2 })})`;
-        balanceUSD.textContent = `USD Balance: ${remainingUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })} (Paid: ${totalPaidUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })})`;
+      drawText(`KES Balance: ${formatAmount(remainingKSH)} (Paid: ${formatAmount(totalPaidKSH)})`, margin, amountBoxY + 10, 10);
+drawText(`USD Balance: ${formatAmount(remainingUSD)} (Paid: ${formatAmount(totalPaidUSD)})`, margin, amountBoxY + 14, 10);
     } else {
         balanceKES.textContent = `KES Balance: ${remainingKSH.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
         balanceUSD.textContent = `USD Balance: ${remainingUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
@@ -1734,21 +1734,49 @@ function renderInvoiceForm() {
                     </div>
                     <div>
                         <label for="exchangeRate" class="block text-sm font-medium text-gray-700">USD 1 = KES</label>
-                        <input type="number" id="exchangeRate" step="0.01" required value="130.00" class="mt-1 block w-full p-2 border rounded-md">
+                        <input type="number" id="exchangeRate" step="1" required value="130" class="mt-1 block w-full p-2 border rounded-md">
                     </div>
                     <div>
                         <label for="dueDate" class="block text-sm font-medium text-gray-700">Due Date (Optional)</label>
                         <input type="date" id="dueDate" class="mt-1 block w-full p-2 border rounded-md">
                     </div>
                     <div>
-                        <label for="depositPercentage" class="block text-sm font-medium text-gray-700">Deposit Percentage (%)</label>
-                        <input type="number" id="depositPercentage" step="0.01" required value="50.00" min="0" max="100" class="mt-1 block w-full p-2 border rounded-md">
+                        <label for="depositType" class="block text-sm font-medium text-gray-700">Deposit Type</label>
+                        <select id="depositType" required class="mt-1 block w-full p-2 border rounded-md" onchange="toggleDepositInput()">
+                            <option value="percentage">Percentage (%)</option>
+                            <option value="fixed">Fixed Amount</option>
+                        </select>
                     </div>
+                </div>
+                
+                <!-- Percentage Deposit Input -->
+                <div id="percentage-deposit-field" class="mb-4">
+                    <label for="depositPercentage" class="block text-sm font-medium text-gray-700">Deposit Percentage (%)</label>
+                    <input type="number" id="depositPercentage" step="1" required value="50" min="0" max="100" class="mt-1 block w-full p-2 border rounded-md">
+                </div>
+                
+                <!-- Fixed Deposit Input -->
+                <div id="fixed-deposit-field" class="hidden mb-4">
+                    <div class="grid grid-cols-3 gap-3">
+                        <div>
+                            <label for="fixedDepositCurrency" class="block text-sm font-medium text-gray-700">Currency</label>
+                            <select id="fixedDepositCurrency" class="mt-1 block w-full p-2 border rounded-md">
+                                <option value="USD">USD</option>
+                                <option value="KSH">KES</option>
+                                <option value="EURO">EURO</option>
+                            </select>
+                        </div>
+                        <div class="col-span-2">
+                            <label for="fixedDepositAmount" class="block text-sm font-medium text-gray-700">Deposit Amount (Whole number only)</label>
+                            <input type="number" id="fixedDepositAmount" step="1" placeholder="Enter whole number amount" class="mt-1 block w-full p-2 border rounded-md">
+                        </div>
+                    </div>
+                    <p class="text-xs text-gray-600 mt-2">Note: Enter amount without decimals. System will convert to USD for calculations.</p>
                 </div>
                 
                 <div id="auction-price-field" class="hidden mb-4 p-4 bg-yellow-50 rounded-lg border border-yellow-300">
                     <label for="auctionPrice" class="block text-sm font-medium text-gray-700 mb-2">Auction Price (USD)</label>
-                    <input type="number" id="auctionPrice" step="0.01" placeholder="Enter auction price in USD" class="w-full p-2 border rounded-md">
+                    <input type="number" id="auctionPrice" step="1" placeholder="Enter auction price in USD (whole number)" class="w-full p-2 border rounded-md">
                     <p class="text-xs text-gray-600 mt-2">Note: For auction invoices, this is the bid security deposit amount.</p>
                 </div>
                 
@@ -1789,7 +1817,7 @@ function renderInvoiceForm() {
                     <legend class="text-base font-semibold text-secondary-red px-2">Pricing</legend>
                     <div class="grid grid-cols-2 gap-4">
                         <input type="number" id="quantity" required value="1" min="1" placeholder="Quantity" class="p-2 border rounded-md">
-                        <input type="number" id="price" step="0.01" required placeholder="Unit Price (USD C&F MSA)" class="p-2 border rounded-md">
+                        <input type="number" id="price" step="1" required placeholder="Unit Price (USD C&F MSA) - Whole number" class="p-2 border rounded-md">
                     </div>
                 </fieldset>
 
@@ -1828,7 +1856,25 @@ function renderInvoiceForm() {
     setTimeout(() => {
         autoFillBuyerConfirmation();
         toggleAuctionFields(); // Initial check
+        toggleDepositInput(); // Initial check for deposit type
     }, 100);
+}
+
+/**
+ * Toggles between percentage and fixed deposit input
+ */
+function toggleDepositInput() {
+    const depositType = document.getElementById('depositType').value;
+    const percentageField = document.getElementById('percentage-deposit-field');
+    const fixedField = document.getElementById('fixed-deposit-field');
+    
+    if (depositType === 'percentage') {
+        percentageField.classList.remove('hidden');
+        fixedField.classList.add('hidden');
+    } else {
+        percentageField.classList.add('hidden');
+        fixedField.classList.remove('hidden');
+    }
 }
 
 /**
@@ -1838,15 +1884,24 @@ function toggleAuctionFields() {
     const docType = document.getElementById('docType').value;
     const auctionField = document.getElementById('auction-price-field');
     const priceField = document.getElementById('price');
+    const depositTypeField = document.getElementById('depositType');
     
     if (docType === 'Auction Invoice') {
         auctionField.classList.remove('hidden');
-        priceField.placeholder = "Total Price (USD)";
-        document.getElementById('depositPercentage').value = "100.00"; // Auction invoices are 100% deposit
+        priceField.placeholder = "Total Price (USD) - Whole number";
+        document.getElementById('depositPercentage').value = "100"; // Auction invoices are 100% deposit
+        if (depositTypeField) {
+            depositTypeField.value = "percentage";
+            depositTypeField.disabled = true;
+            toggleDepositInput();
+        }
     } else {
         auctionField.classList.add('hidden');
-        priceField.placeholder = "Unit Price (USD C&F MSA)";
-        document.getElementById('depositPercentage').value = "50.00";
+        priceField.placeholder = "Unit Price (USD C&F MSA) - Whole number";
+        document.getElementById('depositPercentage').value = "50";
+        if (depositTypeField) {
+            depositTypeField.disabled = false;
+        }
     }
 }
 
@@ -1867,7 +1922,25 @@ async function saveInvoice(onlySave) {
     const clientPhone = document.getElementById('clientPhone').value;
     const dueDate = document.getElementById('dueDate').value;
     const exchangeRate = parseFloat(document.getElementById('exchangeRate').value);
-    const depositPercentage = parseFloat(document.getElementById('depositPercentage').value);
+    const depositType = document.getElementById('depositType').value;
+    
+    // Get deposit details based on type
+    let depositPercentage, fixedDepositCurrency, fixedDepositAmount;
+    
+    if (depositType === 'percentage') {
+        depositPercentage = parseFloat(document.getElementById('depositPercentage').value);
+        fixedDepositCurrency = 'USD'; // Default for percentage calculations
+        fixedDepositAmount = null;
+    } else {
+        depositPercentage = null;
+        fixedDepositCurrency = document.getElementById('fixedDepositCurrency').value;
+        fixedDepositAmount = parseFloat(document.getElementById('fixedDepositAmount').value);
+        
+        if (!fixedDepositAmount || fixedDepositAmount <= 0) {
+            alert("Please enter a valid fixed deposit amount.");
+            return;
+        }
+    }
     
     const carMake = document.getElementById('carMake').value;
     const carModel = document.getElementById('carModel').value;
@@ -1926,11 +1999,31 @@ async function saveInvoice(onlySave) {
         balanceUSD = 0;
     } else {
         totalPriceUSD = quantity * priceUSD;
-        depositUSD = totalPriceUSD * (depositPercentage / 100); // FIXED: Proper percentage calculation
-        balanceUSD = totalPriceUSD - depositUSD;
+        
+        // Calculate deposit based on deposit type
+        if (depositType === 'percentage') {
+            depositUSD = Math.round(totalPriceUSD * (depositPercentage / 100)); // Rounded to whole number
+        } else {
+            // Convert fixed deposit to USD if needed
+            let depositInUSD = fixedDepositAmount;
+            if (fixedDepositCurrency === 'KSH') {
+                depositInUSD = Math.round(fixedDepositAmount / exchangeRate);
+            } else if (fixedDepositCurrency === 'EURO') {
+                // Assuming EURO to USD conversion rate (you might want to make this configurable)
+                const euroToUsdRate = 1.07; // Example rate
+                depositInUSD = Math.round(fixedDepositAmount * euroToUsdRate);
+            }
+            depositUSD = depositInUSD;
+        }
+        
+        balanceUSD = Math.round(totalPriceUSD - depositUSD);
     }
     
-    const depositKSH = depositUSD * exchangeRate;
+    // Round all amounts to whole numbers with .00
+    totalPriceUSD = Math.round(totalPriceUSD);
+    depositUSD = Math.round(depositUSD);
+    balanceUSD = Math.round(balanceUSD);
+    const depositKSH = Math.round(depositUSD * exchangeRate);
     
     // 3. Generate sequential invoice number
     const generatedInvoiceId = await generateSequentialInvoiceNumber(clientName, carModel, carYear);
@@ -1943,7 +2036,10 @@ async function saveInvoice(onlySave) {
         issueDate: new Date().toLocaleDateString('en-US'),
         dueDate: dueDate || null, // Make due date optional
         exchangeRate,
-        depositPercentage,
+        depositType,
+        depositPercentage: depositType === 'percentage' ? depositPercentage : null,
+        fixedDepositAmount: depositType === 'fixed' ? fixedDepositAmount : null,
+        fixedDepositCurrency: depositType === 'fixed' ? fixedDepositCurrency : null,
         carDetails: {
             make: carMake,
             model: carModel,
@@ -1962,7 +2058,7 @@ async function saveInvoice(onlySave) {
             totalUSD: totalPriceUSD,
             depositUSD,
             balanceUSD,
-            depositKSH: depositKSH.toFixed(2),
+            depositKSH: depositKSH,
             depositPaid: false,
             remainingBalance: totalPriceUSD,
             depositPercentage: depositPercentage
@@ -1993,7 +2089,6 @@ async function saveInvoice(onlySave) {
         alert("Failed to save invoice: " + error.message);
     }
 }
-
 // =================================================================
 //                 8. INVOICE HISTORY MODULE (UPDATED WITH REVOKE)
 // =================================================================
@@ -2609,6 +2704,14 @@ async function deleteBank(bankId) {
  * Generates and downloads a custom PDF for the comprehensive receipt. (WITH PAYMENT HISTORY)
  */
 function generateReceiptPDF(data) {
+
+  // Add this helper function near the top of generateReceiptPDF function, after the drawText function:
+// Helper to format amounts without decimals (with .00)
+const formatAmount = (amount) => {
+    if (amount === null || amount === undefined) return '0.00';
+    const rounded = Math.round(amount);
+    return rounded.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+};
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF('p', 'mm', 'a4'); 
 
@@ -2768,8 +2871,8 @@ function generateReceiptPDF(data) {
     
     doc.setTextColor(255);
     drawText('AMOUNT FIGURE', pageW - margin - 65, amountBoxY + 4, 8, 'bold', 255);
-    drawText(`${data.currency} ${data.amountReceived?.toLocaleString('en-US', { minimumFractionDigits: 2 }) || '0.00'}`, 
-             pageW - margin - 5, amountBoxY + 11, 18, 'bold', 255, 'right');
+    drawText(`${data.currency} ${formatAmount(data.amountReceived)}`, 
+         pageW - margin - 5, amountBoxY + 11, 18, 'bold', 255, 'right');
     
     // Balance Details - FIXED: Use stored USD/KSH amounts
     doc.setTextColor(primaryColor);
@@ -2864,8 +2967,9 @@ function generateReceiptPDF(data) {
             drawText(`${index + 1}`, margin + 2, y + 3.5, 8);
             drawText(payment.paymentDate || 'N/A', margin + 10, y + 3.5, 8);
             drawText(`${payment.currency} ${payment.amount?.toFixed(2) || '0.00'}`, margin + 40, y + 3.5, 8);
-            drawText(`USD ${payment.amountUSD?.toFixed(2) || '0.00'}`, margin + 75, y + 3.5, 8);
-            drawText(`KES ${payment.amountKSH?.toFixed(2) || '0.00'}`, margin + 105, y + 3.5, 8);
+            drawText(`${payment.currency} ${formatAmount(payment.amount)}`, margin + 40, y + 3.5, 8);
+drawText(`USD ${formatAmount(payment.amountUSD || (payment.currency === 'USD' ? payment.amount : (payment.amount / (payment.exchangeRate || 130))))}`, margin + 75, y + 3.5, 8);
+drawText(`KES ${formatAmount(payment.amountKSH || (payment.currency === 'KSH' ? payment.amount : (payment.amount * (payment.exchangeRate || 130))))}`, margin + 105, y + 3.5, 8);
             
             const method = payment.paymentMethod || 'N/A';
             const shortMethod = method.length > 15 ? method.substring(0, 12) + '...' : method;
@@ -2993,6 +3097,13 @@ function generateInvoicePDF(data) {
         doc.setFont("helvetica", style);
         doc.setTextColor(color);
         doc.text(text, x, y, { align: align });
+    };
+    
+    // Helper to format amounts without decimals (with .00)
+    const formatAmount = (amount) => {
+        if (amount === null || amount === undefined) return '0.00';
+        const rounded = Math.round(amount);
+        return rounded.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     };
 
     // Function to add stamp image with date OVERLAY - UPDATED WITH RED TEXT AND SIZE 14
@@ -3194,8 +3305,8 @@ function generateInvoicePDF(data) {
         drawText(mileageColorText, 130, y + 9, 8, 'normal', 0, 'center');
     }
 
-    // Price - right aligned
-    drawText(`${data.carDetails.priceUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })}`, 185, y + 9, 10, 'normal', 0, "right");
+    // Price - right aligned with .00 format
+    drawText(`${formatAmount(data.carDetails.priceUSD)}`, 185, y + 9, 10, 'normal', 0, "right");
 
     y += 16;
 
@@ -3221,19 +3332,25 @@ function generateInvoicePDF(data) {
     doc.setLineWidth(0.1);
     doc.rect(totalsX, y, totalBoxW, lineHeight);
     drawText('SUBTOTAL (USD)', totalsX + 2, y + 3.5, 9, 'normal', 0);
-    drawText(data.pricing.totalUSD.toLocaleString('en-US', { minimumFractionDigits: 2 }), totalsX + totalBoxW - 2, y + 3.5, 9, 'bold', 0, 'right');
+    drawText(formatAmount(data.pricing.totalUSD), totalsX + totalBoxW - 2, y + 3.5, 9, 'bold', 0, 'right');
     y += lineHeight;
 
     // Line 2: Deposit
     doc.rect(totalsX, y, totalBoxW, lineHeight);
-    drawText(`DEPOSIT (${data.pricing.depositPercentage || 50}% USD)`, totalsX + 2, y + 3.5, 9, 'normal', 0);
-    drawText(data.pricing.depositUSD.toLocaleString('en-US', { minimumFractionDigits: 2 }), totalsX + totalBoxW - 2, y + 3.5, 9, 'bold', secondaryColor, 'right');
+    let depositLabel = 'DEPOSIT (USD)';
+    if (data.depositType === 'percentage' && data.depositPercentage) {
+        depositLabel = `DEPOSIT (${data.depositPercentage}% USD)`;
+    } else if (data.depositType === 'fixed' && data.fixedDepositCurrency) {
+        depositLabel = `DEPOSIT (${data.fixedDepositCurrency})`;
+    }
+    drawText(depositLabel, totalsX + 2, y + 3.5, 9, 'normal', 0);
+    drawText(formatAmount(data.pricing.depositUSD), totalsX + totalBoxW - 2, y + 3.5, 9, 'bold', secondaryColor, 'right');
     y += lineHeight;
 
     // Line 3: Balance
     doc.rect(totalsX, y, totalBoxW, lineHeight);
     drawText('BALANCE DUE (USD)', totalsX + 2, y + 3.5, 9, 'normal', 0);
-    drawText(data.pricing.balanceUSD.toLocaleString('en-US', { minimumFractionDigits: 2 }), totalsX + totalBoxW - 2, y + 3.5, 9, 'bold', primaryColor, 'right');
+    drawText(formatAmount(data.pricing.balanceUSD), totalsX + totalBoxW - 2, y + 3.5, 9, 'bold', primaryColor, 'right');
     y += lineHeight;
 
     // Line 4: Deposit KES Equivalent
@@ -3241,12 +3358,12 @@ function generateInvoicePDF(data) {
     doc.rect(totalsX, y, totalBoxW, lineHeight, 'F');
     doc.rect(totalsX, y, totalBoxW, lineHeight);
     drawText('DEPOSIT (KES EQUIV)', totalsX + 2, y + 3.5, 9, 'bold', primaryColor);
-    drawText(parseFloat(data.pricing.depositKSH).toLocaleString('en-US', { minimumFractionDigits: 2 }), totalsX + totalBoxW - 2, y + 3.5, 9, 'bold', primaryColor, 'right');
+    drawText(formatAmount(data.pricing.depositKSH), totalsX + totalBoxW - 2, y + 3.5, 9, 'bold', primaryColor, 'right');
     y += lineHeight;
     y += 5; // Extra space
 
     // =================================================================
-    // TERMS & CONDITIONS (Left) - NOW UNDERLINED
+    // TERMS & CONDITIONS (Left) - NOW UNDERLINED WITH NEW CLAUSES
     // =================================================================
     drawText('TERMS & CONDITIONS', margin, y, 12, 'bold', primaryColor);
     // Add underline
@@ -3265,33 +3382,43 @@ function generateInvoicePDF(data) {
         const term1 = `All payments under this contract shall be made in USD. If payments are made in any other currency, the amount will be converted at the prevailing exchange rate of the seller's bank on the date of payment.`;
         y = drawTerm(doc, y, '1.', term1);
 
-        // Term 2: Auction Bid Security
-        const term2 = `Wanbite Investments Ltd will arrange the auction bid once the Buyer deposits USD ${auctionPrice.toLocaleString('en-US', { minimumFractionDigits: 2 })} as bid security. This deposit is refundable.`;
+        // Term 2: Auction Bid Security - NEW CLAUSE
+        const term2 = `WanBite Investments Ltd will arrange the auction bid once the Buyer deposits USD 2,000.00 as bid security. This deposit is refundable.`;
         y = drawTerm(doc, y, '2.', term2);
 
-        // Term 3: Balance Payment
-        y = drawTerm(doc, y, '3.', 'The remaining balance must be paid within 10 days of the bill of landing issuance date.');
+        // Term 3: Balance Payment - NEW CLAUSE
+        const term3 = `The remaining balance must be paid within Ten (10) days of the Bill of Landing issuance date.`;
+        y = drawTerm(doc, y, '3.', term3);
 
         // Term 4: BOL Release
-        y = drawTerm(doc, y, '4.', 'The original Bill of Landing will be sent to the Buyer within 20 business days after full payment is received.');
+        const term4 = `The original Bill of Landing will be sent to the Buyer within 20 business days after full payment is received.`;
+        y = drawTerm(doc, y, '4.', term4);
 
         // Term 5: As Is Condition
-        y = drawTerm(doc, y, '5.', 'All vehicles are sold on an "AS IS" basis, with no warranties, expressed or implied. Shipment booking will be arranged once the AGREED PAYMENT amount is paid by the Buyer.');
+        const term5 = `All vehicles are sold on an "AS IS" basis, with no warranties, expressed or implied. Shipment booking will be arranged once the AGREED PAYMENT amount is paid by the Buyer.`;
+        y = drawTerm(doc, y, '5.', term5);
 
         // Term 6: Third Party Payment
-        y = drawTerm(doc, y, '6.', 'If a third party makes the payment, the Buyer must inform the Seller in writing of the relationship before the payment is made, for security reasons.');
+        const term6 = `If a third party makes the payment, the Buyer must inform the Seller in writing of the relationship before the payment is made, for security reasons.`;
+        y = drawTerm(doc, y, '6.', term6);
 
         // Term 7: Import Responsibility
-        y = drawTerm(doc, y, '7.', 'The Seller is not responsible for any losses arising from the Buyer\'s failure to comply with import regulations and/or restrictions in the Buyer\'s country.');
+        const term7 = `The Seller is not responsible for any losses arising from the Buyer's failure to comply with import regulations and/or restrictions in the Buyer's country.`;
+        y = drawTerm(doc, y, '7.', term7);
         
     } else {
         // REGULAR INVOICE TERMS
         // Term 1: Total Price
-        const totalPriceText = `The total price of the vehicle is USD ${data.pricing.totalUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+        const totalPriceText = `The total price of the vehicle is USD ${formatAmount(data.pricing.totalUSD)}`;
         y = drawTerm(doc, y, '1.', totalPriceText, 188 - termIndent);
 
         // Term 2: Payment Schedule - FIXED PERCENTAGE CALCULATION
-        const depositText = `A deposit of USD ${data.pricing.depositUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })} (KES ${data.pricing.depositKSH.toLocaleString('en-US', { minimumFractionDigits: 2 })} equivalent) is required to secure the vehicle and begin shipping/clearing. The balance of USD ${data.pricing.balanceUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })} is due ${data.dueDate ? `on or before ${data.dueDate}` : 'upon production of the Bill of Landing'}. The seller shall promptly notify the buyer of the date for due compliance.`;
+        let depositText;
+        if (data.depositType === 'percentage' && data.depositPercentage) {
+            depositText = `A deposit of USD ${formatAmount(data.pricing.depositUSD)} (KES ${formatAmount(data.pricing.depositKSH)} equivalent) is required to secure the vehicle and begin shipping/clearing. The balance of USD ${formatAmount(data.pricing.balanceUSD)} is due ${data.dueDate ? `on or before ${data.dueDate}` : 'upon production of the Bill of Landing'}. The seller shall promptly notify the buyer of the date for due compliance.`;
+        } else {
+            depositText = `A deposit of ${data.fixedDepositCurrency} ${formatAmount(data.fixedDepositAmount)} (USD ${formatAmount(data.pricing.depositUSD)} / KES ${formatAmount(data.pricing.depositKSH)} equivalent) is required to secure the vehicle and begin shipping/clearing. The balance of USD ${formatAmount(data.pricing.balanceUSD)} is due ${data.dueDate ? `on or before ${data.dueDate}` : 'upon production of the Bill of Landing'}. The seller shall promptly notify the buyer of the date for due compliance.`;
+        }
         y = drawTerm(doc, y, '2.', depositText);
 
         // Term 3: BOL Release
@@ -3337,7 +3464,7 @@ function generateInvoicePDF(data) {
     // Exchange Rate Note - far right
     doc.setFontSize(8);
     doc.setTextColor(primaryColor);
-    doc.text(`Exchange rate used USD 1 = KES ${data.exchangeRate.toFixed(2)}`, 190 - margin, currentY_bank - 2, null, null, "right");
+    doc.text(`Exchange rate used USD 1 = KES ${formatAmount(data.exchangeRate)}`, 190 - margin, currentY_bank - 2, null, null, "right");
     
     // Bank Details - handle multiple banks
     doc.setFontSize(10);
@@ -3617,7 +3744,7 @@ function generateAgreementPDF(data) {
     doc.setTextColor(0);
     doc.text("The Purchase Price of ", margin, y);
     doc.setFont("helvetica", "bold");
-    let totalText = `${data.salesTerms.currency} ${data.salesTerms.price.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+   let totalText = `${data.salesTerms.currency} ${formatAmount(data.salesTerms.price)}`;
     doc.text(totalText, margin + doc.getStringUnitWidth("The Purchase Price of ") * doc.getFontSize() / doc.internal.scaleFactor, y);
     doc.setTextColor(0);
     doc.setFont("helvetica", "normal");
