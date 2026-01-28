@@ -2880,23 +2880,21 @@ const formatAmount = (amount) => {
     doc.setFontSize(12);
     doc.setTextColor(0);
 
-    // Calculate proper balances
-    const totalPaidUSD = data.totalPaidUSD || (data.amountReceivedUSD || (data.currency === 'USD' ? data.amountReceived : data.amountReceived / (data.exchangeRate || 130)));
-    const totalPaidKSH = data.totalPaidKSH || (data.amountReceivedKSH || (data.currency === 'KSH' ? data.amountReceived : data.amountReceived * (data.exchangeRate || 130)));
-    
-    const remainingUSD = data.balanceDetails?.balanceRemainingUSD || data.balanceDetails?.balanceRemaining || 0;
-    const remainingKSH = data.balanceDetails?.balanceRemainingKSH || remainingUSD * (data.exchangeRate || 130);
-    
-    const balanceText = remainingUSD > 0 
-        ? `${data.currency} ${remainingUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })}` 
-        : 'ZERO';
-    
-    drawText(`Balance Remaining: ${balanceText}`, margin, amountBoxY + 10, 10);
-    drawText(`Due On/Before: ${data.balanceDetails?.balanceDueDate || 'N/A'}`, margin, amountBoxY + 14, 10);
-    
-    // Add paid amounts
-    drawText(`Paid (USD): ${totalPaidUSD.toFixed(2)}`, margin, amountBoxY + 18, 10);
-    drawText(`Paid (KES): ${totalPaidKSH.toFixed(2)}`, margin, amountBoxY + 22, 10);
+  // Calculate proper balances
+const totalPaidUSD = data.totalPaidUSD || (data.amountReceivedUSD || (data.currency === 'USD' ? data.amountReceived : data.amountReceived / (data.exchangeRate || 130)));
+const totalPaidKSH = data.totalPaidKSH || (data.amountReceivedKSH || (data.currency === 'KSH' ? data.amountReceived : data.amountReceived * (data.exchangeRate || 130)));
+
+const remainingUSD = data.balanceDetails?.balanceRemainingUSD || data.balanceDetails?.balanceRemaining || 0;
+const remainingKSH = data.balanceDetails?.balanceRemainingKSH || remainingUSD * (data.exchangeRate || 130);
+
+// Show balance in both USD and KSH - UPDATED
+drawText(`Balance Remaining (USD): ${formatAmount(remainingUSD)}`, margin, amountBoxY + 10, 10);
+drawText(`Balance Remaining (KES): ${formatAmount(remainingKSH)}`, margin, amountBoxY + 14, 10);
+drawText(`Due On/Before: ${data.balanceDetails?.balanceDueDate || 'N/A'}`, margin, amountBoxY + 18, 10);
+
+// Add paid amounts
+drawText(`Paid (USD): ${formatAmount(totalPaidUSD)}`, margin, amountBoxY + 22, 10);
+drawText(`Paid (KES): ${formatAmount(totalPaidKSH)}`, margin, amountBoxY + 26, 10);
     
     y = amountBoxY + amountBoxH + 10;
 
