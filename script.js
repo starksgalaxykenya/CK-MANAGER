@@ -3566,7 +3566,7 @@ if (stampDate) {
 
 // Calculate stamp position - position it just below banking details with proper spacing
 // Banking details section ends at 'y', so we need to add a small gap
-const stampY = y + 8; // Reduced from y + 5 to y + 8 for better positioning
+const stampY = y + -15; // Reduced from y + 5 to y + 8 for better positioning
 addStampWithDate(sellerSigX + 40, stampY, stampDate);
 
 y += 32; // Adjusted from y += 30 to maintain proper footer spacing
