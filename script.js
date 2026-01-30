@@ -3541,7 +3541,7 @@ drawText('Accepted and Confirmed by Buyer', margin + 35, buyerNameY + 4, 8, 'nor
 // Adjust Y position based on number of name lines
 y = buyerNameY + 10;
 
-// Seller Signature with stamp - MOVED UPWARDS
+// Seller Signature with stamp - POSITION ADJUSTED TO BE JUST BELOW BANKING DETAILS
 const sellerSigX = 110;
 
 // Use document creation date (issueDate) instead of current date
@@ -3564,11 +3564,12 @@ if (stampDate) {
     stampDate = new Date().toLocaleDateString('en-US');
 }
 
-// MOVE STAMP UPWARDS - position just below banking details
-const stampY = y + 10; // Adjusted from y + 5 to y + 10
+// Calculate stamp position - position it just below banking details with proper spacing
+// Banking details section ends at 'y', so we need to add a small gap
+const stampY = y + 8; // Reduced from y + 5 to y + 8 for better positioning
 addStampWithDate(sellerSigX + 40, stampY, stampDate);
 
-y += 35; // Adjusted from y += 30 to account for stamp position
+y += 32; // Adjusted from y += 30 to maintain proper footer spacing
 
     // =================================================================
     // FOOTER
@@ -3832,13 +3833,15 @@ function generateAgreementPDF(data) {
         }
     }
 
-    addStampWithDate(sellerX + 35, sigY - 5, stampDate);
-    
-    doc.setFontSize(8);
-    doc.setTextColor(0);
-    doc.text(`Witness: ${data.signatures.sellerWitness}`, sellerX + 35, sigY + 20, null, null, "center");
-    
-    y += 30;
+    // Adjust stamp position to be just below payment terms section
+const stampYPosition = sigY; // Position at same Y as buyer signature line
+addStampWithDate(sellerX + 35, stampYPosition, stampDate);
+
+doc.setFontSize(8);
+doc.setTextColor(0);
+doc.text(`Witness: ${data.signatures.sellerWitness}`, sellerX + 35, sigY + 15, null, null, "center");
+
+y += 28; // Adjusted for better spacing
     
     // --- Global Footer ---
     doc.setFillColor(primaryColor);
