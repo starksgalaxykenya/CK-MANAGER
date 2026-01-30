@@ -2948,37 +2948,36 @@ drawText(`Paid (KES): ${formatAmount(totalPaidKSH)}`, margin, amountBoxY + 26, 1
         doc.setFontSize(8);
         doc.setTextColor(0);
         
-        paymentHistory.forEach((payment, index) => {
-            // Check page boundary
-            if (y > pageH - 20) {
-                doc.addPage();
-                y = 10;
-            }
-            
-            // Alternate row colors
-            if (index % 2 === 0) {
-                doc.setFillColor(250, 250, 250);
-                doc.rect(margin, y, boxW, 5, 'F');
-            }
-            
-            doc.rect(margin, y, boxW, 5);
-            drawText(`${index + 1}`, margin + 2, y + 3.5, 8);
-            drawText(payment.paymentDate || 'N/A', margin + 10, y + 3.5, 8);
-            drawText(`${payment.currency} ${payment.amount?.toFixed(2) || '0.00'}`, margin + 40, y + 3.5, 8);
-            drawText(`${payment.currency} ${formatAmount(payment.amount)}`, margin + 40, y + 3.5, 8);
-drawText(`USD ${formatAmount(payment.amountUSD || (payment.currency === 'USD' ? payment.amount : (payment.amount / (payment.exchangeRate || 130))))}`, margin + 75, y + 3.5, 8);
-drawText(`KES ${formatAmount(payment.amountKSH || (payment.currency === 'KSH' ? payment.amount : (payment.amount * (payment.exchangeRate || 130))))}`, margin + 105, y + 3.5, 8);
-            
-            const method = payment.paymentMethod || 'N/A';
-            const shortMethod = method.length > 15 ? method.substring(0, 12) + '...' : method;
-            drawText(shortMethod, margin + 135, y + 3.5, 8);
-            
-            const description = payment.description || 'Payment';
-            const shortDesc = description.length > 20 ? description.substring(0, 17) + '...' : description;
-            drawText(shortDesc, margin + 170, y + 3.5, 8);
-            
-            y += 5;
-        });
+       paymentHistory.forEach((payment, index) => {
+    // Check page boundary
+    if (y > pageH - 20) {
+        doc.addPage();
+        y = 10;
+    }
+    
+    // Alternate row colors
+    if (index % 2 === 0) {
+        doc.setFillColor(250, 250, 250);
+        doc.rect(margin, y, boxW, 5, 'F');
+    }
+    
+    doc.rect(margin, y, boxW, 5);
+    drawText(`${index + 1}`, margin + 2, y + 3.5, 8);
+    drawText(payment.paymentDate || 'N/A', margin + 10, y + 3.5, 8);
+    drawText(`${payment.currency} ${formatAmount(payment.amount)}`, margin + 40, y + 3.5, 8);
+    drawText(`USD ${formatAmount(payment.amountUSD || (payment.currency === 'USD' ? payment.amount : (payment.amount / (payment.exchangeRate || 130))))}`, margin + 75, y + 3.5, 8);
+    drawText(`KES ${formatAmount(payment.amountKSH || (payment.currency === 'KSH' ? payment.amount : (payment.amount * (payment.exchangeRate || 130))))}`, margin + 105, y + 3.5, 8);
+    
+    const method = payment.paymentMethod || 'N/A';
+    const shortMethod = method.length > 15 ? method.substring(0, 12) + '...' : method;
+    drawText(shortMethod, margin + 135, y + 3.5, 8);
+    
+    const description = payment.description || 'Payment';
+    const shortDesc = description.length > 20 ? description.substring(0, 17) + '...' : description;
+    drawText(shortDesc, margin + 170, y + 3.5, 8);
+    
+    y += 5;
+});
         
         y += 3;
     } else if (paymentCount === 1) {
@@ -3515,59 +3514,61 @@ function generateInvoicePDF(data) {
     drawText('**NOTE: Buyer Should bear the cost of Bank Charge when remitting T/T', margin, y + (data.bankDetails?.length > 1 ? 55 : 40) - 5, 9, 'bold', secondaryColor);
     y += (data.bankDetails?.length > 1 ? 60 : 45);
 
-    // =================================================================
-    // CONFIRMATION SIGNATURES WITH STAMP - UPDATED FOR BETTER LAYOUT
-    // =================================================================
-    doc.setDrawColor(primaryColor);
-    
-    // Buyer Signature Section - UPDATED WITH TEXT WRAPPING
-    // Split buyer name into multiple lines if needed
-    const maxBuyerWidth = 70; // Width of the signature box
-    const buyerNameLines = doc.splitTextToSize(data.buyerNameConfirmation, maxBuyerWidth);
-    let buyerNameY = y + 5;
+   // =================================================================
+// CONFIRMATION SIGNATURES WITH STAMP - UPDATED FOR BETTER LAYOUT
+// =================================================================
+doc.setDrawColor(primaryColor);
 
-    // Draw each line of the buyer's name
-    buyerNameLines.forEach((line, index) => {
-        doc.setFontSize(10);
-        doc.setTextColor(primaryColor);
-        doc.setFont("helvetica", "bold");
-        doc.text(line, margin + 35, buyerNameY, null, null, "center");
-        buyerNameY += 4;
-    });
+// Buyer Signature Section - UPDATED WITH TEXT WRAPPING
+// Split buyer name into multiple lines if needed
+const maxBuyerWidth = 70; // Width of the signature box
+const buyerNameLines = doc.splitTextToSize(data.buyerNameConfirmation, maxBuyerWidth);
+let buyerNameY = y + 5;
 
-    // Line for signature
-    doc.line(margin, buyerNameY, 90, buyerNameY);
-    drawText('Accepted and Confirmed by Buyer', margin + 35, buyerNameY + 4, 8, 'normal', 0, "center");
+// Draw each line of the buyer's name
+buyerNameLines.forEach((line, index) => {
+    doc.setFontSize(10);
+    doc.setTextColor(primaryColor);
+    doc.setFont("helvetica", "bold");
+    doc.text(line, margin + 35, buyerNameY, null, null, "center");
+    buyerNameY += 4;
+});
 
-    // Adjust Y position based on number of name lines
-    y = buyerNameY + 10;
+// Line for signature
+doc.line(margin, buyerNameY, 90, buyerNameY);
+drawText('Accepted and Confirmed by Buyer', margin + 35, buyerNameY + 4, 8, 'normal', 0, "center");
 
-    // Seller Signature with stamp
-    const sellerSigX = 110;
-    
-    // Use document creation date (issueDate) instead of current date
-    let stampDate = data.issueDate; // This is already stored when invoice was created
+// Adjust Y position based on number of name lines
+y = buyerNameY + 10;
 
-    // If issueDate is in a different format, convert it
-    if (stampDate) {
-        try {
-            // Try to format the date properly
-            const dateObj = new Date(stampDate);
-            if (!isNaN(dateObj.getTime())) {
-                stampDate = dateObj.toLocaleDateString('en-US');
-            }
-        } catch (e) {
-            // Fallback to original date
-            console.log("Using original issue date format");
+// Seller Signature with stamp - MOVED UPWARDS
+const sellerSigX = 110;
+
+// Use document creation date (issueDate) instead of current date
+let stampDate = data.issueDate; // This is already stored when invoice was created
+
+// If issueDate is in a different format, convert it
+if (stampDate) {
+    try {
+        // Try to format the date properly
+        const dateObj = new Date(stampDate);
+        if (!isNaN(dateObj.getTime())) {
+            stampDate = dateObj.toLocaleDateString('en-US');
         }
-    } else {
-        // Fallback to today's date
-        stampDate = new Date().toLocaleDateString('en-US');
+    } catch (e) {
+        // Fallback to original date
+        console.log("Using original issue date format");
     }
+} else {
+    // Fallback to today's date
+    stampDate = new Date().toLocaleDateString('en-US');
+}
 
-    addStampWithDate(sellerSigX + 40, y + 5, stampDate);
-    
-    y += 30;
+// MOVE STAMP UPWARDS - position just below banking details
+const stampY = y + 10; // Adjusted from y + 5 to y + 10
+addStampWithDate(sellerSigX + 40, stampY, stampDate);
+
+y += 35; // Adjusted from y += 30 to account for stamp position
 
     // =================================================================
     // FOOTER
