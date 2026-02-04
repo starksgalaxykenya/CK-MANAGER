@@ -1,4 +1,185 @@
 // =================================================================
+//                 0. LOADING ANIMATIONS & UI UTILITIES
+// =================================================================
+
+// Modern loading spinner component
+function showLoadingOverlay(message = "Processing...") {
+    // Remove existing overlay if any
+    hideLoadingOverlay();
+    
+    const overlay = document.createElement('div');
+    overlay.id = 'loading-overlay';
+    overlay.className = 'fixed inset-0 z-50 flex flex-col items-center justify-center bg-gray-900 bg-opacity-80 backdrop-blur-sm';
+    overlay.innerHTML = `
+        <div class="relative">
+            <!-- Outer spinning ring -->
+            <div class="w-20 h-20 border-4 border-primary-blue/20 border-t-primary-blue rounded-full animate-spin"></div>
+            
+            <!-- Inner pulsing dot -->
+            <div class="absolute inset-0 flex items-center justify-center">
+                <div class="w-8 h-8 bg-primary-blue rounded-full animate-pulse"></div>
+            </div>
+            
+            <!-- Glowing effect -->
+            <div class="absolute inset-0 animate-ping opacity-20">
+                <div class="w-20 h-20 border-4 border-primary-blue rounded-full"></div>
+            </div>
+        </div>
+        
+        <!-- Loading text with fade animation -->
+        <p class="mt-6 text-white font-semibold text-lg animate-pulse">${message}</p>
+        
+        <!-- Optional: Progress dots -->
+        <div class="mt-4 flex space-x-2">
+            <div class="w-2 h-2 bg-secondary-red rounded-full animate-bounce" style="animation-delay: 0ms"></div>
+            <div class="w-2 h-2 bg-secondary-red rounded-full animate-bounce" style="animation-delay: 150ms"></div>
+            <div class="w-2 h-2 bg-secondary-red rounded-full animate-bounce" style="animation-delay: 300ms"></div>
+        </div>
+    `;
+    
+    document.body.appendChild(overlay);
+    return overlay;
+}
+
+function hideLoadingOverlay() {
+    const existingOverlay = document.getElementById('loading-overlay');
+    if (existingOverlay) {
+        // Add fade out animation before removing
+        existingOverlay.style.opacity = '0';
+        existingOverlay.style.transition = 'opacity 0.3s ease-out';
+        setTimeout(() => {
+            if (existingOverlay.parentNode) {
+                existingOverlay.parentNode.removeChild(existingOverlay);
+            }
+        }, 300);
+    }
+}
+
+// Shimmer loading effect for lists
+function createShimmerLoader(count = 3) {
+    let html = '';
+    for (let i = 0; i < count; i++) {
+        html += `
+            <div class="animate-pulse space-y-3 p-4 border rounded-lg bg-white">
+                <div class="flex justify-between items-start">
+                    <div class="flex-1 space-y-2">
+                        <div class="h-4 bg-gray-200 rounded w-1/4"></div>
+                        <div class="h-3 bg-gray-100 rounded w-3/4"></div>
+                        <div class="h-3 bg-gray-100 rounded w-1/2"></div>
+                    </div>
+                    <div class="flex flex-col gap-2 ml-4">
+                        <div class="h-8 bg-gray-200 rounded-full w-20"></div>
+                        <div class="h-8 bg-gray-200 rounded-full w-20"></div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+    return html;
+}
+
+// Success toast notification
+function showSuccessToast(message, duration = 3000) {
+    showToast(message, 'success', duration);
+}
+
+// Error toast notification
+function showErrorToast(message, duration = 5000) {
+    showToast(message, 'error', duration);
+}
+
+// Toast notification system
+function showToast(message, type = 'info', duration = 3000) {
+    // Remove existing toasts
+    const existingToasts = document.querySelectorAll('.custom-toast');
+    existingToasts.forEach(toast => {
+        if (toast.parentNode) {
+            toast.parentNode.removeChild(toast);
+        }
+    });
+    
+    const toast = document.createElement('div');
+    toast.className = `custom-toast fixed top-4 right-4 z-50 transform transition-all duration-500 ease-out translate-x-0`;
+    
+    const bgColor = type === 'success' ? 'bg-green-500' : 
+                   type === 'error' ? 'bg-secondary-red' : 
+                   'bg-primary-blue';
+    
+    toast.innerHTML = `
+        <div class="${bgColor} text-white p-4 rounded-lg shadow-2xl flex items-center space-x-3 animate-fade-in">
+            <div class="flex-shrink-0">
+                ${type === 'success' ? 
+                    '<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>' : 
+                    '<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>'}
+            </div>
+            <div class="flex-1">
+                <p class="font-semibold">${message}</p>
+            </div>
+            <button onclick="this.parentElement.parentElement.remove()" class="text-white hover:text-gray-200">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+            </button>
+        </div>
+    `;
+    
+    document.body.appendChild(toast);
+    
+    // Auto remove after duration
+    setTimeout(() => {
+        if (toast.parentNode) {
+            toast.style.transform = 'translateX(100%)';
+            setTimeout(() => {
+                if (toast.parentNode) {
+                    toast.parentNode.removeChild(toast);
+                }
+            }, 500);
+        }
+    }, duration);
+}
+
+// Add CSS for animations
+function addAnimationStyles() {
+    if (!document.getElementById('animation-styles')) {
+        const style = document.createElement('style');
+        style.id = 'animation-styles';
+        style.textContent = `
+            @keyframes fade-in {
+                from { opacity: 0; transform: translateY(-10px); }
+                to { opacity: 1; transform: translateY(0); }
+            }
+            
+            @keyframes shimmer {
+                0% { background-position: -200px 0; }
+                100% { background-position: calc(200px + 100%) 0; }
+            }
+            
+            .animate-fade-in {
+                animation: fade-in 0.3s ease-out;
+            }
+            
+            .shimmer {
+                background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+                background-size: 200px 100%;
+                animation: shimmer 1.5s infinite;
+            }
+            
+            /* Custom bounce animation for dots */
+            @keyframes custom-bounce {
+                0%, 100% { transform: translateY(0); }
+                50% { transform: translateY(-5px); }
+            }
+            
+            .animate-bounce {
+                animation: custom-bounce 0.6s infinite;
+            }
+        `;
+        document.head.appendChild(style);
+    }
+}
+
+// Initialize animation styles when DOM is ready
+document.addEventListener('DOMContentLoaded', addAnimationStyles);
+
+// =================================================================
 //                 1. FIREBASE CONFIGURATION & INIT
 // =================================================================
 
@@ -65,16 +246,55 @@ function renderAuthForm() {
                     <label for="password" class="block text-gray-700 text-sm font-semibold mb-2">Password</label>
                     <input type="password" id="password" required class="w-full p-3 border border-gray-300 rounded-lg focus:ring-primary-blue focus:border-primary-blue">
                 </div>
-                <button type="submit" class="w-full bg-primary-blue hover:bg-blue-900 text-white font-bold py-3 rounded-lg transition duration-200">
-                    Sign In
+                <button type="submit" id="login-button" class="w-full bg-primary-blue hover:bg-blue-900 text-white font-bold py-3 rounded-lg transition duration-200 flex items-center justify-center space-x-2">
+                    <span>Sign In</span>
+                    <svg id="login-spinner" class="hidden w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
                 </button>
             </form>
         </div>
     `;
 }
 
+async function handleLogin() {
+    const email = document.getElementById('email').value;
+    const password = document.getElementById('password').value;
+    
+    // Show loading state on button
+    const loginButton = document.getElementById('login-button');
+    const loginSpinner = document.getElementById('login-spinner');
+    
+    if (loginButton && loginSpinner) {
+        loginButton.disabled = true;
+        loginSpinner.classList.remove('hidden');
+        loginButton.innerHTML = '<span>Signing In...</span>' + loginSpinner.outerHTML;
+    }
+    
+    try {
+        await auth.signInWithEmailAndPassword(email, password);
+        // Success will be handled by authStateChanged
+    } catch (error) {
+        console.error("Login failed:", error.message);
+        showErrorToast("Login Failed: " + error.message);
+        
+        // Reset button state
+        if (loginButton && loginSpinner) {
+            loginButton.disabled = false;
+            loginSpinner.classList.add('hidden');
+            loginButton.innerHTML = '<span>Sign In</span>' + loginSpinner.outerHTML;
+        }
+    }
+}
+
 function handleLogout() {
-    auth.signOut();
+    const loadingOverlay = showLoadingOverlay("Logging out...");
+    setTimeout(() => {
+        auth.signOut();
+        hideLoadingOverlay();
+        showSuccessToast("Logged out successfully");
+    }, 500);
 }
 
 // Add this function at the top level (after the authentication section)
@@ -126,7 +346,7 @@ async function searchDocuments() {
     const docTypeFilter = document.getElementById('document-type-filter')?.value;
     
     if (!searchTerm) {
-        alert("Please enter a search term");
+        showErrorToast("Please enter a search term");
         return;
     }
     
@@ -176,18 +396,21 @@ async function performSearch(searchTerm, docTypeFilter) {
     // Double-check elements exist
     if (!resultsList || !searchResultsDiv || !docCreationArea) {
         console.error("Required DOM elements not found");
-        alert("Error: Unable to perform search. Please try again.");
+        showErrorToast("Error: Unable to perform search. Please try again.");
         return;
     }
     
-    // Show loading state
-    resultsList.innerHTML = '<p class="text-center text-gray-500">Searching documents...</p>';
+    // Show loading state with shimmer effect
+    resultsList.innerHTML = createShimmerLoader(3);
     searchResultsDiv.classList.remove('hidden');
     docCreationArea.classList.add('hidden');
     
     let allResults = [];
     
     try {
+        // Show loading overlay for search
+        const searchOverlay = showLoadingOverlay("Searching documents...");
+        
         // Search Receipts if applicable
         if (docTypeFilter === 'all' || docTypeFilter === 'receipt') {
             const receiptResults = await searchReceipts(searchTerm);
@@ -213,16 +436,38 @@ async function performSearch(searchTerm, docTypeFilter) {
             return dateB - dateA;
         });
         
+        // Hide loading overlay
+        hideLoadingOverlay();
+        
         // Display results
         if (resultsList) {
             displaySearchResults(allResults, searchTerm);
         }
         
+        // Show success message
+        if (allResults.length > 0) {
+            showSuccessToast(`Found ${allResults.length} documents`);
+        }
+        
     } catch (error) {
         console.error("Error searching documents:", error);
+        hideLoadingOverlay();
+        
         if (resultsList) {
-            resultsList.innerHTML = '<p class="text-red-500 text-center">Error searching documents. Please try again.</p>';
+            resultsList.innerHTML = `
+                <div class="text-center p-8 bg-red-50 rounded-lg border border-red-200 animate-fade-in">
+                    <svg class="w-12 h-12 text-red-500 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                    <p class="text-red-600 font-semibold mb-2">Search Error</p>
+                    <p class="text-sm text-gray-600">${error.message}</p>
+                    <button onclick="clearSearch()" class="mt-4 bg-primary-blue hover:bg-blue-900 text-white font-bold py-2 px-4 rounded-md transition duration-150">
+                        Return to Document Generator
+                    </button>
+                </div>
+            `;
         }
+        showErrorToast("Error searching documents. Please try again.");
     }
 }
 
@@ -236,8 +481,12 @@ function displaySearchResults(results, searchTerm) {
     
     if (results.length === 0) {
         resultsList.innerHTML = `
-            <div class="text-center p-8 bg-gray-50 rounded-lg">
-                <p class="text-gray-600">No documents found for "<span class="font-semibold">${searchTerm}</span>"</p>
+            <div class="text-center p-8 bg-gray-50 rounded-lg border border-gray-200 animate-fade-in">
+                <svg class="w-16 h-16 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                </svg>
+                <p class="text-gray-600 mb-2">No documents found for</p>
+                <p class="font-semibold text-primary-blue text-lg mb-1">"${searchTerm}"</p>
                 <p class="text-sm text-gray-500 mt-2">Try searching with different terms</p>
             </div>
         `;
@@ -245,25 +494,44 @@ function displaySearchResults(results, searchTerm) {
     }
     
     let html = `
-        <div class="mb-4">
-            <p class="text-gray-600">Found <span class="font-bold text-primary-blue">${results.length}</span> documents for "<span class="font-semibold">${searchTerm}</span>"</p>
+        <div class="mb-6 p-4 bg-gradient-to-r from-primary-blue/5 to-blue-50 rounded-lg border border-primary-blue/20 animate-fade-in">
+            <div class="flex items-center justify-between">
+                <div>
+                    <p class="text-gray-600">Found <span class="font-bold text-primary-blue text-xl">${results.length}</span> documents for</p>
+                    <p class="font-semibold text-lg text-primary-blue">"${searchTerm}"</p>
+                </div>
+                <div class="bg-primary-blue text-white text-xs font-bold px-3 py-1 rounded-full">
+                    ${results.length} Results
+                </div>
+            </div>
         </div>
     `;
     
-    results.forEach(doc => {
+    results.forEach((doc, index) => {
+        // Add delay for staggered animation
+        const animationDelay = index * 50;
+        
         const docJson = JSON.stringify({
             ...doc,
             firestoreId: doc.id,
             createdAt: doc.createdAt ? (doc.createdAt.toDate ? doc.createdAt.toDate().toISOString() : doc.createdAt) : new Date().toISOString()
         });
         
+        let resultHtml = '';
         if (doc.type === 'receipt') {
-            html += renderReceiptSearchResult(doc, docJson);
+            resultHtml = renderReceiptSearchResult(doc, docJson);
         } else if (doc.type === 'invoice') {
-            html += renderInvoiceSearchResult(doc, docJson);
+            resultHtml = renderInvoiceSearchResult(doc, docJson);
         } else if (doc.type === 'agreement') {
-            html += renderAgreementSearchResult(doc, docJson);
+            resultHtml = renderAgreementSearchResult(doc, docJson);
         }
+        
+        // Wrap each result with animation
+        html += `
+            <div class="animate-fade-in" style="animation-delay: ${animationDelay}ms">
+                ${resultHtml}
+            </div>
+        `;
     });
     
     resultsList.innerHTML = html;
@@ -276,40 +544,68 @@ function renderReceiptSearchResult(doc, docJson) {
     const date = doc.receiptDate || (doc.createdAt?.toDate ? doc.createdAt.toDate().toLocaleDateString() : 'N/A');
     
     return `
-        <div class="p-4 border border-secondary-red/30 rounded-lg bg-white shadow-sm hover:shadow-md transition duration-200">
+        <div class="p-4 border border-secondary-red/30 rounded-lg bg-white shadow-sm hover:shadow-md transition-all duration-200 hover:scale-[1.01] hover:border-secondary-red/50 group">
             <div class="flex justify-between items-start">
                 <div class="flex-1">
                     <div class="flex items-center gap-2 mb-2">
-                        <span class="bg-secondary-red text-white text-xs font-bold px-2 py-1 rounded">RECEIPT</span>
+                        <span class="bg-gradient-to-r from-secondary-red to-red-500 text-white text-xs font-bold px-3 py-1 rounded-full flex items-center gap-1">
+                            <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4 4a2 2 0 00-2 2v4a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2H4z" clip-rule="evenodd"/></svg>
+                            RECEIPT
+                        </span>
                         <span class="text-sm text-gray-500">${date}</span>
                     </div>
-                    <h4 class="font-bold text-gray-800">${doc.receiptId}</h4>
-                    <p class="text-sm text-gray-700 mt-1"><strong>From:</strong> ${doc.receivedFrom}</p>
-                    <p class="text-sm text-gray-600"><strong>For:</strong> ${doc.beingPaidFor || 'N/A'}</p>
-                    <p class="text-sm text-gray-600"><strong>Amount:</strong> ${doc.currency} ${doc.amountReceived?.toFixed(2) || '0.00'}</p>
-                    ${doc.invoiceReference ? `<p class="text-sm text-gray-600"><strong>Invoice Ref:</strong> ${doc.invoiceReference}</p>` : ''}
+                    <h4 class="font-bold text-gray-800 text-lg mb-1">${doc.receiptId}</h4>
+                    <p class="text-sm text-gray-700 mb-1"><strong>From:</strong> ${doc.receivedFrom}</p>
+                    <p class="text-sm text-gray-600 mb-1"><strong>For:</strong> ${doc.beingPaidFor || 'N/A'}</p>
+                    <div class="flex items-center gap-4 mt-2">
+                        <span class="text-sm font-bold text-secondary-red">
+                            ${doc.currency} ${doc.amountReceived?.toFixed(2) || '0.00'}
+                        </span>
+                        ${doc.invoiceReference ? `
+                            <span class="text-xs bg-blue-50 text-primary-blue px-2 py-1 rounded">
+                                Invoice: ${doc.invoiceReference}
+                            </span>
+                        ` : ''}
+                    </div>
                 </div>
                 <div class="flex flex-col gap-2 ml-4">
                     <button onclick='reDownloadReceipt(${docJson})' 
-                            class="bg-secondary-red hover:bg-red-700 text-white text-xs py-1 px-3 rounded-full transition duration-150">
+                            class="bg-secondary-red hover:bg-red-700 text-white text-xs py-2 px-4 rounded-full transition-all duration-150 flex items-center gap-1 group-hover:scale-105">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                        </svg>
                         Download
                     </button>
+                    ${!doc.revoked ? `
                     <button onclick='addPaymentToReceipt(${docJson})' 
-                            class="bg-primary-blue hover:bg-blue-700 text-white text-xs py-1 px-3 rounded-full transition duration-150">
+                            class="bg-primary-blue hover:bg-blue-700 text-white text-xs py-2 px-4 rounded-full transition-all duration-150 flex items-center gap-1 group-hover:scale-105">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+                        </svg>
                         Add Payment
                     </button>
                     <button onclick='viewReceiptBalances(${docJson})' 
-                            class="bg-green-600 hover:bg-green-700 text-white text-xs py-1 px-3 rounded-full transition duration-150">
-                        View Balances
+                            class="bg-green-600 hover:bg-green-700 text-white text-xs py-2 px-4 rounded-full transition-all duration-150 flex items-center gap-1 group-hover:scale-105">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path>
+                        </svg>
+                        Balances
                     </button>
                     <button onclick='createAgreementFromReceipt(${docJson})' 
-                            class="bg-gray-700 hover:bg-gray-900 text-white text-xs py-1 px-3 rounded-full transition duration-150">
-                        Create Agreement
+                            class="bg-gray-700 hover:bg-gray-900 text-white text-xs py-2 px-4 rounded-full transition-all duration-150 flex items-center gap-1 group-hover:scale-105">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                        </svg>
+                        Agreement
                     </button>
                     <button onclick='revokeReceipt(${docJson})' 
-                            class="bg-red-600 hover:bg-red-800 text-white text-xs py-1 px-3 rounded-full transition duration-150">
+                            class="bg-red-600 hover:bg-red-800 text-white text-xs py-2 px-4 rounded-full transition-all duration-150 flex items-center gap-1 group-hover:scale-105">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                        </svg>
                         REVOKE
                     </button>
+                    ` : ''}
                 </div>
             </div>
         </div>
@@ -321,38 +617,77 @@ function renderReceiptSearchResult(doc, docJson) {
  */
 function renderInvoiceSearchResult(doc, docJson) {
     const date = doc.issueDate || (doc.createdAt?.toDate ? doc.createdAt.toDate().toLocaleDateString() : 'N/A');
+    const docTypeColor = doc.docType === 'Auction Invoice' ? 'bg-yellow-500' : 'bg-primary-blue';
     
     return `
-        <div class="p-4 border border-primary-blue/30 rounded-lg bg-white shadow-sm hover:shadow-md transition duration-200">
+        <div class="p-4 border border-primary-blue/30 rounded-lg bg-white shadow-sm hover:shadow-md transition-all duration-200 hover:scale-[1.01] hover:border-primary-blue/50 group">
             <div class="flex justify-between items-start">
                 <div class="flex-1">
                     <div class="flex items-center gap-2 mb-2">
-                        <span class="bg-primary-blue text-white text-xs font-bold px-2 py-1 rounded">${doc.docType || 'INVOICE'}</span>
+                        <span class="${docTypeColor} text-white text-xs font-bold px-3 py-1 rounded-full flex items-center gap-1">
+                            <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M5 2a2 2 0 00-2 2v14l3.5-2 3.5 2 3.5-2 3.5 2V4a2 2 0 00-2-2H5z" clip-rule="evenodd"/></svg>
+                            ${doc.docType || 'INVOICE'}
+                        </span>
                         <span class="text-sm text-gray-500">${date}</span>
                     </div>
-                    <h4 class="font-bold text-gray-800">${doc.invoiceId}</h4>
-                    <p class="text-sm text-gray-700 mt-1"><strong>Client:</strong> ${doc.clientName}</p>
-                    <p class="text-sm text-gray-600"><strong>Vehicle:</strong> ${doc.carDetails?.make || ''} ${doc.carDetails?.model || ''} ${doc.carDetails?.year || ''}</p>
-                    <p class="text-sm text-gray-600"><strong>Total:</strong> USD ${doc.pricing?.totalUSD?.toFixed(2) || '0.00'}</p>
-                    <p class="text-sm text-gray-600"><strong>Phone:</strong> ${doc.clientPhone || 'N/A'}</p>
+                    <h4 class="font-bold text-gray-800 text-lg mb-1">${doc.invoiceId}</h4>
+                    <p class="text-sm text-gray-700 mb-1"><strong>Client:</strong> ${doc.clientName}</p>
+                    <p class="text-sm text-gray-600 mb-1"><strong>Vehicle:</strong> ${doc.carDetails?.make || ''} ${doc.carDetails?.model || ''} ${doc.carDetails?.year || ''}</p>
+                    <div class="flex items-center gap-4 mt-2">
+                        <span class="text-sm font-bold text-primary-blue">
+                            USD ${doc.pricing?.totalUSD?.toFixed(2) || '0.00'}
+                        </span>
+                        <span class="text-xs text-gray-500">${doc.clientPhone || 'N/A'}</span>
+                    </div>
                 </div>
                 <div class="flex flex-col gap-2 ml-4">
                     <button onclick='reDownloadInvoice(${docJson})' 
-                            class="bg-primary-blue hover:bg-blue-700 text-white text-xs py-1 px-3 rounded-full transition duration-150">
+                            class="bg-primary-blue hover:bg-blue-700 text-white text-xs py-2 px-4 rounded-full transition-all duration-150 flex items-center gap-1 group-hover:scale-105">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                        </svg>
                         Download
                     </button>
+                    ${!doc.revoked ? `
                     <button onclick='createReceiptFromInvoice(${docJson})' 
-                            class="bg-secondary-red hover:bg-red-700 text-white text-xs py-1 px-3 rounded-full transition duration-150">
+                            class="bg-secondary-red hover:bg-red-700 text-white text-xs py-2 px-4 rounded-full transition-all duration-150 flex items-center gap-1 group-hover:scale-105">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+                        </svg>
                         Create Receipt
                     </button>
+                    ${!doc.pricing?.depositPaid ? `
                     <button onclick='markInvoiceDepositPaid(${docJson})' 
-                            class="bg-green-600 hover:bg-green-700 text-white text-xs py-1 px-3 rounded-full transition duration-150">
+                            class="bg-green-600 hover:bg-green-700 text-white text-xs py-2 px-4 rounded-full transition-all duration-150 flex items-center gap-1 group-hover:scale-105">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                        </svg>
                         Deposit Paid
                     </button>
+                    ` : ''}
                     <button onclick='createAdditionalInvoice(${docJson})' 
-                            class="bg-yellow-600 hover:bg-yellow-700 text-white text-xs py-1 px-3 rounded-full transition duration-150">
+                            class="bg-yellow-600 hover:bg-yellow-700 text-white text-xs py-2 px-4 rounded-full transition-all duration-150 flex items-center gap-1 group-hover:scale-105">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+                        </svg>
                         Add Invoice
                     </button>
+                    <button onclick='revokeInvoice(${docJson})' 
+                            class="bg-red-600 hover:bg-red-800 text-white text-xs py-2 px-4 rounded-full transition-all duration-150 flex items-center gap-1 group-hover:scale-105">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                        </svg>
+                        REVOKE
+                    </button>
+                    ` : `
+                    <button onclick='unrevokeInvoice(${docJson})' 
+                            class="bg-gray-600 hover:bg-gray-800 text-white text-xs py-2 px-4 rounded-full transition-all duration-150 flex items-center gap-1 group-hover:scale-105">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                        </svg>
+                        UNREVOKE
+                    </button>
+                    `}
                 </div>
             </div>
         </div>
@@ -366,22 +701,32 @@ function renderAgreementSearchResult(doc, docJson) {
     const date = doc.agreementDate || (doc.createdAt?.toDate ? doc.createdAt.toDate().toLocaleDateString() : 'N/A');
     
     return `
-        <div class="p-4 border border-gray-300 rounded-lg bg-white shadow-sm hover:shadow-md transition duration-200">
+        <div class="p-4 border border-gray-300 rounded-lg bg-white shadow-sm hover:shadow-md transition-all duration-200 hover:scale-[1.01] hover:border-gray-400 group">
             <div class="flex justify-between items-start">
                 <div class="flex-1">
                     <div class="flex items-center gap-2 mb-2">
-                        <span class="bg-gray-700 text-white text-xs font-bold px-2 py-1 rounded">AGREEMENT</span>
+                        <span class="bg-gray-700 text-white text-xs font-bold px-3 py-1 rounded-full flex items-center gap-1">
+                            <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4 4a2 2 0 00-2 2v8a2 2 0 002 2h12a2 2 0 002-2V8a2 2 0 00-2-2h-5L9 4H4z" clip-rule="evenodd"/></svg>
+                            AGREEMENT
+                        </span>
                         <span class="text-sm text-gray-500">${date}</span>
                     </div>
-                    <h4 class="font-bold text-gray-800">Agreement #${doc.id.substring(0, 8)}...</h4>
-                    <p class="text-sm text-gray-700 mt-1"><strong>Buyer:</strong> ${doc.buyer?.name || 'N/A'}</p>
-                    <p class="text-sm text-gray-600"><strong>Vehicle:</strong> ${doc.vehicle?.makeModel || 'N/A'}</p>
-                    <p class="text-sm text-gray-600"><strong>Total:</strong> ${doc.salesTerms?.currency || 'KES'} ${doc.salesTerms?.price?.toFixed(2) || '0.00'}</p>
-                    <p class="text-sm text-gray-600"><strong>Phone:</strong> ${doc.buyer?.phone || 'N/A'}</p>
+                    <h4 class="font-bold text-gray-800 text-lg mb-1">Agreement #${doc.id.substring(0, 8)}...</h4>
+                    <p class="text-sm text-gray-700 mb-1"><strong>Buyer:</strong> ${doc.buyer?.name || 'N/A'}</p>
+                    <p class="text-sm text-gray-600 mb-1"><strong>Vehicle:</strong> ${doc.vehicle?.makeModel || 'N/A'}</p>
+                    <div class="flex items-center gap-4 mt-2">
+                        <span class="text-sm font-bold text-gray-700">
+                            ${doc.salesTerms?.currency || 'KES'} ${doc.salesTerms?.price?.toFixed(2) || '0.00'}
+                        </span>
+                        <span class="text-xs text-gray-500">${doc.buyer?.phone || 'N/A'}</span>
+                    </div>
                 </div>
                 <div class="flex flex-col gap-2 ml-4">
                     <button onclick='reDownloadAgreement(${docJson})' 
-                            class="bg-gray-700 hover:bg-gray-800 text-white text-xs py-1 px-3 rounded-full transition duration-150">
+                            class="bg-gray-700 hover:bg-gray-800 text-white text-xs py-2 px-4 rounded-full transition-all duration-150 flex items-center gap-1 group-hover:scale-105">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                        </svg>
                         Download
                     </button>
                 </div>
@@ -403,91 +748,138 @@ function clearSearch() {
     if (searchInput) searchInput.value = '';
     if (filterSelect) filterSelect.value = 'all';
     
-    if (searchResultsDiv) searchResultsDiv.classList.add('hidden');
-    if (docCreationArea) docCreationArea.classList.remove('hidden');
+    if (searchResultsDiv) {
+        searchResultsDiv.style.opacity = '0';
+        searchResultsDiv.style.transition = 'opacity 0.3s ease-out';
+        setTimeout(() => {
+            searchResultsDiv.classList.add('hidden');
+            searchResultsDiv.style.opacity = '1';
+        }, 300);
+    }
+    
+    if (docCreationArea) {
+        docCreationArea.classList.remove('hidden');
+        docCreationArea.style.animation = 'fade-in 0.3s ease-out';
+    }
+    
+    showSuccessToast("Search cleared");
 }
 
 // Add event listener for Enter key in search
 document.addEventListener('DOMContentLoaded', function() {
-
-  function setupSearchEnterKey() {
-    const searchInput = document.getElementById('document-search');
-    if (searchInput) {
-        // Remove any existing listeners to avoid duplicates
-        searchInput.removeEventListener('keypress', handleSearchEnterKey);
-        searchInput.addEventListener('keypress', handleSearchEnterKey);
+    function setupSearchEnterKey() {
+        const searchInput = document.getElementById('document-search');
+        if (searchInput) {
+            searchInput.removeEventListener('keypress', handleSearchEnterKey);
+            searchInput.addEventListener('keypress', handleSearchEnterKey);
+        }
     }
-}
 
-function handleSearchEnterKey(e) {
-    if (e.key === 'Enter') {
-        e.preventDefault();
-        searchDocuments();
+    function handleSearchEnterKey(e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            searchDocuments();
+        }
     }
-}
 
-// Then update the handleDocumentGenerator function to call setupSearchEnterKey:
-function handleDocumentGenerator() {
-    appContent.innerHTML = `
-        <h2 class="text-3xl font-bold mb-6 text-primary-blue">Document Generator</h2>
-        
-        <!-- Search and Filter Section -->
-        <div class="mb-6 p-4 bg-white rounded-xl shadow-md border border-gray-200">
-            <div class="flex flex-wrap gap-4 items-end">
-                <div class="flex-1 min-w-[300px]">
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Search Documents</label>
-                    <div class="flex gap-2">
-                        <input type="text" id="document-search" placeholder="Search by client name, reference number, or car make/model..." class="flex-1 p-3 border border-gray-300 rounded-lg focus:ring-primary-blue focus:border-primary-blue">
-                        <button onclick="searchDocuments()" class="bg-primary-blue hover:bg-blue-900 text-white font-bold py-2 px-6 rounded-lg transition duration-150">
-                            Search
-                        </button>
-                        <button onclick="clearSearch()" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-lg transition duration-150">
-                            Clear
-                        </button>
+    // Then update the handleDocumentGenerator function to call setupSearchEnterKey:
+    function handleDocumentGenerator() {
+        appContent.innerHTML = `
+            <h2 class="text-3xl font-bold mb-6 text-primary-blue animate-fade-in">Document Generator</h2>
+            
+            <!-- Search and Filter Section -->
+            <div class="mb-6 p-4 bg-white rounded-xl shadow-md border border-gray-200 animate-fade-in" style="animation-delay: 100ms">
+                <div class="flex flex-wrap gap-4 items-end">
+                    <div class="flex-1 min-w-[300px]">
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Search Documents</label>
+                        <div class="flex gap-2">
+                            <input type="text" id="document-search" placeholder="Search by client name, reference number, or car make/model..." class="flex-1 p-3 border border-gray-300 rounded-lg focus:ring-primary-blue focus:border-primary-blue transition duration-200">
+                            <button onclick="searchDocuments()" class="bg-primary-blue hover:bg-blue-900 text-white font-bold py-2 px-6 rounded-lg transition duration-150 flex items-center gap-2">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                                </svg>
+                                Search
+                            </button>
+                            <button onclick="clearSearch()" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-lg transition duration-150 flex items-center gap-2">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                                </svg>
+                                Clear
+                            </button>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Document Type</label>
+                        <select id="document-type-filter" class="p-3 border border-gray-300 rounded-lg focus:ring-primary-blue focus:border-primary-blue transition duration-200">
+                            <option value="all">All Documents</option>
+                            <option value="receipt">Receipts Only</option>
+                            <option value="invoice">Invoices Only</option>
+                            <option value="agreement">Sales Agreements Only</option>
+                        </select>
                     </div>
                 </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Document Type</label>
-                    <select id="document-type-filter" class="p-3 border border-gray-300 rounded-lg focus:ring-primary-blue focus:border-primary-blue">
-                        <option value="all">All Documents</option>
-                        <option value="receipt">Receipts Only</option>
-                        <option value="invoice">Invoices Only</option>
-                        <option value="agreement">Sales Agreements Only</option>
-                    </select>
+                <div class="mt-3 text-sm text-gray-600">
+                    <p>Search by: Client Name, Reference Number, Car Make/Model, Phone Number, or VIN</p>
                 </div>
             </div>
-            <div class="mt-3 text-sm text-gray-600">
-                <p>Search by: Client Name, Reference Number, Car Make/Model, Phone Number, or VIN</p>
-            </div>
-        </div>
 
-        <div class="flex space-x-4 mb-6 flex-wrap">
-            <button onclick="renderInvoiceForm()" class="bg-primary-blue hover:bg-blue-900 text-white p-3 rounded-lg transition duration-150 mb-2">Invoice/Proforma</button>
-            <button onclick="renderInvoiceHistory()" class="bg-gray-700 hover:bg-gray-900 text-white p-3 rounded-lg transition duration-150 mb-2">Invoice History</button>
-            <button onclick="renderReceiptForm()" class="bg-secondary-red hover:bg-red-700 text-white p-3 rounded-lg transition duration-150 mb-2">Payment Receipt</button>
-            <button onclick="renderAgreementForm()" class="bg-gray-700 hover:bg-gray-900 text-white p-3 rounded-lg transition duration-150 mb-2">Car Sales Agreement</button>
-            <button onclick="renderBankManagement()" class="bg-green-600 hover:bg-green-700 text-white p-3 rounded-lg transition duration-150 mb-2">BANKS</button>
-        </div>
-        
-        <div id="document-form-area">
-            <div id="search-results" class="hidden">
-                <h3 class="text-xl font-bold mb-4 text-primary-blue">Search Results</h3>
-                <div id="search-results-list" class="space-y-4">
-                    <!-- Search results will appear here -->
+            <div class="flex space-x-4 mb-6 flex-wrap animate-fade-in" style="animation-delay: 200ms">
+                <button onclick="renderInvoiceForm()" class="bg-primary-blue hover:bg-blue-900 text-white p-3 rounded-lg transition duration-150 mb-2 flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                    </svg>
+                    Invoice/Proforma
+                </button>
+                <button onclick="renderInvoiceHistory()" class="bg-gray-700 hover:bg-gray-900 text-white p-3 rounded-lg transition duration-150 mb-2 flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                    Invoice History
+                </button>
+                <button onclick="renderReceiptForm()" class="bg-secondary-red hover:bg-red-700 text-white p-3 rounded-lg transition duration-150 mb-2 flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                    Payment Receipt
+                </button>
+                <button onclick="renderAgreementForm()" class="bg-gray-700 hover:bg-gray-900 text-white p-3 rounded-lg transition duration-150 mb-2 flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                    </svg>
+                    Car Sales Agreement
+                </button>
+                <button onclick="renderBankManagement()" class="bg-green-600 hover:bg-green-700 text-white p-3 rounded-lg transition duration-150 mb-2 flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"></path>
+                    </svg>
+                    BANKS
+                </button>
+            </div>
+            
+            <div id="document-form-area" class="animate-fade-in" style="animation-delay: 300ms">
+                <div id="search-results" class="hidden">
+                    <h3 class="text-xl font-bold mb-4 text-primary-blue">Search Results</h3>
+                    <div id="search-results-list" class="space-y-4">
+                        <!-- Search results will appear here -->
+                    </div>
+                </div>
+                <div id="document-creation-area">
+                    <div class="text-center p-8 bg-gradient-to-r from-primary-blue/5 to-blue-50 rounded-xl border border-dashed border-primary-blue/30">
+                        <svg class="w-16 h-16 text-primary-blue/50 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                        </svg>
+                        <p class="text-gray-600 text-lg">Select a document type or manage bank accounts</p>
+                        <p class="text-sm text-gray-500 mt-2">Create invoices, receipts, agreements, or search existing documents</p>
+                    </div>
                 </div>
             </div>
-            <div id="document-creation-area">
-                <p class="text-gray-600">Select a document type or manage bank accounts.</p>
-            </div>
-        </div>
-    `;
-  
-    
-    // Setup enter key listener
-    setTimeout(() => {
-        setupSearchEnterKey();
-    }, 100);
-}
+        `;
+        
+        // Setup enter key listener
+        setTimeout(() => {
+            setupSearchEnterKey();
+        }, 100);
+    }
     // This will be initialized when handleDocumentGenerator is called
 });
 
@@ -497,10 +889,10 @@ function handleDocumentGenerator() {
 
 function renderDashboard() {
     appContent.innerHTML = `
-        <h2 class="text-4xl font-extrabold mb-8 text-primary-blue">CDMS Dashboard</h2>
+        <h2 class="text-4xl font-extrabold mb-8 text-primary-blue animate-fade-in">CDMS Dashboard</h2>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
-            ${createDashboardCard('Document Generator', 'Invoices, Receipts, Agreements', 'bg-green-100 border-green-400', 'handleDocumentGenerator')}
-            ${createDashboardCard('Fleet Management', 'Car Tracking, Clearing, ETA', 'bg-yellow-100 border-yellow-400', 'handleFleetManagement')}
+            ${createDashboardCard('Document Generator', 'Invoices, Receipts, Agreements', 'bg-gradient-to-br from-green-50 to-green-100 border-green-400', 'handleDocumentGenerator', 0)}
+            ${createDashboardCard('Fleet Management', 'Car Tracking, Clearing, ETA', 'bg-gradient-to-br from-yellow-50 to-yellow-100 border-yellow-400', 'handleFleetManagement', 100)}
         </div>
     `;
     
@@ -513,21 +905,19 @@ function renderDashboard() {
     mainNav.classList.remove('hidden');
 }
 
-async function handleLogin() {
-    const email = document.getElementById('email').value;
-    const password = document.getElementById('password').value;
-    try {
-        await auth.signInWithEmailAndPassword(email, password);
-    } catch (error) {
-        console.error("Login failed:", error.message);
-        alert("Login Failed: " + error.message);
-    }
-}
-
-function createDashboardCard(title, subtitle, colorClass, handler) {
+function createDashboardCard(title, subtitle, colorClass, handler, delay = 0) {
     return `
-        <div class="${colorClass} border-2 p-6 rounded-xl shadow-lg cursor-pointer hover:shadow-2xl hover:scale-[1.02] transition duration-300 transform" onclick="${handler}()">
-            <h3 class="text-2xl font-bold text-gray-800">${title}</h3>
+        <div class="${colorClass} border-2 p-6 rounded-xl shadow-lg cursor-pointer hover:shadow-2xl hover:scale-[1.02] transition-all duration-300 transform animate-fade-in" 
+             onclick="${handler}()" 
+             style="animation-delay: ${delay}ms">
+            <div class="flex items-center mb-4">
+                <div class="w-12 h-12 rounded-lg bg-white flex items-center justify-center shadow-sm mr-4">
+                    ${title.includes('Document') ? 
+                        '<svg class="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>' :
+                        '<svg class="w-6 h-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>'}
+                </div>
+                <h3 class="text-2xl font-bold text-gray-800">${title}</h3>
+            </div>
             <p class="text-gray-600 mt-2">${subtitle}</p>
         </div>
     `;
@@ -553,26 +943,32 @@ async function generateSharedRefId(clientName, carModel, carYear, collectionName
 
 function handleDocumentGenerator() {
     appContent.innerHTML = `
-        <h2 class="text-3xl font-bold mb-6 text-primary-blue">Document Generator</h2>
+        <h2 class="text-3xl font-bold mb-6 text-primary-blue animate-fade-in">Document Generator</h2>
         
         <!-- Search and Filter Section -->
-        <div class="mb-6 p-4 bg-white rounded-xl shadow-md border border-gray-200">
+        <div class="mb-6 p-4 bg-white rounded-xl shadow-md border border-gray-200 animate-fade-in" style="animation-delay: 100ms">
             <div class="flex flex-wrap gap-4 items-end">
                 <div class="flex-1 min-w-[300px]">
                     <label class="block text-sm font-medium text-gray-700 mb-1">Search Documents</label>
                     <div class="flex gap-2">
-                        <input type="text" id="document-search" placeholder="Search by client name, reference number, or car make/model..." class="flex-1 p-3 border border-gray-300 rounded-lg focus:ring-primary-blue focus:border-primary-blue">
-                        <button onclick="searchDocuments()" class="bg-primary-blue hover:bg-blue-900 text-white font-bold py-2 px-6 rounded-lg transition duration-150">
+                        <input type="text" id="document-search" placeholder="Search by client name, reference number, or car make/model..." class="flex-1 p-3 border border-gray-300 rounded-lg focus:ring-primary-blue focus:border-primary-blue transition duration-200">
+                        <button onclick="searchDocuments()" class="bg-primary-blue hover:bg-blue-900 text-white font-bold py-2 px-6 rounded-lg transition duration-150 flex items-center gap-2">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                            </svg>
                             Search
                         </button>
-                        <button onclick="clearSearch()" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-lg transition duration-150">
+                        <button onclick="clearSearch()" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-lg transition duration-150 flex items-center gap-2">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                            </svg>
                             Clear
                         </button>
                     </div>
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">Document Type</label>
-                    <select id="document-type-filter" class="p-3 border border-gray-300 rounded-lg focus:ring-primary-blue focus:border-primary-blue">
+                    <select id="document-type-filter" class="p-3 border border-gray-300 rounded-lg focus:ring-primary-blue focus:border-primary-blue transition duration-200">
                         <option value="all">All Documents</option>
                         <option value="receipt">Receipts Only</option>
                         <option value="invoice">Invoices Only</option>
@@ -585,15 +981,40 @@ function handleDocumentGenerator() {
             </div>
         </div>
 
-        <div class="flex space-x-4 mb-6 flex-wrap">
-            <button onclick="renderInvoiceForm()" class="bg-primary-blue hover:bg-blue-900 text-white p-3 rounded-lg transition duration-150 mb-2">Invoice/Proforma</button>
-            <button onclick="renderInvoiceHistory()" class="bg-gray-700 hover:bg-gray-900 text-white p-3 rounded-lg transition duration-150 mb-2">Invoice History</button>
-            <button onclick="renderReceiptForm()" class="bg-secondary-red hover:bg-red-700 text-white p-3 rounded-lg transition duration-150 mb-2">Payment Receipt</button>
-            <button onclick="renderAgreementForm()" class="bg-gray-700 hover:bg-gray-900 text-white p-3 rounded-lg transition duration-150 mb-2">Car Sales Agreement</button>
-            <button onclick="renderBankManagement()" class="bg-green-600 hover:bg-green-700 text-white p-3 rounded-lg transition duration-150 mb-2">BANKS</button>
+        <div class="flex space-x-4 mb-6 flex-wrap animate-fade-in" style="animation-delay: 200ms">
+            <button onclick="renderInvoiceForm()" class="bg-primary-blue hover:bg-blue-900 text-white p-3 rounded-lg transition duration-150 mb-2 flex items-center gap-2">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                </svg>
+                Invoice/Proforma
+            </button>
+            <button onclick="renderInvoiceHistory()" class="bg-gray-700 hover:bg-gray-900 text-white p-3 rounded-lg transition duration-150 mb-2 flex items-center gap-2">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                </svg>
+                Invoice History
+            </button>
+            <button onclick="renderReceiptForm()" class="bg-secondary-red hover:bg-red-700 text-white p-3 rounded-lg transition duration-150 mb-2 flex items-center gap-2">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                </svg>
+                Payment Receipt
+            </button>
+            <button onclick="renderAgreementForm()" class="bg-gray-700 hover:bg-gray-900 text-white p-3 rounded-lg transition duration-150 mb-2 flex items-center gap-2">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                </svg>
+                Car Sales Agreement
+            </button>
+            <button onclick="renderBankManagement()" class="bg-green-600 hover:bg-green-700 text-white p-3 rounded-lg transition duration-150 mb-2 flex items-center gap-2">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"></path>
+                </svg>
+                BANKS
+            </button>
         </div>
         
-        <div id="document-form-area">
+        <div id="document-form-area" class="animate-fade-in" style="animation-delay: 300ms">
             <div id="search-results" class="hidden">
                 <h3 class="text-xl font-bold mb-4 text-primary-blue">Search Results</h3>
                 <div id="search-results-list" class="space-y-4">
@@ -601,7 +1022,13 @@ function handleDocumentGenerator() {
                 </div>
             </div>
             <div id="document-creation-area">
-                <p class="text-gray-600">Select a document type or manage bank accounts.</p>
+                <div class="text-center p-8 bg-gradient-to-r from-primary-blue/5 to-blue-50 rounded-xl border border-dashed border-primary-blue/30">
+                    <svg class="w-16 h-16 text-primary-blue/50 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                    </svg>
+                    <p class="text-gray-600 text-lg">Select a document type or manage bank accounts</p>
+                    <p class="text-sm text-gray-500 mt-2">Create invoices, receipts, agreements, or search existing documents</p>
+                </div>
             </div>
         </div>
     `;
@@ -746,33 +1173,36 @@ async function calculateReceiptBalances(receiptId) {
 function renderReceiptForm(invoiceReference = '') {
     const formArea = document.getElementById('document-form-area');
     formArea.innerHTML = `
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div class="p-6 border border-secondary-red rounded-xl bg-white shadow-md">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 animate-fade-in">
+            <div class="p-6 border border-secondary-red rounded-xl bg-white shadow-md animate-fade-in" style="animation-delay: 100ms">
                 <h3 class="text-xl font-semibold mb-4 text-secondary-red">New Payment Receipt</h3>
                 <form id="receipt-form" onsubmit="event.preventDefault(); saveReceipt()">
                     
                     <div class="grid grid-cols-2 gap-3 mb-4">
-                        <select id="receiptType" required class="block w-full p-2 border rounded-md">
+                        <select id="receiptType" required class="block w-full p-2 border rounded-md transition duration-200">
                             <option value="" disabled selected>Select Receipt Type</option>
                             <option value="Auction Imports">Auction Imports</option>
                             <option value="BeForward">BeForward</option>
                             <option value="Local Sales">Local Sales</option>
                             <option value="Other">Other</option>
                         </select>
-                        <input type="text" id="receivedFrom" required placeholder="Received From (Customer Name)" class="block w-full p-2 border rounded-md">
+                        <input type="text" id="receivedFrom" required placeholder="Received From (Customer Name)" class="block w-full p-2 border rounded-md transition duration-200">
                     </div>
 
                     <div class="mb-4">
                         <label for="invoiceReference" class="block text-gray-700 font-medium mb-1">Invoice Reference (Optional)</label>
                         <div class="flex gap-2">
-                            <input type="text" id="invoiceReference" placeholder="Enter Invoice Number" value="${invoiceReference}" class="flex-1 p-2 border rounded-md">
-                            <button type="button" onclick="fetchInvoiceDetails()" class="bg-primary-blue hover:bg-blue-900 text-white px-3 py-2 rounded-md text-sm">
+                            <input type="text" id="invoiceReference" placeholder="Enter Invoice Number" value="${invoiceReference}" class="flex-1 p-2 border rounded-md transition duration-200">
+                            <button type="button" onclick="fetchInvoiceDetails()" class="bg-primary-blue hover:bg-blue-900 text-white px-3 py-2 rounded-md text-sm transition duration-150 flex items-center gap-1">
+                                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                                </svg>
                                 Fetch Invoice
                             </button>
                         </div>
                     </div>
 
-                    <div id="invoice-details" class="hidden mb-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
+                    <div id="invoice-details" class="hidden mb-4 p-3 bg-blue-50 rounded-lg border border-blue-200 animate-fade-in">
                         <h4 class="font-bold text-primary-blue mb-2">Invoice Details:</h4>
                         <p id="invoice-client" class="text-sm"></p>
                         <p id="invoice-vehicle" class="text-sm"></p>
@@ -783,23 +1213,26 @@ function renderReceiptForm(invoiceReference = '') {
                     </div>
 
                     <!-- NEW SECTION FOR MANUAL TOTAL PAYMENT INPUT -->
-                    <div id="manual-total-section" class="hidden mb-4 p-3 bg-green-50 rounded-lg border border-green-200">
+                    <div id="manual-total-section" class="hidden mb-4 p-3 bg-green-50 rounded-lg border border-green-200 animate-fade-in">
                         <h4 class="font-bold text-green-700 mb-2">Total Payment Information (For receipts without invoice)</h4>
                         <div class="grid grid-cols-2 gap-3 mb-2">
                             <div>
                                 <label class="block text-sm font-medium text-gray-700">Total Payment Amount</label>
-                                <input type="number" id="manualTotalAmount" step="0.01" placeholder="0.00" class="w-full p-2 border rounded-md" oninput="updateManualBalanceCalculation()">
+                                <input type="number" id="manualTotalAmount" step="0.01" placeholder="0.00" class="w-full p-2 border rounded-md transition duration-200" oninput="updateManualBalanceCalculation()">
                             </div>
                             <div>
                                 <label class="block text-sm font-medium text-gray-700">Currency</label>
-                                <select id="manualTotalCurrency" class="w-full p-2 border rounded-md" onchange="updateManualBalanceCalculation()">
+                                <select id="manualTotalCurrency" class="w-full p-2 border rounded-md transition duration-200" onchange="updateManualBalanceCalculation()">
                                     <option value="KSH">KSH</option>
                                     <option value="USD">USD</option>
                                 </select>
                             </div>
                         </div>
                         <p id="manual-total-display" class="text-sm text-gray-600"></p>
-                        <button type="button" onclick="applyManualTotalToBalances()" class="mt-2 bg-green-600 hover:bg-green-700 text-white text-xs py-1 px-3 rounded-md transition duration-150">
+                        <button type="button" onclick="applyManualTotalToBalances()" class="mt-2 bg-green-600 hover:bg-green-700 text-white text-xs py-1 px-3 rounded-md transition duration-150 flex items-center gap-1">
+                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                            </svg>
                             Apply to Balance Calculation
                         </button>
                     </div>
@@ -807,49 +1240,49 @@ function renderReceiptForm(invoiceReference = '') {
                     <fieldset class="border p-4 rounded-lg mb-4">
                         <legend class="text-base font-semibold text-primary-blue px-2">Amount Received</legend>
                         <div class="grid grid-cols-3 gap-3">
-                            <select id="currency" required class="p-2 border rounded-md">
+                            <select id="currency" required class="p-2 border rounded-md transition duration-200">
                                 <option value="KSH">KSH</option>
                                 <option value="USD">USD</option>
                             </select>
-                            <input type="number" id="amountReceived" step="0.01" required placeholder="Amount Figure" class="p-2 border rounded-md col-span-2" oninput="updateAmountInWords(); checkForManualTotal();">
+                            <input type="number" id="amountReceived" step="0.01" required placeholder="Amount Figure" class="p-2 border rounded-md col-span-2 transition duration-200" oninput="updateAmountInWords(); checkForManualTotal();">
                         </div>
                         <div class="mt-2">
                             <label for="amountWords" class="block text-sm font-medium text-gray-700">Amount in Words:</label>
-                            <textarea id="amountWords" rows="2" readonly class="mt-1 block w-full p-2 border rounded-md bg-gray-100 text-gray-800"></textarea>
+                            <textarea id="amountWords" rows="2" readonly class="mt-1 block w-full p-2 border rounded-md bg-gray-100 text-gray-800 transition duration-200"></textarea>
                         </div>
                     </fieldset>
 
                     <!-- ADD BUTTON TO OPEN MANUAL TOTAL SECTION -->
                     <div class="mb-4">
-                        <button type="button" onclick="toggleManualTotalSection()" class="text-primary-blue hover:text-blue-900 text-sm underline">
+                        <button type="button" onclick="toggleManualTotalSection()" class="text-primary-blue hover:text-blue-900 text-sm underline transition duration-150">
                             + Add total payment information (for receipts without invoice)
                         </button>
                     </div>
 
-                    <input type="text" id="beingPaidFor" required placeholder="Being Paid For (e.g., Toyota Vitz 2018 Deposit)" value="${invoiceReference}" class="mb-4 block w-full p-2 border rounded-md">
+                    <input type="text" id="beingPaidFor" required placeholder="Being Paid For (e.g., Toyota Vitz 2018 Deposit)" value="${invoiceReference}" class="mb-4 block w-full p-2 border rounded-md transition duration-200">
 
                     <fieldset class="border p-4 rounded-lg mb-4">
                         <legend class="text-base font-semibold text-primary-blue px-2">Payment Details</legend>
                         <div class="mb-3">
                             <label for="exchangeRate" class="block text-sm font-medium text-gray-700">Exchange Rate (USD 1 = KES)</label>
-                            <input type="number" id="exchangeRate" step="0.01" value="130.00" required class="w-full p-2 border rounded-md">
+                            <input type="number" id="exchangeRate" step="0.01" value="130.00" required class="w-full p-2 border rounded-md transition duration-200">
                         </div>
                         <div class="mb-3">
                             <label for="bankUsed" class="block text-sm font-medium text-gray-700">Bank Used</label>
-                            <select id="bankUsed" required class="w-full p-2 border rounded-md">
+                            <select id="bankUsed" required class="w-full p-2 border rounded-md transition duration-200">
                                 <option value="" disabled selected>Select Bank</option>
                                 <option value="Cash">Cash</option>
                             </select>
                         </div>
                         <div class="grid grid-cols-2 gap-3">
-                            <input type="text" id="chequeNo" placeholder="Cheque No. (Optional)" class="p-2 border rounded-md">
-                            <input type="text" id="rtgsTtNo" placeholder="RTGS/TT No. (Optional)" class="p-2 border rounded-md">
+                            <input type="text" id="chequeNo" placeholder="Cheque No. (Optional)" class="p-2 border rounded-md transition duration-200">
+                            <input type="text" id="rtgsTtNo" placeholder="RTGS/TT No. (Optional)" class="p-2 border rounded-md transition duration-200">
                         </div>
                     </fieldset>
 
                     <div class="grid grid-cols-2 gap-3 mb-6">
                         <input type="number" id="balanceRemaining" step="0.01" placeholder="Balance Remaining (Auto-calculated)" readonly class="block w-full p-2 border rounded-md bg-gray-100">
-                        <input type="date" id="balanceDueDate" placeholder="To be paid on or before" class="block w-full p-2 border rounded-md">
+                        <input type="date" id="balanceDueDate" placeholder="To be paid on or before" class="block w-full p-2 border rounded-md transition duration-200">
                     </div>
 
                     <div class="mb-4 p-3 bg-yellow-50 rounded-lg border border-yellow-200">
@@ -858,21 +1291,28 @@ function renderReceiptForm(invoiceReference = '') {
                         <p id="calculated-balance-usd" class="text-sm">USD Balance: --</p>
                     </div>
 
-                    <button type="submit" class="w-full bg-secondary-red hover:bg-red-700 text-white font-bold py-3 rounded-lg transition duration-150">
-                        Generate & Save Receipt
+                    <button type="submit" id="save-receipt-btn" class="w-full bg-secondary-red hover:bg-red-700 text-white font-bold py-3 rounded-lg transition duration-150 flex items-center justify-center gap-2">
+                        <span>Generate & Save Receipt</span>
+                        <svg id="receipt-spinner" class="hidden w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
                     </button>
                 </form>
             </div>
 
-            <div class="p-6 border border-gray-300 rounded-xl bg-white shadow-md">
+            <div class="p-6 border border-gray-300 rounded-xl bg-white shadow-md animate-fade-in" style="animation-delay: 200ms">
                 <h3 class="text-xl font-semibold mb-4 text-primary-blue">Recent Receipts</h3>
                 <div class="mb-4">
-                    <button onclick="renderReceiptBalancesView()" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-md text-sm transition duration-150">
+                    <button onclick="renderReceiptBalancesView()" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-md text-sm transition duration-150 flex items-center gap-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path>
+                        </svg>
                         View All Receipt Balances
                     </button>
                 </div>
                 <div id="recent-receipts">
-                    <p class="text-center text-gray-500">Loading payments...</p>
+                    ${createShimmerLoader(2)}
                 </div>
             </div>
         </div>
@@ -906,11 +1346,14 @@ function toggleManualTotalSection() {
     const invoiceRef = document.getElementById('invoiceReference').value;
     
     if (invoiceRef.trim()) {
-        alert("You already have an invoice reference. Remove it first to use manual total payment.");
+        showErrorToast("You already have an invoice reference. Remove it first to use manual total payment.");
         return;
     }
     
     manualSection.classList.toggle('hidden');
+    if (!manualSection.classList.contains('hidden')) {
+        manualSection.style.animation = 'fade-in 0.3s ease-out';
+    }
 }
 
 function checkForManualTotal() {
@@ -923,10 +1366,10 @@ function checkForManualTotal() {
         if (!document.getElementById('manual-total-suggestion')) {
             const suggestion = document.createElement('div');
             suggestion.id = 'manual-total-suggestion';
-            suggestion.className = 'mb-3 p-2 bg-yellow-50 rounded text-sm text-yellow-700';
+            suggestion.className = 'mb-3 p-2 bg-yellow-50 rounded text-sm text-yellow-700 animate-fade-in';
             suggestion.innerHTML = `
                 <p>No invoice reference provided. Consider adding total payment amount for accurate balance calculation.</p>
-                <button type="button" onclick="toggleManualTotalSection()" class="mt-1 text-blue-600 hover:text-blue-800 underline">
+                <button type="button" onclick="toggleManualTotalSection()" class="mt-1 text-blue-600 hover:text-blue-800 underline transition duration-150">
                     Add total payment information
                 </button>
             `;
@@ -964,7 +1407,7 @@ function applyManualTotalToBalances() {
     const exchangeRate = parseFloat(document.getElementById('exchangeRate').value) || 130;
     
     if (manualTotal <= 0) {
-        alert("Please enter a valid total payment amount");
+        showErrorToast("Please enter a valid total payment amount");
         return;
     }
     
@@ -989,7 +1432,7 @@ function applyManualTotalToBalances() {
     // Update calculations
     updateReceiptCalculations();
     
-    alert(`Total payment of ${manualCurrency} ${manualTotal.toFixed(2)} applied. Balance calculations will now use this total.`);
+    showSuccessToast(`Total payment of ${manualCurrency} ${manualTotal.toFixed(2)} applied. Balance calculations will now use this total.`);
 }
 
 /**
@@ -999,13 +1442,14 @@ async function populateBankDropdownForReceipt() {
     const bankSelect = document.getElementById('bankUsed');
     if (!bankSelect) return;
 
-    // Clear existing options except the first one
-    while (bankSelect.options.length > 1) {
-        bankSelect.remove(1);
-    }
+    // Show loading state in dropdown
+    bankSelect.innerHTML = '<option value="" disabled selected>Loading banks...</option>';
 
     try {
         const snapshot = await db.collection("bankDetails").orderBy("createdAt", "desc").get();
+        
+        // Clear existing options
+        bankSelect.innerHTML = '<option value="" disabled selected>Select Bank</option>';
         
         if (snapshot.empty) {
             // Add a placeholder if no banks are configured
@@ -1025,12 +1469,19 @@ async function populateBankDropdownForReceipt() {
             bankSelect.appendChild(option);
         });
 
+        // Add cash option
+        const cashOption = document.createElement('option');
+        cashOption.value = "Cash";
+        cashOption.textContent = "Cash";
+        bankSelect.appendChild(cashOption);
+
     } catch (error) {
         console.error("Error loading banks for receipt:", error);
         const option = document.createElement('option');
         option.value = "";
         option.textContent = "Error loading banks";
         option.disabled = true;
+        bankSelect.innerHTML = '';
         bankSelect.appendChild(option);
     }
 }
@@ -1041,27 +1492,45 @@ async function populateBankDropdownForReceipt() {
 async function fetchInvoiceDetails() {
     const invoiceRef = document.getElementById('invoiceReference').value;
     if (!invoiceRef) {
-        alert("Please enter an invoice reference number");
+        showErrorToast("Please enter an invoice reference number");
         return;
     }
     
-    const invoiceDetails = await fetchInvoiceAmount(invoiceRef);
-    if (!invoiceDetails) {
-        alert("Invoice not found. Please check the invoice number.");
-        return;
-    }
-    
-    // Show invoice details section
+    // Show loading state
     const detailsDiv = document.getElementById('invoice-details');
     detailsDiv.classList.remove('hidden');
+    detailsDiv.innerHTML = `
+        <div class="flex items-center justify-center p-4">
+            <div class="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-blue"></div>
+            <span class="ml-2 text-sm text-gray-600">Fetching invoice details...</span>
+        </div>
+    `;
+    
+    const invoiceDetails = await fetchInvoiceAmount(invoiceRef);
+    
+    if (!invoiceDetails) {
+        detailsDiv.innerHTML = `
+            <div class="text-center p-2">
+                <svg class="w-6 h-6 text-red-500 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                </svg>
+                <p class="text-sm text-red-600">Invoice not found</p>
+            </div>
+        `;
+        return;
+    }
     
     // Populate invoice details
-    document.getElementById('invoice-client').textContent = `Client: ${invoiceDetails.clientName}`;
-    document.getElementById('invoice-vehicle').textContent = `Vehicle: ${invoiceDetails.vehicleInfo}`;
-    document.getElementById('invoice-total').textContent = `Total Price: USD ${invoiceDetails.totalUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
-    document.getElementById('invoice-deposit').textContent = `Deposit Required: USD ${invoiceDetails.depositUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })} (KES ${parseFloat(invoiceDetails.depositKSH).toLocaleString('en-US', { minimumFractionDigits: 2 })})`;
-    document.getElementById('invoice-balance').textContent = `Balance Due: USD ${invoiceDetails.balanceUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
-    document.getElementById('invoice-rate').textContent = `Exchange Rate: USD 1 = KES ${invoiceDetails.exchangeRate}`;
+    detailsDiv.innerHTML = `
+        <h4 class="font-bold text-primary-blue mb-2">Invoice Details:</h4>
+        <p id="invoice-client" class="text-sm"><strong>Client:</strong> ${invoiceDetails.clientName}</p>
+        <p id="invoice-vehicle" class="text-sm"><strong>Vehicle:</strong> ${invoiceDetails.vehicleInfo}</p>
+        <p id="invoice-total" class="text-sm"><strong>Total Price:</strong> USD ${invoiceDetails.totalUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
+        <p id="invoice-deposit" class="text-sm"><strong>Deposit Required:</strong> USD ${invoiceDetails.depositUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })} (KES ${parseFloat(invoiceDetails.depositKSH).toLocaleString('en-US', { minimumFractionDigits: 2 })})</p>
+        <p id="invoice-balance" class="text-sm"><strong>Balance Due:</strong> USD ${invoiceDetails.balanceUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
+        <p id="invoice-rate" class="text-sm"><strong>Exchange Rate:</strong> USD 1 = KES ${invoiceDetails.exchangeRate}</p>
+    `;
+    detailsDiv.style.animation = 'fade-in 0.3s ease-out';
     
     // Auto-populate receipt form
     document.getElementById('receivedFrom').value = invoiceDetails.clientName;
@@ -1075,6 +1544,8 @@ async function fetchInvoiceDetails() {
     
     // Calculate initial balances
     updateReceiptCalculations();
+    
+    showSuccessToast("Invoice details loaded successfully");
 }
 
 /**
@@ -1169,6 +1640,15 @@ async function saveReceipt() {
         return;
     }
     
+    // Show loading state
+    const saveButton = document.getElementById('save-receipt-btn');
+    const spinner = document.getElementById('receipt-spinner');
+    if (saveButton && spinner) {
+        saveButton.disabled = true;
+        spinner.classList.remove('hidden');
+        saveButton.innerHTML = `<span>Saving Receipt...</span>${spinner.outerHTML}`;
+    }
+    
     const receiptType = document.getElementById('receiptType').value;
     const receivedFrom = document.getElementById('receivedFrom').value;
     const currency = document.getElementById('currency').value;
@@ -1188,7 +1668,8 @@ async function saveReceipt() {
         : exchangeRate;
 
     if (isNaN(amountReceived) || amountReceived <= 0) {
-        alert("Please enter a valid amount received.");
+        showErrorToast("Please enter a valid amount received.");
+        resetSaveButton();
         return;
     }
 
@@ -1261,6 +1742,7 @@ async function saveReceipt() {
             const bankSelect = document.getElementById('bankUsed');
             if (bankSelect) bankSelect.value = "";
             
+            resetSaveButton();
             fetchReceipts(); // Refresh history
             return;
         }
@@ -1318,7 +1800,7 @@ async function saveReceipt() {
         
         await db.collection("receipt_payments").add(paymentData);
         
-        alert(`Receipt ${receiptId} saved successfully!`);
+        showSuccessToast(`Receipt ${receiptId} saved successfully!`);
         
         receiptData.firestoreId = docRef.id;
         receiptData.totalPaidUSD = amountReceivedUSD;
@@ -1334,8 +1816,13 @@ async function saveReceipt() {
             description: "Initial Payment"
         }];
         
+        // Reset button
+        resetSaveButton();
+        
+        // Generate PDF
         generateReceiptPDF(receiptData);
         
+        // Reset form
         document.getElementById('receipt-form').reset();
         document.getElementById('amountWords').value = '';
         document.getElementById('invoice-details').classList.add('hidden');
@@ -1349,7 +1836,19 @@ async function saveReceipt() {
         fetchReceipts(); // Refresh history
     } catch (error) {
         console.error("Error saving receipt:", error);
-        alert("Failed to save receipt: " + error.message);
+        showErrorToast("Failed to save receipt: " + error.message);
+        resetSaveButton();
+    }
+}
+
+// Helper function to reset save button state
+function resetSaveButton() {
+    const saveButton = document.getElementById('save-receipt-btn');
+    const spinner = document.getElementById('receipt-spinner');
+    if (saveButton && spinner) {
+        saveButton.disabled = false;
+        spinner.classList.add('hidden');
+        saveButton.innerHTML = `<span>Generate & Save Receipt</span>${spinner.outerHTML}`;
     }
 }
 
@@ -1403,12 +1902,12 @@ async function addPaymentToExistingReceiptFromForm(receiptDocId, receiptNumber, 
             "amountReceivedKSH": (receiptData.amountReceivedKSH || 0) + amountKSH
         });
         
-        alert(`Additional payment of ${currency} ${amount.toFixed(2)} added to receipt ${receiptNumber} successfully!`);
+        showSuccessToast(`Additional payment of ${currency} ${amount.toFixed(2)} added to receipt ${receiptNumber} successfully!`);
         
         return true;
     } catch (error) {
         console.error("Error saving additional payment:", error);
-        alert("Failed to save payment: " + error.message);
+        showErrorToast("Failed to save payment: " + error.message);
         return false;
     }
 }
@@ -1422,7 +1921,14 @@ async function fetchReceipts() {
     try {
         const snapshot = await db.collection("receipts").orderBy("createdAt", "desc").limit(10).get();
         if (snapshot.empty) {
-            receiptList.innerHTML = `<p class="text-gray-500">No recent receipts found.</p>`;
+            receiptList.innerHTML = `
+                <div class="text-center p-8 border border-dashed border-gray-300 rounded-lg">
+                    <svg class="w-12 h-12 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                    </svg>
+                    <p class="text-gray-500">No recent receipts found.</p>
+                </div>
+            `;
             return;
         }
         
@@ -1447,7 +1953,7 @@ async function fetchReceipts() {
 
             const isRevoked = data.revoked || false;
             
-            html += `<li class="p-3 border rounded-lg ${isRevoked ? 'bg-red-50' : 'bg-gray-50'} flex flex-col sm:flex-row justify-between items-start sm:items-center">
+            html += `<li class="p-3 border rounded-lg ${isRevoked ? 'bg-red-50 border-red-200' : 'bg-gray-50 border-gray-200'} flex flex-col sm:flex-row justify-between items-start sm:items-center animate-fade-in">
                         <div class="flex-1">
                             ${isRevoked ? `<span class="bg-red-500 text-white text-xs font-bold px-2 py-1 rounded mb-2 inline-block">REVOKED</span><br>` : ''}
                             <strong class="text-gray-800">${data.receiptId}</strong><br>
@@ -1458,22 +1964,34 @@ async function fetchReceipts() {
                         </div>
                         <div class="mt-2 sm:mt-0 space-x-2">
                             <button onclick='reDownloadReceipt(${receiptDataJson})' 
-                                    class="bg-secondary-red hover:bg-red-600 text-white text-xs py-1 px-3 rounded-full transition duration-150">
-                                Download PDF
+                                    class="bg-secondary-red hover:bg-red-600 text-white text-xs py-1 px-3 rounded-full transition duration-150 flex items-center gap-1">
+                                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                                </svg>
+                                PDF
                             </button>
                             ${!isRevoked ? `
                             <button onclick='addPaymentToReceipt(${receiptDataJson})' 
-                                    class="bg-primary-blue hover:bg-blue-600 text-white text-xs py-1 px-3 rounded-full transition duration-150">
+                                    class="bg-primary-blue hover:bg-blue-600 text-white text-xs py-1 px-3 rounded-full transition duration-150 flex items-center gap-1">
+                                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+                                </svg>
                                 Add Payment
                             </button>
                             ` : ''}
                             <button onclick='viewReceiptPaymentDetails("${doc.id}", "${data.receiptId}", "${data.receivedFrom}")' 
-                                    class="bg-green-600 hover:bg-green-700 text-white text-xs py-1 px-3 rounded-full transition duration-150">
-                                View History
+                                    class="bg-green-600 hover:bg-green-700 text-white text-xs py-1 px-3 rounded-full transition duration-150 flex items-center gap-1">
+                                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path>
+                                </svg>
+                                History
                             </button>
                             ${!isRevoked ? `
                             <button onclick='revokeReceipt(${receiptDataJson})' 
-                                    class="bg-red-600 hover:bg-red-800 text-white text-xs py-1 px-3 rounded-full transition duration-150">
+                                    class="bg-red-600 hover:bg-red-800 text-white text-xs py-1 px-3 rounded-full transition duration-150 flex items-center gap-1">
+                                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                                </svg>
                                 REVOKE
                             </button>
                             ` : ''}
@@ -1484,7 +2002,12 @@ async function fetchReceipts() {
         receiptList.innerHTML = html;
     } catch (error) {
         console.error("Error fetching receipts:", error);
-        receiptList.innerHTML = `<p class="text-red-500">Error loading receipts. Check console for details.</p>`;
+        receiptList.innerHTML = `
+            <div class="text-center p-4 bg-red-50 border border-red-200 rounded-lg">
+                <p class="text-red-600 font-semibold">Error loading receipts</p>
+                <p class="text-xs text-gray-600 mt-1">${error.message}</p>
+            </div>
+        `;
     }
 }
 
@@ -1492,7 +2015,13 @@ async function fetchReceipts() {
  * View detailed payment history for a specific receipt
  */
 async function viewReceiptPaymentDetails(receiptDocId, receiptNumber, clientName) {
+    // Show loading overlay
+    const loadingOverlay = showLoadingOverlay("Loading payment history...");
+    
     const balances = await calculateReceiptBalances(receiptDocId);
+    
+    // Hide loading overlay
+    hideLoadingOverlay();
     
     let paymentDetailsHtml = `<h4 class="font-bold text-primary-blue mb-3">Payment History for ${receiptNumber}</h4>`;
     paymentDetailsHtml += `<p class="text-sm text-gray-600 mb-4">Client: ${clientName}</p>`;
@@ -1516,7 +2045,7 @@ async function viewReceiptPaymentDetails(receiptDocId, receiptNumber, clientName
                 <tbody class="bg-white divide-y divide-gray-200">`;
         
         balances.payments.forEach((payment, index) => {
-            paymentDetailsHtml += `<tr>
+            paymentDetailsHtml += `<tr class="hover:bg-gray-50 transition duration-150">
                 <td class="px-4 py-2 text-sm">${index + 1}</td>
                 <td class="px-4 py-2 text-sm">${payment.paymentDate || 'N/A'}</td>
                 <td class="px-4 py-2 text-sm font-bold">${payment.currency} ${payment.amount.toFixed(2)}</td>
@@ -1530,7 +2059,7 @@ async function viewReceiptPaymentDetails(receiptDocId, receiptNumber, clientName
         paymentDetailsHtml += `</tbody></table>`;
         
         // Add summary
-        paymentDetailsHtml += `<div class="mt-4 p-3 bg-blue-50 rounded-lg">
+        paymentDetailsHtml += `<div class="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
             <h5 class="font-bold text-primary-blue mb-2">Payment Summary</h5>
             <p class="text-sm">Total Payments: ${balances.payments.length}</p>
             <p class="text-sm">Total Paid (USD): <span class="font-bold">${balances.totalPaidUSD.toFixed(2)}</span></p>
@@ -1540,22 +2069,25 @@ async function viewReceiptPaymentDetails(receiptDocId, receiptNumber, clientName
     
     const modalHtml = `
         <div id="payment-details-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-            <div class="relative top-20 mx-auto p-5 border w-3/4 shadow-lg rounded-md bg-white">
+            <div class="relative top-20 mx-auto p-5 border w-3/4 shadow-lg rounded-md bg-white animate-fade-in">
                 <div class="flex justify-between items-center mb-4">
                     <h3 class="text-lg font-semibold text-primary-blue">Payment Details - ${receiptNumber}</h3>
                     <div class="flex space-x-2">
                         <button onclick='downloadReceiptWithHistory("${receiptDocId}")' 
-                                class="bg-secondary-red hover:bg-red-700 text-white text-xs py-1 px-3 rounded-md transition duration-150">
-                            Download Receipt with History
+                                class="bg-secondary-red hover:bg-red-700 text-white text-xs py-1 px-3 rounded-md transition duration-150 flex items-center gap-1">
+                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                            </svg>
+                            Download with History
                         </button>
-                        <button onclick="document.getElementById('payment-details-modal').remove()" class="text-gray-500 hover:text-gray-700">
+                        <button onclick="document.getElementById('payment-details-modal').remove()" class="text-gray-500 hover:text-gray-700 transition duration-150">
                             &times;
                         </button>
                     </div>
                 </div>
                 ${paymentDetailsHtml}
                 <div class="mt-4 flex justify-end">
-                    <button onclick="document.getElementById('payment-details-modal').remove()" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-md">
+                    <button onclick="document.getElementById('payment-details-modal').remove()" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-md transition duration-150">
                         Close
                     </button>
                 </div>
@@ -1571,10 +2103,14 @@ async function viewReceiptPaymentDetails(receiptDocId, receiptNumber, clientName
  */
 async function downloadReceiptWithHistory(receiptDocId) {
     try {
+        // Show loading overlay
+        const loadingOverlay = showLoadingOverlay("Preparing receipt with history...");
+        
         // Get receipt data
         const receiptDoc = await db.collection("receipts").doc(receiptDocId).get();
         if (!receiptDoc.exists) {
-            alert("Receipt not found!");
+            hideLoadingOverlay();
+            showErrorToast("Receipt not found!");
             return;
         }
         
@@ -1590,12 +2126,16 @@ async function downloadReceiptWithHistory(receiptDocId) {
         receiptData.paymentCount = balances.payments.length;
         receiptData.paymentHistory = balances.payments;
         
+        // Hide loading overlay
+        hideLoadingOverlay();
+        
         // Generate enhanced PDF
         generateReceiptPDF(receiptData);
         
     } catch (error) {
         console.error("Error downloading receipt with history:", error);
-        alert("Failed to download receipt with history: " + error.message);
+        hideLoadingOverlay();
+        showErrorToast("Failed to download receipt with history: " + error.message);
     }
 }
 
@@ -1658,7 +2198,7 @@ async function populateBankDropdown(dropdownId, isMultiSelect = false) {
     const bankSelect = document.getElementById(dropdownId);
     if (!bankSelect) return;
 
-    bankSelect.innerHTML = '<option value="" disabled selected>Loading...</option>';
+    bankSelect.innerHTML = '<option value="" disabled selected>Loading banks...</option>';
 
     const banks = await _getBankDetailsData();
     let options = isMultiSelect ? '' : '<option value="" disabled selected>Select Bank Account</option>';
@@ -1720,13 +2260,13 @@ function autoFillBuyerConfirmation() {
 function renderInvoiceForm() {
     const formArea = document.getElementById('document-form-area');
     formArea.innerHTML = `
-        <div class="p-6 border border-gray-300 rounded-xl bg-white shadow-lg">
+        <div class="p-6 border border-gray-300 rounded-xl bg-white shadow-lg animate-fade-in">
             <h3 class="text-xl font-semibold mb-4 text-primary-blue">Create Sales Invoice/Proforma</h3>
             <form id="invoice-form" onsubmit="event.preventDefault(); saveInvoice(false);">
-                <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6 p-4 bg-blue-50 rounded-lg">
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6 p-4 bg-blue-50 rounded-lg animate-fade-in" style="animation-delay: 100ms">
                     <div>
                         <label class="block text-sm font-medium text-gray-700">Document Type</label>
-                        <select id="docType" required class="mt-1 block w-full p-2 border rounded-md" onchange="toggleAuctionFields()">
+                        <select id="docType" required class="mt-1 block w-full p-2 border rounded-md transition duration-200" onchange="toggleAuctionFields()">
                             <option value="Invoice">Invoice</option>
                             <option value="Proforma Invoice">Proforma Invoice</option>
                             <option value="Auction Invoice">Auction Invoice</option>
@@ -1734,15 +2274,15 @@ function renderInvoiceForm() {
                     </div>
                     <div>
                         <label for="exchangeRate" class="block text-sm font-medium text-gray-700">USD 1 = KES</label>
-                        <input type="number" id="exchangeRate" step="1" required value="130" class="mt-1 block w-full p-2 border rounded-md">
+                        <input type="number" id="exchangeRate" step="1" required value="130" class="mt-1 block w-full p-2 border rounded-md transition duration-200">
                     </div>
                     <div>
                         <label for="dueDate" class="block text-sm font-medium text-gray-700">Due Date (Optional)</label>
-                        <input type="date" id="dueDate" class="mt-1 block w-full p-2 border rounded-md">
+                        <input type="date" id="dueDate" class="mt-1 block w-full p-2 border rounded-md transition duration-200">
                     </div>
                     <div>
                         <label for="depositType" class="block text-sm font-medium text-gray-700">Deposit Type</label>
-                        <select id="depositType" required class="mt-1 block w-full p-2 border rounded-md" onchange="toggleDepositInput()">
+                        <select id="depositType" required class="mt-1 block w-full p-2 border rounded-md transition duration-200" onchange="toggleDepositInput()">
                             <option value="percentage">Percentage (%)</option>
                             <option value="fixed">Fixed Amount</option>
                         </select>
@@ -1750,17 +2290,17 @@ function renderInvoiceForm() {
                 </div>
                 
                 <!-- Percentage Deposit Input -->
-                <div id="percentage-deposit-field" class="mb-4">
+                <div id="percentage-deposit-field" class="mb-4 animate-fade-in" style="animation-delay: 150ms">
                     <label for="depositPercentage" class="block text-sm font-medium text-gray-700">Deposit Percentage (%)</label>
-                    <input type="number" id="depositPercentage" step="1" required value="50" min="0" max="100" class="mt-1 block w-full p-2 border rounded-md">
+                    <input type="number" id="depositPercentage" step="1" required value="50" min="0" max="100" class="mt-1 block w-full p-2 border rounded-md transition duration-200">
                 </div>
                 
                 <!-- Fixed Deposit Input -->
-                <div id="fixed-deposit-field" class="hidden mb-4">
+                <div id="fixed-deposit-field" class="hidden mb-4 animate-fade-in">
                     <div class="grid grid-cols-3 gap-3">
                         <div>
                             <label for="fixedDepositCurrency" class="block text-sm font-medium text-gray-700">Currency</label>
-                            <select id="fixedDepositCurrency" class="mt-1 block w-full p-2 border rounded-md">
+                            <select id="fixedDepositCurrency" class="mt-1 block w-full p-2 border rounded-md transition duration-200">
                                 <option value="USD">USD</option>
                                 <option value="KSH">KES</option>
                                 <option value="EURO">EURO</option>
@@ -1768,92 +2308,100 @@ function renderInvoiceForm() {
                         </div>
                         <div class="col-span-2">
                             <label for="fixedDepositAmount" class="block text-sm font-medium text-gray-700">Deposit Amount (Whole number only)</label>
-                            <input type="number" id="fixedDepositAmount" step="1" placeholder="Enter whole number amount" class="mt-1 block w-full p-2 border rounded-md">
+                            <input type="number" id="fixedDepositAmount" step="1" placeholder="Enter whole number amount" class="mt-1 block w-full p-2 border rounded-md transition duration-200">
                         </div>
                     </div>
                     <p class="text-xs text-gray-600 mt-2">Note: Enter amount without decimals. System will convert to USD for calculations.</p>
                 </div>
                 
-                <div id="auction-price-field" class="hidden mb-4 p-4 bg-yellow-50 rounded-lg border border-yellow-300">
+                <div id="auction-price-field" class="hidden mb-4 p-4 bg-yellow-50 rounded-lg border border-yellow-300 animate-fade-in">
                     <div class="grid grid-cols-2 gap-3">
                         <div>
                             <label for="auctionPriceCurrency" class="block text-sm font-medium text-gray-700">Currency</label>
-                            <select id="auctionPriceCurrency" class="mt-1 block w-full p-2 border rounded-md">
+                            <select id="auctionPriceCurrency" class="mt-1 block w-full p-2 border rounded-md transition duration-200">
                                 <option value="USD">USD</option>
                                 <option value="KSH">KES</option>
                             </select>
                         </div>
                         <div>
                             <label for="auctionPrice" class="block text-sm font-medium text-gray-700">Auction Price (Whole number only)</label>
-                            <input type="number" id="auctionPrice" step="1" placeholder="Enter auction price" class="w-full p-2 border rounded-md">
+                            <input type="number" id="auctionPrice" step="1" placeholder="Enter auction price" class="w-full p-2 border rounded-md transition duration-200">
                         </div>
                     </div>
                     <p class="text-xs text-gray-600 mt-2">Note: For auction invoices, this is the bid security deposit amount. System will convert to USD for calculations.</p>
                 </div>
                 
-                <fieldset class="border p-4 rounded-lg mb-6">
+                <fieldset class="border p-4 rounded-lg mb-6 animate-fade-in" style="animation-delay: 200ms">
                     <legend class="text-base font-semibold text-secondary-red px-2">Client Details</legend>
                     <div class="grid grid-cols-2 gap-4">
-                        <input type="text" id="clientName" required placeholder="Client Full Name" class="p-2 border rounded-md" oninput="autoFillBuyerConfirmation()">
-                        <input type="text" id="clientPhone" required placeholder="Client Phone Number" class="p-2 border rounded-md">
+                        <input type="text" id="clientName" required placeholder="Client Full Name" class="p-2 border rounded-md transition duration-200" oninput="autoFillBuyerConfirmation()">
+                        <input type="text" id="clientPhone" required placeholder="Client Phone Number" class="p-2 border rounded-md transition duration-200">
                     </div>
                 </fieldset>
 
-                <fieldset class="border p-4 rounded-lg mb-6">
+                <fieldset class="border p-4 rounded-lg mb-6 animate-fade-in" style="animation-delay: 250ms">
                     <legend class="text-base font-semibold text-primary-blue px-2">Vehicle Specification</legend>
                     <div class="grid grid-cols-4 gap-4">
-                        <input type="text" id="carMake" required placeholder="Make (e.g., Toyota)" class="p-2 border rounded-md">
-                        <input type="text" id="carModel" required placeholder="Model (e.g., Vitz)" class="p-2 border rounded-md">
-                        <input type="number" id="carYear" required placeholder="Year" class="p-2 border rounded-md">
-                        <input type="text" id="vinNumber" required placeholder="VIN Number" class="p-2 border rounded-md">
-                        <input type="number" id="engineCC" required placeholder="Engine CC" class="p-2 border rounded-md">
-                        <select id="fuelType" required class="p-2 border rounded-md">
+                        <input type="text" id="carMake" required placeholder="Make (e.g., Toyota)" class="p-2 border rounded-md transition duration-200">
+                        <input type="text" id="carModel" required placeholder="Model (e.g., Vitz)" class="p-2 border rounded-md transition duration-200">
+                        <input type="number" id="carYear" required placeholder="Year" class="p-2 border rounded-md transition duration-200">
+                        <input type="text" id="vinNumber" required placeholder="VIN Number" class="p-2 border rounded-md transition duration-200">
+                        <input type="number" id="engineCC" required placeholder="Engine CC" class="p-2 border rounded-md transition duration-200">
+                        <select id="fuelType" required class="p-2 border rounded-md transition duration-200">
                             <option value="" disabled selected>Fuel Type</option>
                             <option value="Petrol">Petrol</option>
                             <option value="Diesel">Diesel</option>
                             <option value="Hybrid">Hybrid</option>
                         </select>
-                        <select id="transmission" required class="p-2 border rounded-md">
+                        <select id="transmission" required class="p-2 border rounded-md transition duration-200">
                             <option value="" disabled selected>Transmission</option>
                             <option value="Automatic">Automatic</option>
                             <option value="Manual">Manual</option>
                         </select>
-                        <input type="text" id="color" required placeholder="Color" class="p-2 border rounded-md">
-                        <input type="number" id="mileage" placeholder="Mileage (km) - Optional" class="p-2 border rounded-md"> <!-- Removed required attribute -->
+                        <input type="text" id="color" required placeholder="Color" class="p-2 border rounded-md transition duration-200">
+                        <input type="number" id="mileage" placeholder="Mileage (km) - Optional" class="p-2 border rounded-md transition duration-200"> <!-- Removed required attribute -->
                     </div>
-                    <textarea id="goodsDescription" placeholder="Description of Goods (e.g., Accessories, specific features)" rows="2" class="mt-3 block w-full p-2 border rounded-md"></textarea>
+                    <textarea id="goodsDescription" placeholder="Description of Goods (e.g., Accessories, specific features)" rows="2" class="mt-3 block w-full p-2 border rounded-md transition duration-200"></textarea>
                 </fieldset>
 
-                <fieldset class="border p-4 rounded-lg mb-6">
+                <fieldset class="border p-4 rounded-lg mb-6 animate-fade-in" style="animation-delay: 300ms">
                     <legend class="text-base font-semibold text-secondary-red px-2">Pricing</legend>
                     <div class="grid grid-cols-2 gap-4">
-                        <input type="number" id="quantity" required value="1" min="1" placeholder="Quantity" class="p-2 border rounded-md">
-                        <input type="number" id="price" step="1" placeholder="Unit Price (USD C&F MSA) - Whole number" class="p-2 border rounded-md">
+                        <input type="number" id="quantity" required value="1" min="1" placeholder="Quantity" class="p-2 border rounded-md transition duration-200">
+                        <input type="number" id="price" step="1" placeholder="Unit Price (USD C&F MSA) - Whole number" class="p-2 border rounded-md transition duration-200">
                     </div>
                 </fieldset>
 
-                <fieldset class="border p-4 rounded-lg mb-6">
+                <fieldset class="border p-4 rounded-lg mb-6 animate-fade-in" style="animation-delay: 350ms">
                     <legend class="text-base font-semibold text-secondary-red px-2">Payment/Confirmation</legend>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                             <label class="block text-sm font-medium text-gray-700">Select Bank Accounts for Payment (Multiple)</label>
-                            <select id="bankDetailsSelect" multiple required class="mt-1 block w-full p-2 border rounded-md"></select>
+                            <select id="bankDetailsSelect" multiple required class="mt-1 block w-full p-2 border rounded-md transition duration-200"></select>
                             <p class="text-xs text-gray-500 mt-1">Hold Ctrl/Cmd to select multiple banks</p>
                         </div>
                         <div>
                             <label for="buyerNameConfirmation" class="block text-sm font-medium text-gray-700">Buyer's Full Name (for signature)</label>
-                            <input type="text" id="buyerNameConfirmation" required placeholder="Buyer's Full Name" class="mt-1 block w-full p-2 border rounded-md">
+                            <input type="text" id="buyerNameConfirmation" required placeholder="Buyer's Full Name" class="mt-1 block w-full p-2 border rounded-md transition duration-200">
                         </div>
                     </div>
                     <p class="mt-4 text-sm text-gray-500">Seller: WANBITE INVESTMENTS COMPANY LIMITED. This acts as a confirmation of acceptance.</p>
                 </fieldset>
 
-                <div class="flex space-x-4">
-                    <button type="submit" class="flex-1 bg-primary-blue hover:bg-blue-900 text-white font-bold py-3 rounded-lg transition duration-150">
-                        Generate & Save Invoice
+                <div class="flex space-x-4 animate-fade-in" style="animation-delay: 400ms">
+                    <button type="submit" id="save-invoice-btn" class="flex-1 bg-primary-blue hover:bg-blue-900 text-white font-bold py-3 rounded-lg transition duration-150 flex items-center justify-center gap-2">
+                        <span>Generate & Save Invoice</span>
+                        <svg id="invoice-spinner" class="hidden w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
                     </button>
-                    <button type="button" onclick="saveInvoice(true)" class="flex-1 bg-gray-500 hover:bg-gray-700 text-white font-bold py-3 rounded-lg transition duration-150">
-                        Save Only (No PDF)
+                    <button type="button" onclick="saveInvoice(true)" id="save-only-btn" class="flex-1 bg-gray-500 hover:bg-gray-700 text-white font-bold py-3 rounded-lg transition duration-150 flex items-center justify-center gap-2">
+                        <span>Save Only (No PDF)</span>
+                        <svg id="save-only-spinner" class="hidden w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
                     </button>
                 </div>
             </form>
@@ -1870,6 +2418,7 @@ function renderInvoiceForm() {
         toggleDepositInput(); // Initial check for deposit type
     }, 100);
 }
+
 /**
  * Toggles between percentage and fixed deposit input
  */
@@ -1884,6 +2433,7 @@ function toggleDepositInput() {
     } else {
         percentageField.classList.add('hidden');
         fixedField.classList.remove('hidden');
+        fixedField.style.animation = 'fade-in 0.3s ease-out';
     }
 }
 
@@ -1910,6 +2460,7 @@ function toggleAuctionFields() {
     
     if (docType === 'Auction Invoice') {
         auctionField.classList.remove('hidden');
+        auctionField.style.animation = 'fade-in 0.3s ease-out';
         // Hide the regular pricing fieldset for auction invoices
         if (pricingFieldsetElement) {
             pricingFieldsetElement.classList.add('hidden');
@@ -1933,6 +2484,7 @@ function toggleAuctionFields() {
         // Show the regular pricing fieldset for non-auction invoices
         if (pricingFieldsetElement) {
             pricingFieldsetElement.classList.remove('hidden');
+            pricingFieldsetElement.style.animation = 'fade-in 0.3s ease-out';
         }
         if (priceField) {
             priceField.placeholder = "Unit Price (USD C&F MSA) - Whole number";
@@ -1947,6 +2499,7 @@ function toggleAuctionFields() {
         }
     }
 }
+
 /**
  * Saves the invoice data to Firestore and optionally generates a PDF.
  * @param {boolean} onlySave - If true, only saves to Firestore without generating PDF.
@@ -1961,7 +2514,7 @@ async function saveInvoice(onlySave) {
     // Only validate price for non-auction invoices
     if (docType !== 'Auction Invoice') {
         if (!priceUSD || priceUSD <= 0) {
-            alert("Please enter a valid unit price.");
+            showErrorToast("Please enter a valid unit price.");
             document.getElementById('price').focus();
             return;
         }
@@ -1971,6 +2524,17 @@ async function saveInvoice(onlySave) {
     if (!form.checkValidity()) {
         form.reportValidity();
         return;
+    }
+
+    // Show loading state
+    const saveButton = onlySave ? document.getElementById('save-only-btn') : document.getElementById('save-invoice-btn');
+    const spinner = onlySave ? document.getElementById('save-only-spinner') : document.getElementById('invoice-spinner');
+    
+    if (saveButton && spinner) {
+        saveButton.disabled = true;
+        spinner.classList.remove('hidden');
+        const buttonText = onlySave ? 'Saving...' : 'Generating & Saving...';
+        saveButton.innerHTML = `<span>${buttonText}</span>${spinner.outerHTML}`;
     }
 
     // 1. Collect Form Data
@@ -1993,7 +2557,8 @@ async function saveInvoice(onlySave) {
         fixedDepositAmount = parseFloat(document.getElementById('fixedDepositAmount').value);
         
         if (!fixedDepositAmount || fixedDepositAmount <= 0) {
-            alert("Please enter a valid fixed deposit amount.");
+            showErrorToast("Please enter a valid fixed deposit amount.");
+            resetInvoiceSaveButton(saveButton, spinner, onlySave);
             return;
         }
     }
@@ -2021,7 +2586,8 @@ async function saveInvoice(onlySave) {
         auctionPriceCurrency = document.getElementById('auctionPriceCurrency').value;
         
         if (!auctionPrice || auctionPrice <= 0) {
-            alert("Please enter a valid auction price.");
+            showErrorToast("Please enter a valid auction price.");
+            resetInvoiceSaveButton(saveButton, spinner, onlySave);
             return;
         }
         
@@ -2059,7 +2625,8 @@ async function saveInvoice(onlySave) {
     }
     
     if (selectedBanks.length === 0) {
-        alert("Please select at least one bank account.");
+        showErrorToast("Please select at least one bank account.");
+        resetInvoiceSaveButton(saveButton, spinner, onlySave);
         return;
     }
     
@@ -2154,18 +2721,41 @@ async function saveInvoice(onlySave) {
     // 5. Save to Firestore
     try {
         const docRef = await db.collection("invoices").add(invoiceData);
-        alert(`${docType} ${generatedInvoiceId} saved successfully!`);
+        
+        // Reset button state
+        resetInvoiceSaveButton(saveButton, spinner, onlySave);
+        
+        showSuccessToast(`${docType} ${generatedInvoiceId} saved successfully!`);
 
         // 6. Download PDF if requested
         if (!onlySave) {
             invoiceData.firestoreId = docRef.id;
             generateInvoicePDF(invoiceData);
         }
+        
+        // Reset form
+        form.reset();
+        
+        // Re-populate bank dropdown
+        populateBankDropdown('bankDetailsSelect', true);
+        
     } catch (error) {
         console.error("Error saving invoice:", error);
-        alert("Failed to save invoice: " + error.message);
+        resetInvoiceSaveButton(saveButton, spinner, onlySave);
+        showErrorToast("Failed to save invoice: " + error.message);
     }
 }
+
+// Helper function to reset invoice save button state
+function resetInvoiceSaveButton(saveButton, spinner, onlySave) {
+    if (saveButton && spinner) {
+        saveButton.disabled = false;
+        spinner.classList.add('hidden');
+        const buttonText = onlySave ? 'Save Only (No PDF)' : 'Generate & Save Invoice';
+        saveButton.innerHTML = `<span>${buttonText}</span>${spinner.outerHTML}`;
+    }
+}
+
 // =================================================================
 //                 8. INVOICE HISTORY MODULE (UPDATED WITH REVOKE)
 // =================================================================
@@ -2176,10 +2766,10 @@ async function saveInvoice(onlySave) {
 function renderInvoiceHistory() {
     const formArea = document.getElementById('document-form-area');
     formArea.innerHTML = `
-        <div class="p-6 border border-gray-300 rounded-xl bg-white shadow-lg">
+        <div class="p-6 border border-gray-300 rounded-xl bg-white shadow-lg animate-fade-in">
             <h3 class="text-xl font-semibold mb-6 text-primary-blue">Previously Saved Invoices</h3>
             <div id="invoice-history-list">
-                <p class="text-center text-gray-500">Loading invoice history...</p>
+                ${createShimmerLoader(3)}
             </div>
         </div>
     `;
@@ -2195,12 +2785,19 @@ async function fetchInvoices() {
     try {
         const snapshot = await db.collection("invoices").orderBy("createdAt", "desc").limit(10).get();
         if (snapshot.empty) {
-            listElement.innerHTML = `<p class="text-gray-500">No recent invoices found.</p>`;
+            listElement.innerHTML = `
+                <div class="text-center p-8 border border-dashed border-gray-300 rounded-lg">
+                    <svg class="w-12 h-12 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                    </svg>
+                    <p class="text-gray-500">No recent invoices found.</p>
+                </div>
+            `;
             return;
         }
         
         html = `<ul class="space-y-3 divide-y divide-gray-200">`;
-        snapshot.forEach(doc => {
+        snapshot.forEach((doc, index) => {
             const data = doc.data();
             const invoiceDataJson = JSON.stringify({
                 ...data, 
@@ -2209,46 +2806,62 @@ async function fetchInvoices() {
             });
 
             const isRevoked = data.revoked || false;
+            const animationDelay = index * 50;
             
-            html += `<li class="p-3 bg-gray-50 flex flex-col sm:flex-row justify-between items-start sm:items-center ${isRevoked ? 'bg-red-50 border-l-4 border-red-500' : ''}">
+            html += `<li class="p-3 bg-gray-50 flex flex-col sm:flex-row justify-between items-start sm:items-center animate-fade-in ${isRevoked ? 'bg-red-50 border-l-4 border-red-500' : ''}" 
+                         style="animation-delay: ${animationDelay}ms">
                         <div>
                             ${isRevoked ? `<span class="bg-red-500 text-white text-xs font-bold px-2 py-1 rounded mb-2 inline-block">REVOKED</span><br>` : ''}
                             <strong class="text-primary-blue">${data.docType} ${data.invoiceId}</strong><br>
                             <span class="text-sm text-gray-700">Client: ${data.clientName} | Vehicle: ${data.carDetails.make} ${data.carDetails.model}</span><br>
                             <span class="text-xs text-gray-600">Total: USD ${data.pricing.totalUSD.toFixed(2)}</span>
-                            ${data.pricing.depositPaid ? `<br><span class="text-xs text-green-600">✓ Deposit Paid</span>` : `<br><span class="text-xs text-secondary-red">Deposit Pending</span>`}
+                            ${data.pricing.depositPaid ? `<br><span class="text-xs text-green-600 flex items-center gap-1"><svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg> Deposit Paid</span>` : `<br><span class="text-xs text-secondary-red flex items-center gap-1"><svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM7 9a1 1 0 000 2h6a1 1 0 100-2H7z" clip-rule="evenodd"/></svg> Deposit Pending</span>`}
                         </div>
                         <div class="mt-2 sm:mt-0 space-x-2">
                             <button onclick='reDownloadInvoice(${invoiceDataJson})' 
-                                    class="bg-primary-blue hover:bg-blue-600 text-white text-xs py-1 px-3 rounded-full transition duration-150">
-                                Re-Download PDF
+                                    class="bg-primary-blue hover:bg-blue-600 text-white text-xs py-1 px-3 rounded-full transition duration-150 flex items-center gap-1">
+                                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                                </svg>
+                                PDF
                             </button>
                             ${!isRevoked ? `
                                 ${!data.pricing.depositPaid ? `
                                 <button onclick='markInvoiceDepositPaid(${invoiceDataJson})' 
-                                        class="bg-green-600 hover:bg-green-700 text-white text-xs py-1 px-3 rounded-full transition duration-150">
-                                    Deposit Paid
+                                        class="bg-green-600 hover:bg-green-700 text-white text-xs py-1 px-3 rounded-full transition duration-150 flex items-center gap-1">
+                                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                                    </svg>
+                                    Deposit
                                 </button>
                                 ` : ''}
                                 <button onclick='createReceiptFromInvoice(${invoiceDataJson})' 
-                                        class="bg-secondary-red hover:bg-red-700 text-white text-xs py-1 px-3 rounded-full transition duration-150">
-                                    Create Receipt
-                                </button>
-                                <button onclick='createAgreementFromInvoice(${invoiceDataJson})' 
-                                        class="bg-green-600 hover:bg-green-800 text-white text-xs py-1 px-3 rounded-full transition duration-150">
-                                    Create Agreement
+                                        class="bg-secondary-red hover:bg-red-700 text-white text-xs py-1 px-3 rounded-full transition duration-150 flex items-center gap-1">
+                                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+                                    </svg>
+                                    Receipt
                                 </button>
                                 <button onclick='createAdditionalInvoice(${invoiceDataJson})' 
-                                        class="bg-yellow-600 hover:bg-yellow-700 text-white text-xs py-1 px-3 rounded-full transition duration-150">
-                                    Add Invoice
+                                        class="bg-yellow-600 hover:bg-yellow-700 text-white text-xs py-1 px-3 rounded-full transition duration-150 flex items-center gap-1">
+                                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+                                    </svg>
+                                    Add
                                 </button>
                                 <button onclick='revokeInvoice(${invoiceDataJson})' 
-                                        class="bg-red-600 hover:bg-red-800 text-white text-xs py-1 px-3 rounded-full transition duration-150">
+                                        class="bg-red-600 hover:bg-red-800 text-white text-xs py-1 px-3 rounded-full transition duration-150 flex items-center gap-1">
+                                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                                    </svg>
                                     REVOKE
                                 </button>
                             ` : `
                                 <button onclick='unrevokeInvoice(${invoiceDataJson})' 
-                                        class="bg-gray-600 hover:bg-gray-800 text-white text-xs py-1 px-3 rounded-full transition duration-150">
+                                        class="bg-gray-600 hover:bg-gray-800 text-white text-xs py-1 px-3 rounded-full transition duration-150 flex items-center gap-1">
+                                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                                    </svg>
                                     UNREVOKE
                                 </button>
                             `}
@@ -2259,7 +2872,12 @@ async function fetchInvoices() {
         listElement.innerHTML = html;
     } catch (error) {
         console.error("Error fetching invoices:", error);
-        listElement.innerHTML = `<p class="text-red-500">Error loading invoice history. Check console for details.</p>`;
+        listElement.innerHTML = `
+            <div class="text-center p-4 bg-red-50 border border-red-200 rounded-lg">
+                <p class="text-red-600 font-semibold">Error loading invoice history</p>
+                <p class="text-xs text-gray-600 mt-1">${error.message}</p>
+            </div>
+        `;
     }
 }
 
@@ -2269,6 +2887,8 @@ async function revokeInvoice(invoiceData) {
         return;
     }
     
+    const loadingOverlay = showLoadingOverlay("Revoking invoice...");
+    
     try {
         await db.collection("invoices").doc(invoiceData.firestoreId).update({
             revoked: true,
@@ -2276,11 +2896,13 @@ async function revokeInvoice(invoiceData) {
             revokedBy: currentUser.email
         });
         
-        alert(`Invoice ${invoiceData.invoiceId} has been revoked.`);
+        hideLoadingOverlay();
+        showSuccessToast(`Invoice ${invoiceData.invoiceId} has been revoked.`);
         fetchInvoices(); // Refresh the list
     } catch (error) {
         console.error("Error revoking invoice:", error);
-        alert("Failed to revoke invoice: " + error.message);
+        hideLoadingOverlay();
+        showErrorToast("Failed to revoke invoice: " + error.message);
     }
 }
 
@@ -2290,6 +2912,8 @@ async function unrevokeInvoice(invoiceData) {
         return;
     }
     
+    const loadingOverlay = showLoadingOverlay("Unrevoking invoice...");
+    
     try {
         await db.collection("invoices").doc(invoiceData.firestoreId).update({
             revoked: false,
@@ -2297,11 +2921,13 @@ async function unrevokeInvoice(invoiceData) {
             unrevokedBy: currentUser.email
         });
         
-        alert(`Invoice ${invoiceData.invoiceId} has been unrevoked.`);
+        hideLoadingOverlay();
+        showSuccessToast(`Invoice ${invoiceData.invoiceId} has been unrevoked.`);
         fetchInvoices(); // Refresh the list
     } catch (error) {
         console.error("Error unrevoking invoice:", error);
-        alert("Failed to unrevoke invoice: " + error.message);
+        hideLoadingOverlay();
+        showErrorToast("Failed to unrevoke invoice: " + error.message);
     }
 }
 
@@ -2339,8 +2965,8 @@ let agreementPaymentCounter = 1;
 function renderAgreementForm(receiptReference = '') {
     const formArea = document.getElementById('document-form-area');
     formArea.innerHTML = `
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div class="p-6 border border-gray-300 rounded-xl bg-white shadow-md">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 animate-fade-in">
+            <div class="p-6 border border-gray-300 rounded-xl bg-white shadow-md animate-fade-in" style="animation-delay: 100ms">
                 <h3 class="text-xl font-semibold mb-4 text-primary-blue">New Car Sales Agreement</h3>
                 <form id="agreement-form" onsubmit="event.preventDefault(); saveAgreement()">
                     
@@ -2348,31 +2974,31 @@ function renderAgreementForm(receiptReference = '') {
                         <legend class="text-base font-semibold text-primary-blue px-2">Agreement Parties & Date</legend>
                         
                         <label for="agreementDateInput" class="block text-sm font-medium text-gray-700 mb-2">Agreement Date:</label>
-                        <input type="date" id="agreementDateInput" required value="${new Date().toISOString().slice(0, 10)}" class="mb-4 block w-full p-2 border rounded-md">
+                        <input type="date" id="agreementDateInput" required value="${new Date().toISOString().slice(0, 10)}" class="mb-4 block w-full p-2 border rounded-md transition duration-200">
                         
                         <h4 class="font-bold text-sm mt-2 text-secondary-red">SELLER: WanBite Investments Company Limited</h4>
                         <div class="grid grid-cols-2 gap-3 mt-1 mb-4">
-                            <input type="text" id="sellerAddress" value="Ngong Road, Kilimani, Nairobi" required placeholder="Seller Address" class="p-2 border rounded-md text-sm">
-                            <input type="text" id="sellerPhone" value="0713147136" required placeholder="Seller Phone" class="p-2 border rounded-md text-sm">
+                            <input type="text" id="sellerAddress" value="Ngong Road, Kilimani, Nairobi" required placeholder="Seller Address" class="p-2 border rounded-md text-sm transition duration-200">
+                            <input type="text" id="sellerPhone" value="0713147136" required placeholder="Seller Phone" class="p-2 border rounded-md text-sm transition duration-200">
                         </div>
                         
                         <h4 class="font-bold text-sm mt-2 text-primary-blue">BUYER:</h4>
                         <div class="grid grid-cols-2 gap-3 mt-1">
-                            <input type="text" id="buyerName" required placeholder="Buyer Name" class="p-2 border rounded-md">
-                            <input type="text" id="buyerPhone" required placeholder="Buyer Phone" class="p-2 border rounded-md">
-                            <input type="text" id="buyerAddress" required placeholder="Buyer Address" class="p-2 border rounded-md col-span-2">
+                            <input type="text" id="buyerName" required placeholder="Buyer Name" class="p-2 border rounded-md transition duration-200">
+                            <input type="text" id="buyerPhone" required placeholder="Buyer Phone" class="p-2 border rounded-md transition duration-200">
+                            <input type="text" id="buyerAddress" required placeholder="Buyer Address" class="p-2 border rounded-md col-span-2 transition duration-200">
                         </div>
                     </fieldset>
                     
                     <fieldset class="border p-4 rounded-lg mb-4">
                         <legend class="text-base font-semibold text-primary-blue px-2">Vehicle Details</legend>
                         <div class="grid grid-cols-2 gap-3">
-                            <input type="text" id="carMakeModel" required placeholder="Make and Model (e.g., Toyota Vitz)" class="p-2 border rounded-md">
-                            <input type="number" id="carYear" required placeholder="Year of Manufacture" class="p-2 border rounded-md">
-                            <input type="text" id="carColor" required placeholder="Color" class="p-2 border rounded-md">
-                            <input type="text" id="carVIN" required placeholder="VIN Number" class="p-2 border rounded-md">
+                            <input type="text" id="carMakeModel" required placeholder="Make and Model (e.g., Toyota Vitz)" class="p-2 border rounded-md transition duration-200">
+                            <input type="number" id="carYear" required placeholder="Year of Manufacture" class="p-2 border rounded-md transition duration-200">
+                            <input type="text" id="carColor" required placeholder="Color" class="p-2 border rounded-md transition duration-200">
+                            <input type="text" id="carVIN" required placeholder="VIN Number" class="p-2 border rounded-md transition duration-200">
                         </div>
-                        <select id="carFuelType" required class="block w-full p-2 border rounded-md mt-3">
+                        <select id="carFuelType" required class="block w-full p-2 border rounded-md mt-3 transition duration-200">
                             <option value="" disabled selected>Select Fuel Type</option>
                             <option value="Petrol">Petrol</option>
                             <option value="Diesel">Diesel</option>
@@ -2384,37 +3010,41 @@ function renderAgreementForm(receiptReference = '') {
                         <legend class="text-base font-semibold text-secondary-red px-2">Payment Details</legend>
                         <div class="mb-3">
                             <label for="currencySelect" class="block text-sm font-medium text-gray-700">Currency</label>
-                            <select id="currencySelect" required class="block w-full p-2 border rounded-md">
+                            <select id="currencySelect" required class="block w-full p-2 border rounded-md transition duration-200">
                                 <option value="KES">KES - Kenya Shillings</option>
                                 <option value="USD">USD - US Dollars</option>
                             </select>
                         </div>
                         <div class="mb-3">
                             <label for="agreementBankDetailsSelect" class="block text-sm font-medium text-gray-700">Select Bank Account for Payment</label>
-                            <select id="agreementBankDetailsSelect" required class="mt-1 block w-full p-2 border rounded-md"></select>
+                            <select id="agreementBankDetailsSelect" required class="mt-1 block w-full p-2 border rounded-md transition duration-200"></select>
                         </div>
                         
                         <div class="mb-3">
                             <label for="totalPrice" class="block text-sm font-medium text-gray-700">Total Price</label>
-                            <input type="number" id="totalPrice" step="0.01" required placeholder="Total Price" class="w-full p-2 border rounded-md">
+                            <input type="number" id="totalPrice" step="0.01" required placeholder="Total Price" class="w-full p-2 border rounded-md transition duration-200">
                         </div>
                     </fieldset>
 
                     <fieldset class="border p-4 rounded-lg mb-6">
                         <legend class="text-base font-semibold text-primary-blue px-2">Witnesses</legend>
-                        <input type="text" id="sellerWitness" required placeholder="Seller Witness Name" class="mt-2 block w-full p-2 border rounded-md">
-                        <input type="text" id="buyerWitness" required placeholder="Buyer Witness Name" class="mt-2 block w-full p-2 border rounded-md">
+                        <input type="text" id="sellerWitness" required placeholder="Seller Witness Name" class="mt-2 block w-full p-2 border rounded-md transition duration-200">
+                        <input type="text" id="buyerWitness" required placeholder="Buyer Witness Name" class="mt-2 block w-full p-2 border rounded-md transition duration-200">
                     </fieldset>
 
-                    <button type="submit" class="w-full bg-primary-blue hover:bg-blue-900 text-white font-bold py-3 rounded-lg transition duration-150">
-                        Generate & Save Agreement
+                    <button type="submit" id="save-agreement-btn" class="w-full bg-primary-blue hover:bg-blue-900 text-white font-bold py-3 rounded-lg transition duration-150 flex items-center justify-center gap-2">
+                        <span>Generate & Save Agreement</span>
+                        <svg id="agreement-spinner" class="hidden w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
                     </button>
                 </form>
             </div>
-            <div class="p-6 border border-gray-300 rounded-xl bg-white shadow-md">
+            <div class="p-6 border border-gray-300 rounded-xl bg-white shadow-md animate-fade-in" style="animation-delay: 200ms">
                 <h3 class="text-xl font-semibold mb-4 text-primary-blue">Recent Sales Agreements</h3>
                 <div id="recent-agreements">
-                    <p class="text-center text-gray-500">Loading agreements...</p>
+                    ${createShimmerLoader(2)}
                 </div>
             </div>
         </div>
@@ -2434,6 +3064,7 @@ function renderAgreementForm(receiptReference = '') {
         });
     }
 }
+
 /**
  * Handles form submission and saves the sales agreement to Firestore.
  */
@@ -2442,6 +3073,15 @@ async function saveAgreement() {
     if (!form.checkValidity()) {
         form.reportValidity();
         return;
+    }
+
+    // Show loading state
+    const saveButton = document.getElementById('save-agreement-btn');
+    const spinner = document.getElementById('agreement-spinner');
+    if (saveButton && spinner) {
+        saveButton.disabled = true;
+        spinner.classList.remove('hidden');
+        saveButton.innerHTML = `<span>Saving Agreement...</span>${spinner.outerHTML}`;
     }
 
     // --- CORRECTION 1: READ THE DATE INPUT VALUE ---
@@ -2474,7 +3114,8 @@ async function saveAgreement() {
         bankId = bankDetails.id;
     } catch (e) {
         console.error("Error parsing bank details from dropdown:", e);
-        alert("Please select a valid bank account.");
+        showErrorToast("Please select a valid bank account.");
+        resetAgreementSaveButton(saveButton, spinner);
         return;
     }
 
@@ -2521,7 +3162,11 @@ async function saveAgreement() {
 
     try {
         const docRef = await db.collection("sales_agreements").add(agreementData);
-        alert(`Sales Agreement for ${agreementData.buyer.name} saved successfully!`);
+        
+        // Reset button state
+        resetAgreementSaveButton(saveButton, spinner);
+        
+        showSuccessToast(`Sales Agreement for ${agreementData.buyer.name} saved successfully!`);
 
         // Use the parsed bank details object for immediate PDF generation
         agreementData.firestoreId = docRef.id;
@@ -2532,7 +3177,17 @@ async function saveAgreement() {
         fetchAgreements(); // Refresh history
     } catch (error) {
         console.error("Error saving sales agreement:", error);
-        alert("Failed to save sales agreement: " + error.message);
+        resetAgreementSaveButton(saveButton, spinner);
+        showErrorToast("Failed to save sales agreement: " + error.message);
+    }
+}
+
+// Helper function to reset agreement save button
+function resetAgreementSaveButton(saveButton, spinner) {
+    if (saveButton && spinner) {
+        saveButton.disabled = false;
+        spinner.classList.add('hidden');
+        saveButton.innerHTML = `<span>Generate & Save Agreement</span>${spinner.outerHTML}`;
     }
 }
 
@@ -2545,12 +3200,19 @@ async function fetchAgreements() {
     try {
         const snapshot = await db.collection("sales_agreements").orderBy("createdAt", "desc").limit(10).get();
         if (snapshot.empty) {
-            agreementList.innerHTML = `<p class="text-gray-500">No recent agreements found.</p>`;
+            agreementList.innerHTML = `
+                <div class="text-center p-8 border border-dashed border-gray-300 rounded-lg">
+                    <svg class="w-12 h-12 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                    </svg>
+                    <p class="text-gray-500">No recent agreements found.</p>
+                </div>
+            `;
             return;
         }
         
         html = `<ul class="space-y-3">`;
-        snapshot.forEach(doc => {
+        snapshot.forEach((doc, index) => {
             const data = doc.data();
             const agreementDataJson = JSON.stringify({
                 ...data, 
@@ -2558,17 +3220,22 @@ async function fetchAgreements() {
                 createdAt: data.createdAt ? data.createdAt.toDate().toISOString() : new Date().toISOString()
             });
 
-            html += `<li class="p-3 border rounded-lg bg-gray-50 flex flex-col sm:flex-row justify-between items-start sm:items-center">
+            const animationDelay = index * 50;
+            
+            html += `<li class="p-3 border rounded-lg bg-gray-50 flex flex-col sm:flex-row justify-between items-start sm:items-center animate-fade-in" style="animation-delay: ${animationDelay}ms">
                         <div>
                             <strong class="text-primary-blue">Agreement ID: ${doc.id.substring(0, 8)}...</strong><br>
                             <span class="text-sm text-gray-700">Buyer: ${data.buyer.name} | Vehicle: ${data.vehicle.makeModel}</span>
-                            ${data.invoiceReference ? `<br><span class="text-xs text-green-600">Invoice Ref: ${data.invoiceReference}</span>` : ''}
-                            ${data.receiptReference ? `<br><span class="text-xs text-blue-600">Receipt Ref: ${data.receiptReference}</span>` : ''}
+                            ${data.invoiceReference ? `<br><span class="text-xs text-green-600 flex items-center gap-1"><svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M5 2a2 2 0 00-2 2v14l3.5-2 3.5 2 3.5-2 3.5 2V4a2 2 0 00-2-2H5z" clip-rule="evenodd"/></svg> Invoice Ref: ${data.invoiceReference}</span>` : ''}
+                            ${data.receiptReference ? `<br><span class="text-xs text-blue-600 flex items-center gap-1"><svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4 4a2 2 0 00-2 2v4a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2H4z" clip-rule="evenodd"/></svg> Receipt Ref: ${data.receiptReference}</span>` : ''}
                         </div>
                         <div class="mt-2 sm:mt-0 space-x-2">
                             <button onclick='reDownloadAgreement(${agreementDataJson})' 
-                                    class="bg-gray-700 hover:bg-gray-600 text-white text-xs py-1 px-3 rounded-full transition duration-150">
-                                Re-Download PDF
+                                    class="bg-gray-700 hover:bg-gray-600 text-white text-xs py-1 px-3 rounded-full transition duration-150 flex items-center gap-1">
+                                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                                </svg>
+                                PDF
                             </button>
                         </div>
                     </li>`;
@@ -2577,7 +3244,12 @@ async function fetchAgreements() {
         agreementList.innerHTML = html;
     } catch (error) {
         console.error("Error fetching agreements:", error);
-        agreementList.innerHTML = `<p class="text-red-500">Error loading agreements. Check console for details.</p>`;
+        agreementList.innerHTML = `
+            <div class="text-center p-4 bg-red-50 border border-red-200 rounded-lg">
+                <p class="text-red-600 font-semibold">Error loading agreements</p>
+                <p class="text-xs text-gray-600 mt-1">${error.message}</p>
+            </div>
+        `;
     }
 }
 
@@ -2627,31 +3299,35 @@ async function reDownloadAgreement(data) {
 function renderBankManagement() {
     const formArea = document.getElementById('document-form-area');
     formArea.innerHTML = `
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div class="md:col-span-1 p-6 border border-green-300 rounded-xl bg-green-50 shadow-md">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 animate-fade-in">
+            <div class="md:col-span-1 p-6 border border-green-300 rounded-xl bg-green-50 shadow-md animate-fade-in" style="animation-delay: 100ms">
                 <h3 class="text-xl font-semibold mb-4 text-green-700">Add New Bank Account</h3>
                 <form id="add-bank-form" onsubmit="event.preventDefault(); addBankDetails()">
-                    <input type="text" id="bankName" required placeholder="Bank Name (e.g., KCB Bank)" class="mt-2 block w-full p-2 border rounded-md">
-                    <input type="text" id="bankBranch" required placeholder="Bank Branch (e.g., Kilimani Branch)" class="mt-2 block w-full p-2 border rounded-md">
-                    <input type="text" id="accountName" required placeholder="Account Name" value="WANBITE INVESTMENTS CO. LTD" class="mt-2 block w-full p-2 border rounded-md">
-                    <input type="text" id="accountNumber" required placeholder="Account Number" class="mt-2 block w-full p-2 border rounded-md">
-                    <input type="text" id="paybillNumber" placeholder="Paybill Number (Optional)" class="mt-2 block w-full p-2 border rounded-md">
-                    <input type="text" id="swiftCode" required placeholder="SWIFT/BIC Code" class="mt-2 block w-full p-2 border rounded-md">
-                    <select id="currency" required class="mt-2 block w-full p-2 border rounded-md">
+                    <input type="text" id="bankName" required placeholder="Bank Name (e.g., KCB Bank)" class="mt-2 block w-full p-2 border rounded-md transition duration-200">
+                    <input type="text" id="bankBranch" required placeholder="Bank Branch (e.g., Kilimani Branch)" class="mt-2 block w-full p-2 border rounded-md transition duration-200">
+                    <input type="text" id="accountName" required placeholder="Account Name" value="WANBITE INVESTMENTS CO. LTD" class="mt-2 block w-full p-2 border rounded-md transition duration-200">
+                    <input type="text" id="accountNumber" required placeholder="Account Number" class="mt-2 block w-full p-2 border rounded-md transition duration-200">
+                    <input type="text" id="paybillNumber" placeholder="Paybill Number (Optional)" class="mt-2 block w-full p-2 border rounded-md transition duration-200">
+                    <input type="text" id="swiftCode" required placeholder="SWIFT/BIC Code" class="mt-2 block w-full p-2 border rounded-md transition duration-200">
+                    <select id="currency" required class="mt-2 block w-full p-2 border rounded-md transition duration-200">
                         <option value="" disabled selected>Select Currency</option>
                         <option value="USD">USD</option>
                         <option value="KES">KES</option>
                     </select>
-                    <button type="submit" class="mt-4 w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 rounded-md transition duration-150">
-                        Save Bank Account
+                    <button type="submit" id="save-bank-btn" class="mt-4 w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 rounded-md transition duration-150 flex items-center justify-center gap-2">
+                        <span>Save Bank Account</span>
+                        <svg id="bank-spinner" class="hidden w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
                     </button>
                 </form>
             </div>
 
-            <div class="md:col-span-2 p-6 border border-gray-300 rounded-xl bg-white shadow-md">
+            <div class="md:col-span-2 p-6 border border-gray-300 rounded-xl bg-white shadow-md animate-fade-in" style="animation-delay: 200ms">
                 <h3 class="text-xl font-semibold mb-4 text-primary-blue">Saved Bank Accounts</h3>
                 <div id="saved-banks-list" class="space-y-3">
-                    <p class="text-center text-gray-500">Loading banks...</p>
+                    ${createShimmerLoader(3)}
                 </div>
             </div>
         </div>
@@ -2663,6 +3339,21 @@ function renderBankManagement() {
  * Saves new bank details to the 'bankDetails' Firestore collection.
  */
 async function addBankDetails() {
+    const form = document.getElementById('add-bank-form');
+    if (!form.checkValidity()) {
+        form.reportValidity();
+        return;
+    }
+    
+    // Show loading state
+    const saveButton = document.getElementById('save-bank-btn');
+    const spinner = document.getElementById('bank-spinner');
+    if (saveButton && spinner) {
+        saveButton.disabled = true;
+        spinner.classList.remove('hidden');
+        saveButton.innerHTML = `<span>Saving...</span>${spinner.outerHTML}`;
+    }
+
     const bankName = document.getElementById('bankName').value;
     const bankBranch = document.getElementById('bankBranch').value;
     const accountName = document.getElementById('accountName').value;
@@ -2684,12 +3375,28 @@ async function addBankDetails() {
 
     try {
         await db.collection("bankDetails").add(newBank);
-        alert(`Bank account for ${bankName} (${bankBranch}) saved successfully!`);
+        
+        // Reset button state
+        if (saveButton && spinner) {
+            saveButton.disabled = false;
+            spinner.classList.add('hidden');
+            saveButton.innerHTML = `<span>Save Bank Account</span>${spinner.outerHTML}`;
+        }
+        
+        showSuccessToast(`Bank account for ${bankName} (${bankBranch}) saved successfully!`);
         document.getElementById('add-bank-form').reset();
         fetchAndDisplayBankDetails(); // Refresh the list
     } catch (error) {
         console.error("Error saving bank details:", error);
-        alert("Failed to save bank details: " + error.message);
+        
+        // Reset button state
+        if (saveButton && spinner) {
+            saveButton.disabled = false;
+            spinner.classList.add('hidden');
+            saveButton.innerHTML = `<span>Save Bank Account</span>${spinner.outerHTML}`;
+        }
+        
+        showErrorToast("Failed to save bank details: " + error.message);
     }
 }
 
@@ -2700,28 +3407,49 @@ async function fetchAndDisplayBankDetails() {
     const listElement = document.getElementById('saved-banks-list');
     if (!listElement) return;
 
-    listElement.innerHTML = `<p class="text-center text-gray-500">Fetching data...</p>`;
+    listElement.innerHTML = `${createShimmerLoader(3)}`;
     let html = ``;
 
     try {
         const snapshot = await db.collection("bankDetails").orderBy("createdAt", "desc").get();
         if (snapshot.empty) {
-            listElement.innerHTML = `<p class="text-center text-gray-500">No bank accounts have been configured yet.</p>`;
+            listElement.innerHTML = `
+                <div class="text-center p-8 border border-dashed border-gray-300 rounded-lg">
+                    <svg class="w-12 h-12 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"></path>
+                    </svg>
+                    <p class="text-center text-gray-500">No bank accounts have been configured yet.</p>
+                </div>
+            `;
             return;
         }
 
         html = `<ul class="divide-y divide-gray-200">`;
-        snapshot.forEach(doc => {
+        snapshot.forEach((doc, index) => {
             const data = doc.data();
+            const animationDelay = index * 50;
+            
             html += `
-                <li class="p-4 flex flex-col">
+                <li class="p-4 flex flex-col animate-fade-in hover:bg-gray-50 transition duration-150" style="animation-delay: ${animationDelay}ms">
                     <div class="flex justify-between items-center">
-                        <strong class="text-lg text-primary-blue">${data.name} (${data.currency})</strong>
-                        <button onclick="deleteBank('${doc.id}')" class="text-red-500 hover:text-red-700 text-sm">Delete</button>
+                        <div class="flex items-center gap-3">
+                            <div class="w-10 h-10 rounded-lg bg-gradient-to-r from-primary-blue to-blue-600 flex items-center justify-center">
+                                <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"></path>
+                                </svg>
+                            </div>
+                            <strong class="text-lg text-primary-blue">${data.name} <span class="text-xs bg-${data.currency === 'USD' ? 'blue' : 'green'}-100 text-${data.currency === 'USD' ? 'blue' : 'green'}-800 px-2 py-1 rounded">${data.currency}</span></strong>
+                        </div>
+                        <button onclick="deleteBank('${doc.id}')" class="text-red-500 hover:text-red-700 text-sm transition duration-150 flex items-center gap-1">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                            </svg>
+                            Delete
+                        </button>
                     </div>
-                    <p class="text-sm text-gray-700">Branch: ${data.branch || 'N/A'}</p>
+                    <p class="text-sm text-gray-700 mt-2">Branch: ${data.branch || 'N/A'}</p>
                     <p class="text-sm text-gray-700">Account: ${data.accountName}</p>
-                    <p class="text-sm text-gray-600">No: ${data.accountNumber} | SWIFT: ${data.swiftCode}</p>
+                    <p class="text-sm text-gray-600 mt-1">No: ${data.accountNumber} | SWIFT: ${data.swiftCode}</p>
                     ${data.paybillNumber ? `<p class="text-sm text-gray-600">Paybill: ${data.paybillNumber}</p>` : ''}
                 </li>
             `;
@@ -2731,7 +3459,12 @@ async function fetchAndDisplayBankDetails() {
 
     } catch (error) {
         console.error("Error fetching banks:", error);
-        listElement.innerHTML = `<p class="text-red-500">Error loading bank accounts.</p>`;
+        listElement.innerHTML = `
+            <div class="text-center p-4 bg-red-50 border border-red-200 rounded-lg">
+                <p class="text-red-600 font-semibold">Error loading bank accounts</p>
+                <p class="text-xs text-gray-600 mt-1">${error.message}</p>
+            </div>
+        `;
     }
 }
 
@@ -2743,13 +3476,19 @@ async function deleteBank(bankId) {
     if (!confirm("Are you sure you want to delete this bank account?")) {
         return;
     }
+    
+    const loadingOverlay = showLoadingOverlay("Deleting bank account...");
+    
     try {
         await db.collection("bankDetails").doc(bankId).delete();
-        alert("Bank account deleted successfully!");
+        
+        hideLoadingOverlay();
+        showSuccessToast("Bank account deleted successfully!");
         fetchAndDisplayBankDetails(); // Refresh the list
     } catch (error) {
         console.error("Error deleting bank:", error);
-        alert("Failed to delete bank: " + error.message);
+        hideLoadingOverlay();
+        showErrorToast("Failed to delete bank: " + error.message);
     }
 }
 
@@ -3176,6 +3915,7 @@ function generateReceiptPDF(data) {
 
     doc.save(`Receipt_${data.receiptId}.pdf`);
 }
+
 /**
  * Generates and downloads a custom PDF for the Invoice/Proforma with TWO BANKS.
  */
@@ -3979,6 +4719,7 @@ y += 28; // Adjusted for better spacing
 
     doc.save(`Car_Sales_Agreement_${data.buyer.name.replace(/\s/g, '_')}.pdf`);
 }
+
 // =================================================================
 //                 ADDITIONAL FUNCTIONS
 // =================================================================
@@ -3989,12 +4730,15 @@ y += 28; // Adjusted for better spacing
 function createReceiptFromInvoice(invoiceData) {
     // Check if invoice is revoked
     if (invoiceData.revoked) {
-        alert("Cannot create receipt from a revoked invoice.");
+        showErrorToast("Cannot create receipt from a revoked invoice.");
         return;
     }
     
     // Navigate to receipt form with invoice reference
     renderReceiptForm(invoiceData.invoiceId);
+    
+    // Show loading indicator
+    const loadingOverlay = showLoadingOverlay("Loading invoice data...");
     
     // Auto-populate fields from invoice data
     setTimeout(() => {
@@ -4014,9 +4758,16 @@ function createReceiptFromInvoice(invoiceData) {
         }
         if (exchangeRateField) exchangeRateField.value = invoiceData.exchangeRate;
         
+        // Hide loading overlay
+        hideLoadingOverlay();
+        
         // Trigger fetch invoice details
-        fetchInvoiceDetails();
-    }, 100);
+        setTimeout(() => {
+            fetchInvoiceDetails();
+            showSuccessToast("Invoice data loaded successfully");
+        }, 300);
+        
+    }, 500);
 }
 
 /**
@@ -4025,12 +4776,15 @@ function createReceiptFromInvoice(invoiceData) {
 function createAgreementFromInvoice(invoiceData) {
     // Check if invoice is revoked
     if (invoiceData.revoked) {
-        alert("Cannot create agreement from a revoked invoice.");
+        showErrorToast("Cannot create agreement from a revoked invoice.");
         return;
     }
     
     // Navigate to agreement form
     renderAgreementForm();
+    
+    // Show loading indicator
+    const loadingOverlay = showLoadingOverlay("Loading invoice data...");
     
     // Auto-populate fields from invoice data
     setTimeout(() => {
@@ -4064,12 +4818,15 @@ function createAgreementFromInvoice(invoiceData) {
             agreementForm.dataset.invoiceId = invoiceData.firestoreId;
         }
         
+        // Hide loading overlay
+        hideLoadingOverlay();
+        
         // Show notification
         setTimeout(() => {
-            alert(`Invoice ${invoiceData.invoiceId} data has been loaded into the agreement form. The invoice number will be used as the agreement reference.`);
+            showSuccessToast(`Invoice ${invoiceData.invoiceId} data has been loaded into the agreement form.`);
         }, 300);
         
-    }, 100);
+    }, 500);
 }
 
 /**
@@ -4078,6 +4835,9 @@ function createAgreementFromInvoice(invoiceData) {
 function createAgreementFromReceipt(receiptData) {
     // Navigate to agreement form
     renderAgreementForm();
+    
+    // Show loading indicator
+    const loadingOverlay = showLoadingOverlay("Loading receipt data...");
     
     // Wait for form to render, then auto-populate fields
     setTimeout(() => {
@@ -4122,12 +4882,15 @@ function createAgreementFromReceipt(receiptData) {
             agreementForm.dataset.receiptId = receiptData.firestoreId;
         }
         
+        // Hide loading overlay
+        hideLoadingOverlay();
+        
         // Show notification
         setTimeout(() => {
-            alert(`Receipt ${receiptData.receiptId} data has been loaded into the agreement form. Please verify and complete the remaining details.`);
+            showSuccessToast(`Receipt ${receiptData.receiptId} data has been loaded into the agreement form.`);
         }, 300);
         
-    }, 100);
+    }, 500);
 }
 
 /**
@@ -4135,6 +4898,9 @@ function createAgreementFromReceipt(receiptData) {
  * @param {object} data - The receipt data object retrieved from Firestore.
  */
 async function reDownloadReceipt(data) {
+    // Show loading overlay
+    const loadingOverlay = showLoadingOverlay("Preparing receipt PDF...");
+    
     // Ensure data.receiptDate is set (should be from the save logic)
     if (!data.receiptDate) {
          data.receiptDate = new Date().toLocaleDateString('en-US'); // Fallback
@@ -4153,6 +4919,9 @@ async function reDownloadReceipt(data) {
         }
     }
     
+    // Hide loading overlay
+    hideLoadingOverlay();
+    
     // Now generate the PDF with all the data
     generateReceiptPDF(data);
 }
@@ -4163,7 +4932,7 @@ async function reDownloadReceipt(data) {
 function viewReceiptBalances(data) {
     const modalHtml = `
         <div id="balances-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-            <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+            <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white animate-fade-in">
                 <h3 class="text-lg font-semibold text-primary-blue mb-4">Receipt Balances</h3>
                 <p class="text-sm mb-3">
                     <strong>Receipt:</strong> ${data.receiptId}<br>
@@ -4186,11 +4955,11 @@ function viewReceiptBalances(data) {
                 </div>
                 <div class="flex justify-end space-x-3">
                     <button onclick="addPaymentToReceipt(${JSON.stringify(data)})" 
-                            class="bg-primary-blue hover:bg-blue-900 text-white font-bold py-2 px-4 rounded-md">
+                            class="bg-primary-blue hover:bg-blue-900 text-white font-bold py-2 px-4 rounded-md transition duration-150">
                         Add Payment
                     </button>
                     <button onclick="document.getElementById('balances-modal').remove()" 
-                            class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-md">
+                            class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-md transition duration-150">
                         Close
                     </button>
                 </div>
@@ -4219,13 +4988,13 @@ function addPaymentToReceipt(receiptData) {
 function markInvoiceDepositPaid(invoiceData) {
     // Check if invoice is revoked
     if (invoiceData.revoked) {
-        alert("Cannot mark deposit as paid on a revoked invoice.");
+        showErrorToast("Cannot mark deposit as paid on a revoked invoice.");
         return;
     }
     
     const modalHtml = `
         <div id="deposit-paid-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-            <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+            <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white animate-fade-in">
                 <h3 class="text-lg font-semibold text-primary-blue mb-4">Mark Deposit as Paid</h3>
                 <p class="text-sm mb-3">
                     <strong>Invoice:</strong> ${invoiceData.invoiceId}<br>
@@ -4235,32 +5004,32 @@ function markInvoiceDepositPaid(invoiceData) {
                 <form id="deposit-paid-form" onsubmit="event.preventDefault(); saveDepositPayment('${invoiceData.firestoreId}', ${invoiceData.pricing.depositUSD}, ${invoiceData.exchangeRate})">
                     <div class="mb-3">
                         <label class="block text-sm font-medium text-gray-700">Payment Date</label>
-                        <input type="date" id="depositDate" required value="${new Date().toISOString().slice(0, 10)}" class="mt-1 block w-full p-2 border rounded-md">
+                        <input type="date" id="depositDate" required value="${new Date().toISOString().slice(0, 10)}" class="mt-1 block w-full p-2 border rounded-md transition duration-200">
                     </div>
                     <div class="mb-3">
                         <label class="block text-sm font-medium text-gray-700">Amount</label>
                         <div class="grid grid-cols-3 gap-2">
-                            <select id="depositCurrency" required class="p-2 border rounded-md">
+                            <select id="depositCurrency" required class="p-2 border rounded-md transition duration-200">
                                 <option value="USD">USD</option>
                                 <option value="KSH">KSH</option>
                             </select>
-                            <input type="number" id="depositAmount" step="0.01" required placeholder="Amount" class="col-span-2 p-2 border rounded-md">
+                            <input type="number" id="depositAmount" step="0.01" required placeholder="Amount" class="col-span-2 p-2 border rounded-md transition duration-200">
                         </div>
                     </div>
                     <div class="mb-3">
                         <label class="block text-sm font-medium text-gray-700">Exchange Rate (USD 1 = KES)</label>
-                        <input type="number" id="depositExchangeRate" step="0.01" required value="${invoiceData.exchangeRate || 130}" class="w-full p-2 border rounded-md">
+                        <input type="number" id="depositExchangeRate" step="0.01" required value="${invoiceData.exchangeRate || 130}" class="w-full p-2 border rounded-md transition duration-200">
                     </div>
                     <div class="mb-3">
                         <label class="block text-sm font-medium text-gray-700">Bank Used</label>
-                        <select id="depositBankUsed" required class="mt-1 block w-full p-2 border rounded-md">
+                        <select id="depositBankUsed" required class="mt-1 block w-full p-2 border rounded-md transition duration-200">
                             <option value="" disabled selected>Select Bank</option>
                             <option value="Cash">Cash</option>
                         </select>
                     </div>
                     <div class="mb-3">
                         <label class="block text-sm font-medium text-gray-700">Reference/Description</label>
-                        <input type="text" id="depositDescription" required placeholder="e.g., Deposit Payment for Invoice ${invoiceData.invoiceId}" class="mt-1 block w-full p-2 border rounded-md">
+                        <input type="text" id="depositDescription" required placeholder="e.g., Deposit Payment for Invoice ${invoiceData.invoiceId}" class="mt-1 block w-full p-2 border rounded-md transition duration-200">
                     </div>
                     <div class="mb-4 p-2 bg-yellow-50 rounded">
                         <p class="text-xs text-gray-600">
@@ -4268,11 +5037,15 @@ function markInvoiceDepositPaid(invoiceData) {
                         </p>
                     </div>
                     <div class="flex justify-end space-x-3">
-                        <button type="button" onclick="(() => { const modal = document.getElementById('deposit-paid-modal'); if (modal) modal.remove(); })()" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-md">
+                        <button type="button" onclick="(() => { const modal = document.getElementById('deposit-paid-modal'); if (modal) modal.remove(); })()" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-md transition duration-150">
                             Cancel
                         </button>
-                        <button type="submit" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-md">
-                            Save Deposit Payment
+                        <button type="submit" id="save-deposit-btn" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-md transition duration-150 flex items-center justify-center gap-2">
+                            <span>Save Deposit Payment</span>
+                            <svg id="deposit-spinner" class="hidden w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
                         </button>
                     </div>
                 </form>
@@ -4313,6 +5086,15 @@ async function saveDepositPayment(invoiceDocId, depositAmountUSD, exchangeRate) 
         return;
     }
     
+    // Show loading state
+    const saveButton = document.getElementById('save-deposit-btn');
+    const spinner = document.getElementById('deposit-spinner');
+    if (saveButton && spinner) {
+        saveButton.disabled = true;
+        spinner.classList.remove('hidden');
+        saveButton.innerHTML = `<span>Saving...</span>${spinner.outerHTML}`;
+    }
+    
     const depositDate = document.getElementById('depositDate').value;
     const depositCurrency = document.getElementById('depositCurrency').value;
     const depositAmount = parseFloat(document.getElementById('depositAmount').value);
@@ -4321,14 +5103,16 @@ async function saveDepositPayment(invoiceDocId, depositAmountUSD, exchangeRate) 
     const depositDescription = document.getElementById('depositDescription').value;
     
     if (isNaN(depositAmount) || depositAmount <= 0) {
-        alert("Please enter a valid deposit amount.");
+        showErrorToast("Please enter a valid deposit amount.");
+        resetDepositSaveButton(saveButton, spinner);
         return;
     }
     
     // Get invoice data
     const invoiceDoc = await db.collection("invoices").doc(invoiceDocId).get();
     if (!invoiceDoc.exists) {
-        alert("Invoice not found!");
+        showErrorToast("Invoice not found!");
+        resetDepositSaveButton(saveButton, spinner);
         return;
     }
     
@@ -4417,14 +5201,25 @@ async function saveDepositPayment(invoiceDocId, depositAmountUSD, exchangeRate) 
             modal.remove();
         }
         
-        alert(`Deposit payment of ${depositCurrency} ${depositAmount.toFixed(2)} saved successfully! Receipt ${receiptId} created.`);
+        resetDepositSaveButton(saveButton, spinner);
+        showSuccessToast(`Deposit payment of ${depositCurrency} ${depositAmount.toFixed(2)} saved successfully! Receipt ${receiptId} created.`);
         
         // Navigate to receipt form with the invoice reference
         renderReceiptForm(invoiceData.invoiceId);
         
     } catch (error) {
         console.error("Error saving deposit payment:", error);
-        alert("Failed to save deposit payment: " + error.message);
+        resetDepositSaveButton(saveButton, spinner);
+        showErrorToast("Failed to save deposit payment: " + error.message);
+    }
+}
+
+// Helper function to reset deposit save button
+function resetDepositSaveButton(saveButton, spinner) {
+    if (saveButton && spinner) {
+        saveButton.disabled = false;
+        spinner.classList.add('hidden');
+        saveButton.innerHTML = `<span>Save Deposit Payment</span>${spinner.outerHTML}`;
     }
 }
 
@@ -4434,15 +5229,22 @@ async function saveDepositPayment(invoiceDocId, depositAmountUSD, exchangeRate) 
 
 function handleFleetManagement() {
     appContent.innerHTML = `
-        <h2 class="text-3xl font-bold mb-8 text-primary-blue">Fleet Management Dashboard</h2>
-        <div class="p-6 bg-yellow-50 rounded-xl border border-yellow-400">
-            <p class="text-gray-800 font-semibold mb-4">Fleet Management Features:</p>
+        <h2 class="text-3xl font-bold mb-8 text-primary-blue animate-fade-in">Fleet Management Dashboard</h2>
+        <div class="p-6 bg-gradient-to-r from-yellow-50 to-yellow-100 rounded-xl border border-yellow-400 animate-fade-in" style="animation-delay: 100ms">
+            <div class="flex items-center gap-4 mb-4">
+                <div class="w-12 h-12 rounded-lg bg-yellow-500 flex items-center justify-center shadow-sm">
+                    <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                </div>
+                <p class="text-gray-800 font-semibold text-lg">Fleet Management Features:</p>
+            </div>
             <ul class="list-disc pl-5 space-y-2 text-gray-700">
-                <li>Track vehicles from shipment to delivery</li>
-                <li>Monitor ETA (Estimated Time of Arrival)</li>
-                <li>Update status and add comments for each stage</li>
-                <li>View status history for each vehicle</li>
-                <li>Real-time updates using Firestore</li>
+                <li class="flex items-center gap-2"><span class="w-2 h-2 bg-yellow-500 rounded-full"></span> Track vehicles from shipment to delivery</li>
+                <li class="flex items-center gap-2"><span class="w-2 h-2 bg-yellow-500 rounded-full"></span> Monitor ETA (Estimated Time of Arrival)</li>
+                <li class="flex items-center gap-2"><span class="w-2 h-2 bg-yellow-500 rounded-full"></span> Update status and add comments for each stage</li>
+                <li class="flex items-center gap-2"><span class="w-2 h-2 bg-yellow-500 rounded-full"></span> View status history for each vehicle</li>
+                <li class="flex items-center gap-2"><span class="w-2 h-2 bg-yellow-500 rounded-full"></span> Real-time updates using Firestore</li>
             </ul>
             <p class="mt-4 text-sm text-gray-600">Use the navigation to manage your fleet operations.</p>
         </div>
@@ -4561,7 +5363,7 @@ async function searchDocuments() {
     const docTypeFilter = document.getElementById('document-type-filter')?.value;
     
     if (!searchTerm || searchTerm.length < 2) {
-        alert("Please enter at least 2 characters to search");
+        showErrorToast("Please enter at least 2 characters to search");
         return;
     }
     
@@ -4599,12 +5401,14 @@ async function performSearch(searchTerm, docTypeFilter) {
     
     if (!resultsList || !searchResultsDiv || !docCreationArea) {
         console.error("Required DOM elements not found");
-        alert("Error: Please try searching again.");
+        showErrorToast("Error: Please try searching again.");
         return;
     }
     
-    resultsList.innerHTML = '<div class="text-center p-8"><p class="text-gray-500">Searching documents...</p><div class="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-primary-blue"></div></div>';
+    resultsList.innerHTML = createShimmerLoader(3);
     searchResultsDiv.classList.remove('hidden');
+    searchResultsDiv.style.opacity = '1';
+    searchResultsDiv.style.transition = 'opacity 0.3s ease-in';
     docCreationArea.classList.add('hidden');
     
     let allResults = [];
@@ -4644,14 +5448,18 @@ async function performSearch(searchTerm, docTypeFilter) {
     } catch (error) {
         console.error("Error searching documents:", error);
         resultsList.innerHTML = `
-            <div class="text-center p-8 bg-red-50 rounded-lg">
-                <p class="text-red-600 font-semibold">Search Error</p>
+            <div class="text-center p-8 bg-red-50 rounded-lg border border-red-200 animate-fade-in">
+                <svg class="w-16 h-16 text-red-500 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.998-.833-2.732 0L4.342 16.5c-.77.833.192 2.5 1.732 2.5z"></path>
+                </svg>
+                <p class="text-red-600 font-semibold mb-2">Search Error</p>
                 <p class="text-sm text-gray-600 mt-2">${error.message}</p>
-                <button onclick="clearSearch()" class="mt-4 bg-primary-blue hover:bg-blue-900 text-white font-bold py-2 px-4 rounded-md">
+                <button onclick="clearSearch()" class="mt-4 bg-primary-blue hover:bg-blue-900 text-white font-bold py-2 px-4 rounded-md transition duration-150">
                     Return to Document Generator
                 </button>
             </div>
         `;
+        showErrorToast("Error searching documents. Please try again.");
     }
 }
 
@@ -4666,13 +5474,14 @@ async function populateBankDropdownForModal(dropdownId) {
     const bankSelect = document.getElementById(dropdownId);
     if (!bankSelect) return;
 
-    // Clear existing options except the first one
-    while (bankSelect.options.length > 1) {
-        bankSelect.remove(1);
-    }
+    // Show loading state in dropdown
+    bankSelect.innerHTML = '<option value="" disabled selected>Loading banks...</option>';
 
     try {
         const snapshot = await db.collection("bankDetails").orderBy("createdAt", "desc").get();
+        
+        // Clear existing options
+        bankSelect.innerHTML = '<option value="" disabled selected>Select Bank</option>';
         
         if (snapshot.empty) {
             const option = document.createElement('option');
@@ -4691,12 +5500,19 @@ async function populateBankDropdownForModal(dropdownId) {
             bankSelect.appendChild(option);
         });
 
+        // Add cash option
+        const cashOption = document.createElement('option');
+        cashOption.value = "Cash";
+        cashOption.textContent = "Cash";
+        bankSelect.appendChild(cashOption);
+
     } catch (error) {
         console.error("Error loading banks for modal:", error);
         const option = document.createElement('option');
         option.value = "";
         option.textContent = "Error loading banks";
         option.disabled = true;
+        bankSelect.innerHTML = '';
         bankSelect.appendChild(option);
     }
 }
@@ -4707,7 +5523,7 @@ async function populateBankDropdownForModal(dropdownId) {
 function addPaymentToExistingReceipt(receiptDocId, receiptNumber, clientName, exchangeRate = 130) {
     const modalHtml = `
         <div id="add-payment-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-            <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+            <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white animate-fade-in">
                 <h3 class="text-lg font-semibold text-primary-blue mb-4">Add Payment to Receipt</h3>
                 <p class="text-sm mb-3">
                     <strong>Receipt:</strong> ${receiptNumber}<br>
@@ -4717,32 +5533,32 @@ function addPaymentToExistingReceipt(receiptDocId, receiptNumber, clientName, ex
                 <form id="add-payment-form" onsubmit="event.preventDefault(); saveAdditionalPayment('${receiptDocId}', '${receiptNumber}', ${exchangeRate})">
                     <div class="mb-3">
                         <label class="block text-sm font-medium text-gray-700">Payment Date</label>
-                        <input type="date" id="paymentDate" required value="${new Date().toISOString().slice(0, 10)}" class="mt-1 block w-full p-2 border rounded-md">
+                        <input type="date" id="paymentDate" required value="${new Date().toISOString().slice(0, 10)}" class="mt-1 block w-full p-2 border rounded-md transition duration-200">
                     </div>
                     <div class="mb-3">
                         <label class="block text-sm font-medium text-gray-700">Amount</label>
                         <div class="grid grid-cols-3 gap-2">
-                            <select id="paymentCurrency" required class="p-2 border rounded-md">
+                            <select id="paymentCurrency" required class="p-2 border rounded-md transition duration-200">
                                 <option value="KSH">KSH</option>
                                 <option value="USD">USD</option>
                             </select>
-                            <input type="number" id="paymentAmount" step="0.01" required placeholder="Amount" class="col-span-2 p-2 border rounded-md">
+                            <input type="number" id="paymentAmount" step="0.01" required placeholder="Amount" class="col-span-2 p-2 border rounded-md transition duration-200">
                         </div>
                     </div>
                     <div class="mb-3">
                         <label class="block text-sm font-medium text-gray-700">Exchange Rate (USD 1 = KES)</label>
-                        <input type="number" id="paymentExchangeRate" step="0.01" required value="${exchangeRate}" class="w-full p-2 border rounded-md">
+                        <input type="number" id="paymentExchangeRate" step="0.01" required value="${exchangeRate}" class="w-full p-2 border rounded-md transition duration-200">
                     </div>
                     <div class="mb-3">
                         <label class="block text-sm font-medium text-gray-700">Bank Used</label>
-                        <select id="paymentBankUsed" required class="mt-1 block w-full p-2 border rounded-md">
+                        <select id="paymentBankUsed" required class="mt-1 block w-full p-2 border rounded-md transition duration-200">
                             <option value="" disabled selected>Select Bank</option>
                             <option value="Cash">Cash</option>
                         </select>
                     </div>
                     <div class="mb-3">
                         <label class="block text-sm font-medium text-gray-700">Reference/Description</label>
-                        <input type="text" id="paymentDescription" required placeholder="e.g., Balance Payment, Additional Payment" class="mt-1 block w-full p-2 border rounded-md">
+                        <input type="text" id="paymentDescription" required placeholder="e.g., Balance Payment, Additional Payment" class="mt-1 block w-full p-2 border rounded-md transition duration-200">
                     </div>
                     <div class="mb-4 p-2 bg-yellow-50 rounded">
                         <p class="text-xs text-gray-600">
@@ -4750,11 +5566,15 @@ function addPaymentToExistingReceipt(receiptDocId, receiptNumber, clientName, ex
                         </p>
                     </div>
                     <div class="flex justify-end space-x-3">
-                       <button type="button" onclick="(() => { const modal = document.getElementById('add-payment-modal'); if (modal) modal.remove(); })()" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-md">
-    Cancel
-</button>
-                        <button type="submit" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-md">
-                            Add Payment
+                       <button type="button" onclick="(() => { const modal = document.getElementById('add-payment-modal'); if (modal) modal.remove(); })()" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-md transition duration-150">
+                            Cancel
+                        </button>
+                        <button type="submit" id="save-payment-btn" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-md transition duration-150 flex items-center justify-center gap-2">
+                            <span>Add Payment</span>
+                            <svg id="payment-spinner" class="hidden w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
                         </button>
                     </div>
                 </form>
@@ -4778,6 +5598,15 @@ async function saveAdditionalPayment(receiptDocId, receiptNumber, exchangeRate) 
         return;
     }
     
+    // Show loading state
+    const saveButton = document.getElementById('save-payment-btn');
+    const spinner = document.getElementById('payment-spinner');
+    if (saveButton && spinner) {
+        saveButton.disabled = true;
+        spinner.classList.remove('hidden');
+        saveButton.innerHTML = `<span>Saving...</span>${spinner.outerHTML}`;
+    }
+    
     const paymentDate = document.getElementById('paymentDate').value;
     const paymentCurrency = document.getElementById('paymentCurrency').value;
     const paymentAmount = parseFloat(document.getElementById('paymentAmount').value);
@@ -4786,7 +5615,8 @@ async function saveAdditionalPayment(receiptDocId, receiptNumber, exchangeRate) 
     const paymentDescription = document.getElementById('paymentDescription').value;
     
     if (isNaN(paymentAmount) || paymentAmount <= 0) {
-        alert("Please enter a valid payment amount.");
+        showErrorToast("Please enter a valid payment amount.");
+        resetPaymentSaveButton(saveButton, spinner);
         return;
     }
     
@@ -4848,7 +5678,8 @@ async function saveAdditionalPayment(receiptDocId, receiptNumber, exchangeRate) 
             modal.remove();
         }
         
-        alert(`Additional payment of ${paymentCurrency} ${paymentAmount.toFixed(2)} added successfully!`);
+        resetPaymentSaveButton(saveButton, spinner);
+        showSuccessToast(`Additional payment of ${paymentCurrency} ${paymentAmount.toFixed(2)} added successfully!`);
         
         // Refresh the view
         if (document.getElementById('receipt-balances-list')) {
@@ -4859,7 +5690,17 @@ async function saveAdditionalPayment(receiptDocId, receiptNumber, exchangeRate) 
         
     } catch (error) {
         console.error("Error saving additional payment:", error);
-        alert("Failed to save payment: " + error.message);
+        resetPaymentSaveButton(saveButton, spinner);
+        showErrorToast("Failed to save payment: " + error.message);
+    }
+}
+
+// Helper function to reset payment save button
+function resetPaymentSaveButton(saveButton, spinner) {
+    if (saveButton && spinner) {
+        saveButton.disabled = false;
+        spinner.classList.add('hidden');
+        saveButton.innerHTML = `<span>Add Payment</span>${spinner.outerHTML}`;
     }
 }
 
@@ -4874,6 +5715,8 @@ async function revokeReceipt(receiptData) {
     if (!confirm(`Are you sure you want to REVOKE receipt ${receiptData.receiptId}?\n\nThis will mark it as invalid and delete it from the system.`)) {
         return;
     }
+    
+    const loadingOverlay = showLoadingOverlay("Revoking receipt...");
     
     try {
         // Mark as revoked
@@ -4895,7 +5738,8 @@ async function revokeReceipt(receiptData) {
         
         await Promise.all(deletePromises);
         
-        alert(`Receipt ${receiptData.receiptId} has been revoked and associated payments deleted.`);
+        hideLoadingOverlay();
+        showSuccessToast(`Receipt ${receiptData.receiptId} has been revoked and associated payments deleted.`);
         
         // Refresh the view
         if (document.getElementById('recent-receipts')) {
@@ -4904,7 +5748,8 @@ async function revokeReceipt(receiptData) {
         
     } catch (error) {
         console.error("Error revoking receipt:", error);
-        alert("Failed to revoke receipt: " + error.message);
+        hideLoadingOverlay();
+        showErrorToast("Failed to revoke receipt: " + error.message);
     }
 }
 
@@ -4914,12 +5759,15 @@ async function revokeReceipt(receiptData) {
 function createAdditionalInvoice(invoiceData) {
     // Check if invoice is revoked
     if (invoiceData.revoked) {
-        alert("Cannot create additional invoice from a revoked invoice.");
+        showErrorToast("Cannot create additional invoice from a revoked invoice.");
         return;
     }
     
     // Navigate to invoice form and pre-populate with existing data
     renderInvoiceForm();
+    
+    // Show loading indicator
+    const loadingOverlay = showLoadingOverlay("Loading invoice data...");
     
     // Auto-populate fields from existing invoice
     setTimeout(() => {
@@ -5008,12 +5856,15 @@ function createAdditionalInvoice(invoiceData) {
         
         autoFillBuyerConfirmation();
         
+        // Hide loading overlay
+        hideLoadingOverlay();
+        
         // Show notification
         setTimeout(() => {
-            alert(`Invoice ${invoiceData.invoiceId} data has been loaded. You can now modify and save as a new invoice.`);
+            showSuccessToast(`Invoice ${invoiceData.invoiceId} data has been loaded. You can now modify and save as a new invoice.`);
         }, 300);
         
-    }, 100);
+    }, 500);
 }
 
 /**
@@ -5022,10 +5873,10 @@ function createAdditionalInvoice(invoiceData) {
 function renderReceiptBalancesView() {
     const formArea = document.getElementById('document-form-area');
     formArea.innerHTML = `
-        <div class="p-6 border border-gray-300 rounded-xl bg-white shadow-lg">
+        <div class="p-6 border border-gray-300 rounded-xl bg-white shadow-lg animate-fade-in">
             <h3 class="text-xl font-semibold mb-6 text-primary-blue">Receipt Balances</h3>
             <div id="receipt-balances-list">
-                <p class="text-center text-gray-500">Loading receipt balances...</p>
+                ${createShimmerLoader(3)}
             </div>
         </div>
     `;
@@ -5041,7 +5892,14 @@ async function fetchAllReceiptBalances() {
     try {
         const snapshot = await db.collection("receipts").orderBy("createdAt", "desc").get();
         if (snapshot.empty) {
-            listElement.innerHTML = `<p class="text-gray-500">No receipts found.</p>`;
+            listElement.innerHTML = `
+                <div class="text-center p-8 border border-dashed border-gray-300 rounded-lg">
+                    <svg class="w-12 h-12 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                    </svg>
+                    <p class="text-gray-500">No receipts found.</p>
+                </div>
+            `;
             return;
         }
         
@@ -5067,14 +5925,15 @@ async function fetchAllReceiptBalances() {
             const remainingUSD = data.balanceDetails?.balanceRemainingUSD || 0;
             const remainingKSH = data.balanceDetails?.balanceRemainingKSH || remainingUSD * (data.exchangeRate || 130);
             const isFullyPaid = remainingUSD <= 0;
+            const animationDelay = snapshot.docs.indexOf(doc) * 50;
             
-            html += `<div class="p-4 border rounded-lg ${isFullyPaid ? 'bg-green-50' : 'bg-yellow-50'}">
+            html += `<div class="p-4 border rounded-lg ${isFullyPaid ? 'bg-green-50 border-green-200' : 'bg-yellow-50 border-yellow-200'} animate-fade-in" style="animation-delay: ${animationDelay}ms">
                 <div class="flex justify-between items-start">
                     <div class="flex-1">
-                        <h4 class="font-bold text-gray-800">${data.receiptId}</h4>
-                        <p class="text-sm text-gray-600">Client: ${data.receivedFrom}</p>
-                        ${data.invoiceReference ? `<p class="text-sm text-primary-blue">Invoice Ref: ${data.invoiceReference}</p>` : ''}
-                        <div class="mt-2 grid grid-cols-2 gap-2 text-sm">
+                        <h4 class="font-bold text-gray-800 text-lg mb-1">${data.receiptId}</h4>
+                        <p class="text-sm text-gray-600 mb-2">Client: ${data.receivedFrom}</p>
+                        ${data.invoiceReference ? `<p class="text-sm text-primary-blue mb-2">Invoice Ref: ${data.invoiceReference}</p>` : ''}
+                        <div class="grid grid-cols-2 gap-2 text-sm">
                             <div>
                                 <p><strong>Total Paid (USD):</strong> ${totalPaidUSD.toFixed(2)}</p>
                                 <p><strong>Total Paid (KES):</strong> ${totalPaidKSH.toFixed(2)}</p>
@@ -5088,12 +5947,18 @@ async function fetchAllReceiptBalances() {
                     </div>
                     <div class="ml-4 flex flex-col gap-2">
                         <button onclick='addPaymentToReceipt(${receiptDataJson})' 
-                                class="bg-primary-blue hover:bg-blue-700 text-white text-xs py-1 px-3 rounded-full transition duration-150">
+                                class="bg-primary-blue hover:bg-blue-700 text-white text-xs py-1 px-3 rounded-full transition duration-150 flex items-center gap-1">
+                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+                            </svg>
                             Add Payment
                         </button>
                         <button onclick='viewReceiptPaymentDetails("${doc.id}", "${data.receiptId}", "${data.receivedFrom}")' 
-                                class="bg-green-600 hover:bg-green-700 text-white text-xs py-1 px-3 rounded-full transition duration-150">
-                            View History
+                                class="bg-green-600 hover:bg-green-700 text-white text-xs py-1 px-3 rounded-full transition duration-150 flex items-center gap-1">
+                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path>
+                            </svg>
+                            History
                         </button>
                     </div>
                 </div>
@@ -5104,6 +5969,11 @@ async function fetchAllReceiptBalances() {
         listElement.innerHTML = html;
     } catch (error) {
         console.error("Error fetching receipt balances:", error);
-        listElement.innerHTML = `<p class="text-red-500">Error loading receipt balances. Check console for details.</p>`;
+        listElement.innerHTML = `
+            <div class="text-center p-4 bg-red-50 border border-red-200 rounded-lg">
+                <p class="text-red-600 font-semibold">Error loading receipt balances</p>
+                <p class="text-xs text-gray-600 mt-1">${error.message}</p>
+            </div>
+        `;
     }
 }
