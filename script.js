@@ -1140,16 +1140,12 @@ function updateReceiptCalculations() {
         const totalPaidUSD = totalUSD - remainingUSD;
         const totalPaidKSH = totalPaidUSD * exchangeRate;
         
-             // FIXED: Use the formatAmount function correctly
-            drawText(`KES Balance: ${formatAmount(remainingKSH)} (Paid: ${formatAmount(totalPaidKSH)})`, margin, amountBoxY + 10, 10);
-            drawText(`USD Balance: ${formatAmount(remainingUSD)} (Paid: ${formatAmount(totalPaidUSD)})`, margin, amountBoxY + 14, 10);
-        } else {
-        // balanceKES.textContent = `KES Balance: ${remainingKSH.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
-        // balanceUSD.textContent = `USD Balance: ${remainingUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
-     // For PDF, just show the balances
-            drawText(`KES Balance: ${formatAmount(remainingKSH)}`, margin, amountBoxY + 10, 10);
-            drawText(`USD Balance: ${formatAmount(remainingUSD)}`, margin, amountBoxY + 14, 10);
-        }
+        balanceKES.textContent = `KES Balance: ${remainingKSH.toLocaleString('en-US', { minimumFractionDigits: 2 })} (Paid: ${totalPaidKSH.toLocaleString('en-US', { minimumFractionDigits: 2 })})`;
+        balanceUSD.textContent = `USD Balance: ${remainingUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })} (Paid: ${totalPaidUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })})`;
+    } else {
+        balanceKES.textContent = `KES Balance: ${remainingKSH.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+        balanceUSD.textContent = `USD Balance: ${remainingUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+    }
 }
 
 /**
@@ -1716,10 +1712,6 @@ function autoFillBuyerConfirmation() {
         }
     }
 }
-
-// =================================================================
-//                 6. INVOICE MODULE (UPDATED WITH DEPOSIT PERCENTAGE & AUCTION INVOICE & TWO BANKS)
-// =================================================================
 
 /**
  * Renders the Invoice/Proforma form.
@@ -2368,11 +2360,6 @@ function renderAgreementForm(receiptReference = '') {
                             <label for="totalPrice" class="block text-sm font-medium text-gray-700">Total Price</label>
                             <input type="number" id="totalPrice" step="0.01" required placeholder="Total Price" class="w-full p-2 border rounded-md">
                         </div>
-
-                        <div class="mt-4 p-2 bg-yellow-200 rounded-md">
-                            <strong class="text-secondary-red">Total Price: </strong> 
-                            <span id="total-amount" class="font-bold text-lg text-secondary-red">0.00 KES</span>
-                        </div>
                     </fieldset>
 
                     <fieldset class="border p-4 rounded-lg mb-6">
@@ -2397,30 +2384,17 @@ function renderAgreementForm(receiptReference = '') {
     
     // Populate the dropdown
     populateBankDropdown('agreementBankDetailsSelect'); 
-    calculatePaymentTotal();
     fetchAgreements();
     
     // Add event listener for total price input
     const totalPriceInput = document.getElementById('totalPrice');
     if (totalPriceInput) {
-        totalPriceInput.addEventListener('input', calculatePaymentTotal);
+        totalPriceInput.addEventListener('input', function() {
+            const currency = document.getElementById('currencySelect').value;
+            const total = parseFloat(this.value) || 0;
+            // You can update any display element here if needed
+        });
     }
-}
-
-/**
- * Calculates and updates the total amount of the payment schedule.
- */
-function calculatePaymentTotal() {
-    const currency = document.getElementById('currencySelect').value;
-    const totalPriceInput = document.getElementById('totalPrice');
-    const totalSpan = document.getElementById('total-amount');
-    
-    let total = 0;
-    if (totalPriceInput) {
-        total = parseFloat(totalPriceInput.value) || 0;
-    }
-
-    totalSpan.textContent = `${total.toLocaleString('en-US', { minimumFractionDigits: 2 })} ${currency}`;
 }
 
 /**
@@ -2518,7 +2492,6 @@ async function saveAgreement() {
         generateAgreementPDF(agreementData);
 
         form.reset();
-        calculatePaymentTotal();
         fetchAgreements(); // Refresh history
     } catch (error) {
         console.error("Error saving sales agreement:", error);
@@ -2764,47 +2737,12 @@ function generateReceiptPDF(data) {
     const boxW = pageW - (2 * margin);
     const lineHeight = 7; 
 
-    // --- HELPER FUNCTIONS ---
-    const drawText = (text, x, y, size, style = 'normal', color = primaryColor, align = 'left') => {
-        doc.setFontSize(size);
-        doc.setFont("helvetica", style);
-        doc.setTextColor(color);
-        doc.text(text, x, y, { align: align });
-        return size / 3; // Return approximate line height in mm
-    };
-
-    const getTextHeight = (text, fontSize, maxWidth) => {
-        const lineHeightFactor = 1.15;
-        const lines = doc.splitTextToSize(text, maxWidth);
-        return lines.length * fontSize * lineHeightFactor / doc.internal.scaleFactor;
-    };
-
     // Helper to format amounts without decimals (with .00)
     const formatAmount = (amount) => {
         if (amount === null || amount === undefined) return '0.00';
         const rounded = Math.round(amount);
         return rounded.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     };
-
-  // Add this helper function near the top of generateReceiptPDF function, after the drawText function:
-// Helper to format amounts without decimals (with .00)
-const formatAmount = (amount) => {
-    if (amount === null || amount === undefined) return '0.00';
-    const rounded = Math.round(amount);
-    return rounded.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-};
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF('p', 'mm', 'a4'); 
-
-    const primaryColor = '#183263'; // WanBite Blue
-    const secondaryColor = '#D96359'; // Red
-    
-    const pageW = doc.internal.pageSize.getWidth();
-    const pageH = doc.internal.pageSize.getHeight();
-    let y = 10; 
-    const margin = 10;
-    const boxW = pageW - (2 * margin);
-    const lineHeight = 7; 
 
     // --- HELPER FUNCTION WITH BETTER LINE HEIGHT CALCULATION ---
     const drawText = (text, x, y, size, style = 'normal', color = primaryColor, align = 'left') => {
@@ -2961,21 +2899,21 @@ const formatAmount = (amount) => {
     doc.setFontSize(12);
     doc.setTextColor(0);
 
-  // Calculate proper balances
-const totalPaidUSD = data.totalPaidUSD || (data.amountReceivedUSD || (data.currency === 'USD' ? data.amountReceived : data.amountReceived / (data.exchangeRate || 130)));
-const totalPaidKSH = data.totalPaidKSH || (data.amountReceivedKSH || (data.currency === 'KSH' ? data.amountReceived : data.amountReceived * (data.exchangeRate || 130)));
+    // Calculate proper balances
+    const totalPaidUSD = data.totalPaidUSD || (data.amountReceivedUSD || (data.currency === 'USD' ? data.amountReceived : data.amountReceived / (data.exchangeRate || 130)));
+    const totalPaidKSH = data.totalPaidKSH || (data.amountReceivedKSH || (data.currency === 'KSH' ? data.amountReceived : data.amountReceived * (data.exchangeRate || 130)));
 
-const remainingUSD = data.balanceDetails?.balanceRemainingUSD || data.balanceDetails?.balanceRemaining || 0;
-const remainingKSH = data.balanceDetails?.balanceRemainingKSH || remainingUSD * (data.exchangeRate || 130);
+    const remainingUSD = data.balanceDetails?.balanceRemainingUSD || data.balanceDetails?.balanceRemaining || 0;
+    const remainingKSH = data.balanceDetails?.balanceRemainingKSH || remainingUSD * (data.exchangeRate || 130);
 
-// Show balance in both USD and KSH - UPDATED
-drawText(`KES Balance: ${formatAmount(remainingKSH)}`, margin, amountBoxY + 10, 10);
-drawText(`USD Balance: ${formatAmount(remainingUSD)}`, margin, amountBoxY + 14, 10);
-drawText(`Due On/Before: ${data.balanceDetails?.balanceDueDate || 'N/A'}`, margin, amountBoxY + 18, 10);
+    // Show balance in both USD and KSH - UPDATED
+    drawText(`Balance Remaining (USD): ${formatAmount(remainingUSD)}`, margin, amountBoxY + 10, 10);
+    drawText(`Balance Remaining (KES): ${formatAmount(remainingKSH)}`, margin, amountBoxY + 14, 10);
+    drawText(`Due On/Before: ${data.balanceDetails?.balanceDueDate || 'N/A'}`, margin, amountBoxY + 18, 10);
 
-// Add paid amounts
-drawText(`Paid (USD): ${formatAmount(totalPaidUSD)}`, margin, amountBoxY + 22, 10);
-drawText(`Paid (KES): ${formatAmount(totalPaidKSH)}`, margin, amountBoxY + 26, 10);
+    // Add paid amounts
+    drawText(`Paid (USD): ${formatAmount(totalPaidUSD)}`, margin, amountBoxY + 22, 10);
+    drawText(`Paid (KES): ${formatAmount(totalPaidKSH)}`, margin, amountBoxY + 26, 10);
     
     y = amountBoxY + amountBoxH + 10;
 
@@ -3029,36 +2967,36 @@ drawText(`Paid (KES): ${formatAmount(totalPaidKSH)}`, margin, amountBoxY + 26, 1
         doc.setFontSize(8);
         doc.setTextColor(0);
         
-       paymentHistory.forEach((payment, index) => {
-    // Check page boundary
-    if (y > pageH - 20) {
-        doc.addPage();
-        y = 10;
-    }
-    
-    // Alternate row colors
-    if (index % 2 === 0) {
-        doc.setFillColor(250, 250, 250);
-        doc.rect(margin, y, boxW, 5, 'F');
-    }
-    
-    doc.rect(margin, y, boxW, 5);
-    drawText(`${index + 1}`, margin + 2, y + 3.5, 8);
-    drawText(payment.paymentDate || 'N/A', margin + 10, y + 3.5, 8);
-    drawText(`${payment.currency} ${formatAmount(payment.amount)}`, margin + 40, y + 3.5, 8);
-    drawText(`USD ${formatAmount(payment.amountUSD || (payment.currency === 'USD' ? payment.amount : (payment.amount / (payment.exchangeRate || 130))))}`, margin + 75, y + 3.5, 8);
-    drawText(`KES ${formatAmount(payment.amountKSH || (payment.currency === 'KSH' ? payment.amount : (payment.amount * (payment.exchangeRate || 130))))}`, margin + 105, y + 3.5, 8);
-    
-    const method = payment.paymentMethod || 'N/A';
-    const shortMethod = method.length > 15 ? method.substring(0, 12) + '...' : method;
-    drawText(shortMethod, margin + 135, y + 3.5, 8);
-    
-    const description = payment.description || 'Payment';
-    const shortDesc = description.length > 20 ? description.substring(0, 17) + '...' : description;
-    drawText(shortDesc, margin + 170, y + 3.5, 8);
-    
-    y += 5;
-});
+        paymentHistory.forEach((payment, index) => {
+            // Check page boundary
+            if (y > pageH - 20) {
+                doc.addPage();
+                y = 10;
+            }
+            
+            // Alternate row colors
+            if (index % 2 === 0) {
+                doc.setFillColor(250, 250, 250);
+                doc.rect(margin, y, boxW, 5, 'F');
+            }
+            
+            doc.rect(margin, y, boxW, 5);
+            drawText(`${index + 1}`, margin + 2, y + 3.5, 8);
+            drawText(payment.paymentDate || 'N/A', margin + 10, y + 3.5, 8);
+            drawText(`${payment.currency} ${formatAmount(payment.amount)}`, margin + 40, y + 3.5, 8);
+            drawText(`USD ${formatAmount(payment.amountUSD || (payment.currency === 'USD' ? payment.amount : (payment.amount / (payment.exchangeRate || 130))))}`, margin + 75, y + 3.5, 8);
+            drawText(`KES ${formatAmount(payment.amountKSH || (payment.currency === 'KSH' ? payment.amount : (payment.amount * (payment.exchangeRate || 130))))}`, margin + 105, y + 3.5, 8);
+            
+            const method = payment.paymentMethod || 'N/A';
+            const shortMethod = method.length > 15 ? method.substring(0, 12) + '...' : method;
+            drawText(shortMethod, margin + 135, y + 3.5, 8);
+            
+            const description = payment.description || 'Payment';
+            const shortDesc = description.length > 20 ? description.substring(0, 17) + '...' : description;
+            drawText(shortDesc, margin + 170, y + 3.5, 8);
+            
+            y += 5;
+        });
         
         y += 3;
     } else if (paymentCount === 1) {
@@ -3169,6 +3107,13 @@ function generateInvoicePDF(data) {
         doc.setTextColor(0); // Reset text color
     }
 
+    // Helper to format amounts without decimals (with .00)
+    const formatAmount = (amount) => {
+        if (amount === null || amount === undefined) return '0.00';
+        const rounded = Math.round(amount);
+        return rounded.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    };
+
     // --- HELPER FUNCTIONS ---
     const drawText = (text, x, y, size, style = 'normal', color = primaryColor, align = 'left') => {
         doc.setFontSize(size);
@@ -3177,12 +3122,6 @@ function generateInvoicePDF(data) {
         doc.text(text, x, y, { align: align });
     };
     
-    // Helper to format amounts without decimals (with .00)
-    const formatAmount = (amount) => {
-        if (amount === null || amount === undefined) return '0.00';
-        const rounded = Math.round(amount);
-        return rounded.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    };
 
     // Function to add stamp image with date OVERLAY - UPDATED WITH RED TEXT AND SIZE 14
     const addStampWithDate = (x, y, dateText) => {
@@ -3682,6 +3621,13 @@ function generateAgreementPDF(data) {
     const lineSpacing = 6;
     const textIndent = 5;
 
+    // Helper to format amounts without decimals (with .00)
+    const formatAmount = (amount) => {
+        if (amount === null || amount === undefined) return '0.00';
+        const rounded = Math.round(amount);
+        return rounded.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    };
+
     // --- HELPER FUNCTION ---
     const drawText = (text, x, y, size, style = 'normal', color = primaryColor, align = 'left') => {
         doc.setFontSize(size);
@@ -3826,7 +3772,7 @@ function generateAgreementPDF(data) {
     doc.setTextColor(0);
     doc.text("The Purchase Price of ", margin, y);
     doc.setFont("helvetica", "bold");
-   let totalText = `${data.salesTerms.currency} ${formatAmount(data.salesTerms.price)}`;
+    let totalText = `${data.salesTerms.currency} ${formatAmount(data.salesTerms.price)}`;
     doc.text(totalText, margin + doc.getStringUnitWidth("The Purchase Price of ") * doc.getFontSize() / doc.internal.scaleFactor, y);
     doc.setTextColor(0);
     doc.setFont("helvetica", "normal");
@@ -4014,50 +3960,6 @@ function createAgreementFromInvoice(invoiceData) {
         // Set agreement date to today
         if (agreementDateInput) agreementDateInput.value = new Date().toISOString().slice(0, 10);
         
-        // Set payment details based on invoice pricing
-        const totalAmount = invoiceData.pricing.totalUSD || 0;
-        const depositAmount = invoiceData.pricing.depositUSD || (totalAmount * 0.5);
-        const balanceAmount = invoiceData.pricing.balanceUSD || (totalAmount * 0.5);
-        
-        // Set currency to USD (since invoice is in USD)
-        const currencySelect = document.getElementById('currencySelect');
-        if (currencySelect) currencySelect.value = 'USD';
-        
-        // Clear existing payment rows
-        const paymentRows = document.getElementById('payment-schedule-rows');
-        if (paymentRows) {
-            paymentRows.innerHTML = '';
-            
-            // Add deposit payment row
-            const depositRow = document.createElement('div');
-            depositRow.className = 'grid grid-cols-4 gap-2 payment-row';
-            depositRow.dataset.id = '1';
-            depositRow.innerHTML = `
-                <input type="text" required placeholder="e.g. Deposit" value="Deposit" class="p-2 border rounded-md col-span-2 text-sm">
-                <input type="number" step="0.01" required placeholder="Amount" value="${depositAmount.toFixed(2)}" oninput="calculatePaymentTotal()" class="payment-amount p-2 border rounded-md text-sm">
-                <input type="date" required value="${new Date().toISOString().slice(0, 10)}" class="payment-date p-2 border rounded-md text-sm">
-            `;
-            paymentRows.appendChild(depositRow);
-            
-            // Add balance payment row
-            if (balanceAmount > 0) {
-                const dueDate = invoiceData.dueDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-                const balanceRow = document.createElement('div');
-                balanceRow.className = 'grid grid-cols-4 gap-2 payment-row';
-                balanceRow.dataset.id = '2';
-                balanceRow.innerHTML = `
-                    <input type="text" required placeholder="e.g. Balance" value="Balance" class="p-2 border rounded-md col-span-2 text-sm">
-                    <input type="number" step="0.01" required placeholder="Amount" value="${balanceAmount.toFixed(2)}" oninput="calculatePaymentTotal()" class="payment-amount p-2 border rounded-md text-sm">
-                    <input type="date" required value="${dueDate}" class="payment-date p-2 border rounded-md text-sm">
-                    <button type="button" onclick="deletePaymentRow(2)" class="text-red-500 hover:text-red-700 text-sm">X</button>
-                `;
-                paymentRows.appendChild(balanceRow);
-            }
-        }
-        
-        // Update the total
-        calculatePaymentTotal();
-        
         // Store the invoice reference in a hidden field or data attribute
         const agreementForm = document.getElementById('agreement-form');
         if (agreementForm) {
@@ -4122,9 +4024,6 @@ function createAgreementFromReceipt(receiptData) {
             agreementForm.dataset.receiptReference = receiptData.receiptId;
             agreementForm.dataset.receiptId = receiptData.firestoreId;
         }
-        
-        // Calculate and update totals
-        calculatePaymentTotal();
         
         // Show notification
         setTimeout(() => {
@@ -5018,4 +4917,96 @@ function createAdditionalInvoice(invoiceData) {
         }, 300);
         
     }, 100);
+}
+
+/**
+ * Renders receipt balances view
+ */
+function renderReceiptBalancesView() {
+    const formArea = document.getElementById('document-form-area');
+    formArea.innerHTML = `
+        <div class="p-6 border border-gray-300 rounded-xl bg-white shadow-lg">
+            <h3 class="text-xl font-semibold mb-6 text-primary-blue">Receipt Balances</h3>
+            <div id="receipt-balances-list">
+                <p class="text-center text-gray-500">Loading receipt balances...</p>
+            </div>
+        </div>
+    `;
+    fetchAllReceiptBalances();
+}
+
+/**
+ * Fetches all receipt balances
+ */
+async function fetchAllReceiptBalances() {
+    const listElement = document.getElementById('receipt-balances-list');
+    let html = ``;
+    try {
+        const snapshot = await db.collection("receipts").orderBy("createdAt", "desc").get();
+        if (snapshot.empty) {
+            listElement.innerHTML = `<p class="text-gray-500">No receipts found.</p>`;
+            return;
+        }
+        
+        html = `<div class="space-y-4">`;
+        
+        for (const doc of snapshot.docs) {
+            const data = doc.data();
+            
+            // Calculate balances for this receipt
+            const balances = await calculateReceiptBalances(doc.id);
+            const totalPaidUSD = balances.totalPaidUSD;
+            const totalPaidKSH = balances.totalPaidKSH;
+            
+            const receiptDataJson = JSON.stringify({
+                ...data, 
+                firestoreId: doc.id,
+                totalPaidUSD: totalPaidUSD,
+                totalPaidKSH: totalPaidKSH,
+                paymentCount: balances.paymentCount,
+                createdAt: data.createdAt ? data.createdAt.toDate().toISOString() : new Date().toISOString()
+            });
+
+            const remainingUSD = data.balanceDetails?.balanceRemainingUSD || 0;
+            const remainingKSH = data.balanceDetails?.balanceRemainingKSH || remainingUSD * (data.exchangeRate || 130);
+            const isFullyPaid = remainingUSD <= 0;
+            
+            html += `<div class="p-4 border rounded-lg ${isFullyPaid ? 'bg-green-50' : 'bg-yellow-50'}">
+                <div class="flex justify-between items-start">
+                    <div class="flex-1">
+                        <h4 class="font-bold text-gray-800">${data.receiptId}</h4>
+                        <p class="text-sm text-gray-600">Client: ${data.receivedFrom}</p>
+                        ${data.invoiceReference ? `<p class="text-sm text-primary-blue">Invoice Ref: ${data.invoiceReference}</p>` : ''}
+                        <div class="mt-2 grid grid-cols-2 gap-2 text-sm">
+                            <div>
+                                <p><strong>Total Paid (USD):</strong> ${totalPaidUSD.toFixed(2)}</p>
+                                <p><strong>Total Paid (KES):</strong> ${totalPaidKSH.toFixed(2)}</p>
+                            </div>
+                            <div class="${isFullyPaid ? 'text-green-600' : 'text-red-600'}">
+                                <p><strong>Remaining (USD):</strong> ${remainingUSD.toFixed(2)}</p>
+                                <p><strong>Remaining (KES):</strong> ${remainingKSH.toFixed(2)}</p>
+                            </div>
+                        </div>
+                        <p class="text-xs text-gray-500 mt-2">Payments: ${balances.paymentCount} | Last updated: ${data.receiptDate || 'N/A'}</p>
+                    </div>
+                    <div class="ml-4 flex flex-col gap-2">
+                        <button onclick='addPaymentToReceipt(${receiptDataJson})' 
+                                class="bg-primary-blue hover:bg-blue-700 text-white text-xs py-1 px-3 rounded-full transition duration-150">
+                            Add Payment
+                        </button>
+                        <button onclick='viewReceiptPaymentDetails("${doc.id}", "${data.receiptId}", "${data.receivedFrom}")' 
+                                class="bg-green-600 hover:bg-green-700 text-white text-xs py-1 px-3 rounded-full transition duration-150">
+                            View History
+                        </button>
+                    </div>
+                </div>
+            </div>`;
+        }
+        
+        html += `</div>`;
+        listElement.innerHTML = html;
+    } catch (error) {
+        console.error("Error fetching receipt balances:", error);
+        listElement.innerHTML = `<p class="text-red-500">Error loading receipt balances. Check console for details.</p>`;
+    }
 }
