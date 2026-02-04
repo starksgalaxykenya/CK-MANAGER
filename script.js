@@ -1819,7 +1819,7 @@ function renderInvoiceForm() {
                             <option value="Manual">Manual</option>
                         </select>
                         <input type="text" id="color" required placeholder="Color" class="p-2 border rounded-md">
-                        <input type="number" id="mileage" required placeholder="Mileage (km)" class="p-2 border rounded-md">
+                        <input type="number" id="mileage" placeholder="Mileage (km) - Optional" class="p-2 border rounded-md"> <!-- Removed required attribute -->
                     </div>
                     <textarea id="goodsDescription" placeholder="Description of Goods (e.g., Accessories, specific features)" rows="2" class="mt-3 block w-full p-2 border rounded-md"></textarea>
                 </fieldset>
@@ -1870,7 +1870,6 @@ function renderInvoiceForm() {
         toggleDepositInput(); // Initial check for deposit type
     }, 100);
 }
-
 /**
  * Toggles between percentage and fixed deposit input
  */
@@ -1896,6 +1895,7 @@ function toggleAuctionFields() {
     const auctionField = document.getElementById('auction-price-field');
     const priceField = document.getElementById('price');
     const depositTypeField = document.getElementById('depositType');
+    const quantityField = document.getElementById('quantity');
     
     // FIXED: Find the pricing fieldset by looking for the legend with "Pricing" text
     let pricingFieldsetElement = null;
@@ -1920,16 +1920,30 @@ function toggleAuctionFields() {
             depositTypeField.disabled = true;
             toggleDepositInput();
         }
+        if (priceField) {
+            priceField.value = ""; // Clear price field for auction invoices
+            priceField.required = false; // Make it not required
+        }
+        if (quantityField) {
+            quantityField.value = "1"; // Default to 1
+            quantityField.disabled = true; // Disable quantity for auction invoices
+        }
     } else {
         auctionField.classList.add('hidden');
         // Show the regular pricing fieldset for non-auction invoices
         if (pricingFieldsetElement) {
             pricingFieldsetElement.classList.remove('hidden');
         }
-        priceField.placeholder = "Unit Price (USD C&F MSA) - Whole number";
+        if (priceField) {
+            priceField.placeholder = "Unit Price (USD C&F MSA) - Whole number";
+            priceField.required = true; // Make it required again for non-auction
+        }
         document.getElementById('depositPercentage').value = "50";
         if (depositTypeField) {
             depositTypeField.disabled = false;
+        }
+        if (quantityField) {
+            quantityField.disabled = false; // Enable quantity for non-auction
         }
     }
 }
@@ -1940,12 +1954,17 @@ function toggleAuctionFields() {
 async function saveInvoice(onlySave) {
     const form = document.getElementById('invoice-form');
     
-    // Validate price first
+    // VALIDATE PRICE - ONLY FOR NON-AUCTION INVOICES
+    const docType = document.getElementById('docType').value;
     const priceUSD = parseFloat(document.getElementById('price').value);
-    if (!priceUSD || priceUSD <= 0) {
-        alert("Please enter a valid unit price.");
-        document.getElementById('price').focus();
-        return;
+    
+    // Only validate price for non-auction invoices
+    if (docType !== 'Auction Invoice') {
+        if (!priceUSD || priceUSD <= 0) {
+            alert("Please enter a valid unit price.");
+            document.getElementById('price').focus();
+            return;
+        }
     }
     
     // Then check form validity
@@ -1955,7 +1974,6 @@ async function saveInvoice(onlySave) {
     }
 
     // 1. Collect Form Data
-    const docType = document.getElementById('docType').value;
     const clientName = document.getElementById('clientName').value;
     const clientPhone = document.getElementById('clientPhone').value;
     const dueDate = document.getElementById('dueDate').value;
@@ -1988,9 +2006,9 @@ async function saveInvoice(onlySave) {
     const fuelType = document.getElementById('fuelType').value;
     const transmission = document.getElementById('transmission').value;
     const color = document.getElementById('color').value;
-    const mileage = document.getElementById('mileage').value;
+    const mileage = document.getElementById('mileage').value; // Now optional
     const quantity = parseInt(document.getElementById('quantity').value);
-    // priceUSD is already declared and validated above
+    // priceUSD is already declared and validated above (only for non-auction)
     const goodsDescription = document.getElementById('goodsDescription').value;
     
     // Auction price for auction invoices with currency
@@ -2106,9 +2124,9 @@ async function saveInvoice(onlySave) {
             fuel: fuelType,
             transmission,
             color,
-            mileage,
+            mileage: mileage || '', // Now optional
             quantity,
-            priceUSD,
+            priceUSD: docType === 'Auction Invoice' ? 0 : priceUSD, // Set to 0 for auction invoices
             goodsDescription
         },
         pricing: {
@@ -2416,7 +2434,6 @@ function renderAgreementForm(receiptReference = '') {
         });
     }
 }
-
 /**
  * Handles form submission and saves the sales agreement to Firestore.
  */
