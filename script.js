@@ -2115,7 +2115,7 @@ if (docType === 'Auction Invoice') {
 
     // 5. Save to Firestore
     try {
-        const docRef = await db.collection("invoices").add(invoiceData);
+        const docRef = db.collection("invoices").add(invoiceData);
         alert(`${docType} ${generatedInvoiceId} saved successfully!`);
 
         // 6. Download PDF if requested
