@@ -2921,13 +2921,28 @@ function generateReceiptPDF(data) {
         y = 10;
     }
     
-    // Total Amount Box
+    // Calculate total paid amount - CHANGED TO SHOW TOTAL SUM OF ALL PAYMENTS
+    const totalPaidUSD = data.totalPaidUSD || (data.amountReceivedUSD || (data.currency === 'USD' ? data.amountReceived : data.amountReceived / (data.exchangeRate || 130)));
+    const totalPaidKSH = data.totalPaidKSH || (data.amountReceivedKSH || (data.currency === 'KSH' ? data.amountReceived : data.amountReceived * (data.exchangeRate || 130)));
+    
+    // Determine which currency to display based on the most recent payment or original currency
+    const displayCurrency = data.currency || 'KSH';
+    let totalAmountFigure;
+    
+    if (displayCurrency === 'USD') {
+        totalAmountFigure = totalPaidUSD;
+    } else {
+        // Default to KSH if currency is KSH or unknown
+        totalAmountFigure = totalPaidKSH;
+    }
+    
+    // Total Amount Box - CHANGED TO SHOW TOTAL SUM OF ALL PAYMENTS
     doc.setFillColor(secondaryColor);
     doc.rect(pageW - margin - 70, amountBoxY, 70, amountBoxH, 'F');
     
     doc.setTextColor(255);
     drawText('AMOUNT FIGURE', pageW - margin - 65, amountBoxY + 4, 8, 'bold', 255);
-    drawText(`${data.currency} ${formatAmount(data.amountReceived)}`, 
+    drawText(`${displayCurrency} ${formatAmount(totalAmountFigure)}`, 
          pageW - margin - 5, amountBoxY + 11, 18, 'bold', 255, 'right');
     
     // Balance Details - FIXED: Use stored USD/KSH amounts
@@ -2937,9 +2952,6 @@ function generateReceiptPDF(data) {
     doc.setTextColor(0);
 
     // Calculate proper balances
-    const totalPaidUSD = data.totalPaidUSD || (data.amountReceivedUSD || (data.currency === 'USD' ? data.amountReceived : data.amountReceived / (data.exchangeRate || 130)));
-    const totalPaidKSH = data.totalPaidKSH || (data.amountReceivedKSH || (data.currency === 'KSH' ? data.amountReceived : data.amountReceived * (data.exchangeRate || 130)));
-
     const remainingUSD = data.balanceDetails?.balanceRemainingUSD || data.balanceDetails?.balanceRemaining || 0;
     const remainingKSH = data.balanceDetails?.balanceRemainingKSH || remainingUSD * (data.exchangeRate || 130);
 
@@ -2948,7 +2960,7 @@ function generateReceiptPDF(data) {
     drawText(`Balance Remaining (KES): ${formatAmount(remainingKSH)}`, margin, amountBoxY + 14, 10);
     drawText(`Due On/Before: ${data.balanceDetails?.balanceDueDate || 'N/A'}`, margin, amountBoxY + 18, 10);
 
-    // Add paid amounts
+    // Add paid amounts - UPDATED TO SHOW TOTAL PAID
     drawText(`Paid (USD): ${formatAmount(totalPaidUSD)}`, margin, amountBoxY + 22, 10);
     drawText(`Paid (KES): ${formatAmount(totalPaidKSH)}`, margin, amountBoxY + 26, 10);
     
@@ -3115,7 +3127,6 @@ function generateReceiptPDF(data) {
 
     doc.save(`Receipt_${data.receiptId}.pdf`);
 }
-
 /**
  * Generates and downloads a custom PDF for the Invoice/Proforma with TWO BANKS.
  */
