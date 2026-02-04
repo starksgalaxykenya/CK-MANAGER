@@ -485,9 +485,10 @@ function handleDocumentGenerator() {
     // Add event listener for Enter key - FIX: Use async wrapper or proper error handling
     const searchInput = document.getElementById('document-search');
     if (searchInput) {
-        searchInput.addEventListener('keypress', function(e) {
+        searchInput.addEventListener('keypress', async function(e) {
             if (e.key === 'Enter') {
                 e.preventDefault();
+              await searchDocuments();  // Add await here
                 // Handle async function properly
                 searchDocuments().catch(error => {
                     console.error("Error searching documents:", error);
@@ -616,9 +617,9 @@ function handleDocumentGenerator() {
     // Add event listener for Enter key
     const searchInput = document.getElementById('document-search');
     if (searchInput) {
-        searchInput.addEventListener('keypress', function(e) {
+        searchInput.addEventListener('keypress', async function(e) {
             if (e.key === 'Enter') {
-                searchDocuments();
+              await searchDocuments();
             }
         });
     }
