@@ -1774,11 +1774,22 @@ function renderInvoiceForm() {
                     <p class="text-xs text-gray-600 mt-2">Note: Enter amount without decimals. System will convert to USD for calculations.</p>
                 </div>
                 
-                <div id="auction-price-field" class="hidden mb-4 p-4 bg-yellow-50 rounded-lg border border-yellow-300">
-                    <label for="auctionPrice" class="block text-sm font-medium text-gray-700 mb-2">Auction Price (USD)</label>
-                    <input type="number" id="auctionPrice" step="1" placeholder="Enter auction price in USD (whole number)" class="w-full p-2 border rounded-md">
-                    <p class="text-xs text-gray-600 mt-2">Note: For auction invoices, this is the bid security deposit amount.</p>
-                </div>
+               <div id="auction-price-field" class="hidden mb-4 p-4 bg-yellow-50 rounded-lg border border-yellow-300">
+    <div class="grid grid-cols-2 gap-3">
+        <div>
+            <label for="auctionPriceCurrency" class="block text-sm font-medium text-gray-700 mb-2">Auction Price Currency</label>
+            <select id="auctionPriceCurrency" class="w-full p-2 border rounded-md">
+                <option value="USD">USD</option>
+                <option value="KSH">KES</option>
+            </select>
+        </div>
+        <div>
+            <label for="auctionPrice" class="block text-sm font-medium text-gray-700 mb-2">Auction Price</label>
+            <input type="number" id="auctionPrice" step="1" placeholder="Enter auction price (whole number)" class="w-full p-2 border rounded-md">
+        </div>
+    </div>
+    <p class="text-xs text-gray-600 mt-2">Note: For auction invoices, this is the bid security deposit amount.</p>
+</div>
                 
                 <fieldset class="border p-4 rounded-lg mb-6">
                     <legend class="text-base font-semibold text-secondary-red px-2">Client Details</legend>
@@ -1880,15 +1891,20 @@ function toggleDepositInput() {
 /**
  * Toggles auction-specific fields based on document type
  */
+// In the toggleAuctionFields() function, modify it to hide the pricing section:
 function toggleAuctionFields() {
     const docType = document.getElementById('docType').value;
     const auctionField = document.getElementById('auction-price-field');
     const priceField = document.getElementById('price');
     const depositTypeField = document.getElementById('depositType');
+    const pricingSection = document.querySelector('fieldset:has(legend:text-secondary-red):has(input#price)');
     
     if (docType === 'Auction Invoice') {
         auctionField.classList.remove('hidden');
-        priceField.placeholder = "Total Price (USD) - Whole number";
+        if (priceField) priceField.placeholder = "Not used for auction invoices";
+        if (priceField) priceField.disabled = true;
+        if (priceField) priceField.value = "";
+        if (pricingSection) pricingSection.style.display = 'none';
         document.getElementById('depositPercentage').value = "100"; // Auction invoices are 100% deposit
         if (depositTypeField) {
             depositTypeField.value = "percentage";
@@ -1897,7 +1913,9 @@ function toggleAuctionFields() {
         }
     } else {
         auctionField.classList.add('hidden');
-        priceField.placeholder = "Unit Price (USD C&F MSA) - Whole number";
+        if (priceField) priceField.placeholder = "Unit Price (USD C&F MSA) - Whole number";
+        if (priceField) priceField.disabled = false;
+        if (pricingSection) pricingSection.style.display = '';
         document.getElementById('depositPercentage').value = "50";
         if (depositTypeField) {
             depositTypeField.disabled = false;
@@ -1956,7 +1974,12 @@ async function saveInvoice(onlySave) {
     const goodsDescription = document.getElementById('goodsDescription').value;
     
     // Auction price for auction invoices
-    const auctionPrice = docType === 'Auction Invoice' ? parseFloat(document.getElementById('auctionPrice').value) : 0;
+  let auctionPrice = 0;
+let auctionPriceCurrency = 'USD';
+if (docType === 'Auction Invoice') {
+    auctionPrice = parseFloat(document.getElementById('auctionPrice').value) || 0;
+    auctionPriceCurrency = document.getElementById('auctionPriceCurrency').value || 'USD';
+}
     
     // Bank Details - multiple selection
     const bankSelect = document.getElementById('bankDetailsSelect');
@@ -1993,12 +2016,18 @@ async function saveInvoice(onlySave) {
     // 2. Calculate Pricing based on document type - FIXED PERCENTAGE CALCULATION
     let totalPriceUSD, depositUSD, balanceUSD;
     
-    if (docType === 'Auction Invoice') {
-        totalPriceUSD = auctionPrice;
-        depositUSD = auctionPrice; // 100% deposit for auction invoices
-        balanceUSD = 0;
+   if (docType === 'Auction Invoice') {
+    // Convert auction price to USD if in KSH
+    if (auctionPriceCurrency === 'KSH') {
+        totalPriceUSD = Math.round(auctionPrice / exchangeRate);
     } else {
-        totalPriceUSD = quantity * priceUSD;
+        totalPriceUSD = Math.round(auctionPrice);
+    }
+    
+    depositUSD = totalPriceUSD; // 100% deposit for auction invoices
+    balanceUSD = 0;
+    depositKSH = Math.round(depositUSD * exchangeRate);
+}
         
         // Calculate deposit based on deposit type
         if (depositType === 'percentage') {
@@ -2071,7 +2100,8 @@ async function saveInvoice(onlySave) {
         invoiceId: generatedInvoiceId,
         revoked: false, // Add revoked flag
         isAuctionInvoice: docType === 'Auction Invoice',
-        auctionPrice: docType === 'Auction Invoice' ? auctionPrice : null
+        auctionPrice: docType === 'Auction Invoice' ? auctionPrice : null,
+        auctionPriceCurrency: docType === 'Auction Invoice' ? auctionPriceCurrency : null
     };
 
     // 5. Save to Firestore
@@ -3292,20 +3322,28 @@ function generateInvoicePDF(data) {
     }
 
     // Mileage/Color - allow wrapping
-    const mileageColorText = `${data.carDetails.mileage}km / ${data.carDetails.color}`;
-    const mileageLines = doc.splitTextToSize(mileageColorText, 30);
-    if (mileageLines.length > 1) {
-        mileageLines.forEach((line, index) => {
-            drawText(line, 130, y + 7 + (index * 4), 7, 'normal', 0, 'center');
-        });
-    } else {
-        drawText(mileageColorText, 130, y + 9, 8, 'normal', 0, 'center');
-    }
+const mileageColorText = `${data.carDetails.mileage}km / ${data.carDetails.color}`;
+const mileageLines = doc.splitTextToSize(mileageColorText, 30);
+if (mileageLines.length > 1) {
+    mileageLines.forEach((line, index) => {
+        drawText(line, 130, y + 7 + (index * 4), 7, 'normal', 0, 'center');
+    });
+} else {
+    drawText(mileageColorText, 130, y + 9, 8, 'normal', 0, 'center');
+}
 
-    // Price - right aligned with .00 format
+// Price - right aligned with .00 format
+if (data.docType === 'Auction Invoice' && data.auctionPrice) {
+    // Show auction price with currency
+    doc.setFontSize(10);
+    doc.setTextColor(secondaryColor);
+    doc.setFont("helvetica", "bold");
+    doc.text(`${data.auctionPriceCurrency || 'USD'} ${data.auctionPrice.toLocaleString('en-US', { minimumFractionDigits: 2 })}`, 185, y + 9, 10, 'normal', secondaryColor, "right");
+} else {
     drawText(`${formatAmount(data.carDetails.priceUSD)}`, 185, y + 9, 10, 'normal', 0, "right");
+}
 
-    y += 16;
+y += 16;
 
     // Description of Goods
     doc.setTextColor(primaryColor);
@@ -3371,17 +3409,18 @@ function generateInvoicePDF(data) {
     y += lineHeight + 2;
     
     // Check if it's an auction invoice
-    if (data.docType === 'Auction Invoice') {
-        // AUCTION INVOICE TERMS
-        const auctionPrice = data.auctionPrice || data.pricing.totalUSD;
-        
-        // Term 1: Currency Clause
-        const term1 = `All payments under this contract shall be made in USD. If payments are made in any other currency, the amount will be converted at the prevailing exchange rate of the seller's bank on the date of payment.`;
-        y = drawTerm(doc, y, '1.', term1);
+   if (data.docType === 'Auction Invoice') {
+    // AUCTION INVOICE TERMS
+    const auctionPrice = data.auctionPrice || data.pricing.totalUSD;
+    const auctionCurrency = data.auctionPriceCurrency || 'USD';
+    
+    // Term 1: Currency Clause
+    const term1 = `All payments under this contract shall be made in USD. If payments are made in any other currency, the amount will be converted at the prevailing exchange rate of the seller's bank on the date of payment.`;
+    y = drawTerm(doc, y, '1.', term1);
 
-        // Term 2: Auction Bid Security - NEW CLAUSE
-        const term2 = `WanBite Investments Ltd will arrange the auction bid once the Buyer deposits USD 2,000.00 as bid security. This deposit is refundable.`;
-        y = drawTerm(doc, y, '2.', term2);
+    // Term 2: Auction Bid Security - UPDATED WITH CURRENCY
+    const term2 = `WanBite Investments Ltd will arrange the auction bid once the Buyer deposits ${auctionCurrency} ${auctionPrice.toLocaleString('en-US', { minimumFractionDigits: 2 })} as bid security. This deposit is refundable.`;
+    y = drawTerm(doc, y, '2.', term2);
 
         // Term 3: Balance Payment - NEW CLAUSE
         const term3 = `The remaining balance must be paid within Ten (10) days of the Bill of Landing issuance date.`;
