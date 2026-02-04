@@ -1140,12 +1140,16 @@ function updateReceiptCalculations() {
         const totalPaidUSD = totalUSD - remainingUSD;
         const totalPaidKSH = totalPaidUSD * exchangeRate;
         
-      drawText(`KES Balance: ${formatAmount(remainingKSH)} (Paid: ${formatAmount(totalPaidKSH)})`, margin, amountBoxY + 10, 10);
-drawText(`USD Balance: ${formatAmount(remainingUSD)} (Paid: ${formatAmount(totalPaidUSD)})`, margin, amountBoxY + 14, 10);
-    } else {
-        balanceKES.textContent = `KES Balance: ${remainingKSH.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
-        balanceUSD.textContent = `USD Balance: ${remainingUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
-    }
+             // FIXED: Use the formatAmount function correctly
+            drawText(`KES Balance: ${formatAmount(remainingKSH)} (Paid: ${formatAmount(totalPaidKSH)})`, margin, amountBoxY + 10, 10);
+            drawText(`USD Balance: ${formatAmount(remainingUSD)} (Paid: ${formatAmount(totalPaidUSD)})`, margin, amountBoxY + 14, 10);
+        } else {
+        // balanceKES.textContent = `KES Balance: ${remainingKSH.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+        // balanceUSD.textContent = `USD Balance: ${remainingUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
+     // For PDF, just show the balances
+            drawText(`KES Balance: ${formatAmount(remainingKSH)}`, margin, amountBoxY + 10, 10);
+            drawText(`USD Balance: ${formatAmount(remainingUSD)}`, margin, amountBoxY + 14, 10);
+        }
 }
 
 /**
@@ -2747,6 +2751,40 @@ async function deleteBank(bankId) {
  * Generates and downloads a custom PDF for the comprehensive receipt. (WITH PAYMENT HISTORY)
  */
 function generateReceiptPDF(data) {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF('p', 'mm', 'a4'); 
+
+    const primaryColor = '#183263'; // WanBite Blue
+    const secondaryColor = '#D96359'; // Red
+    
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    let y = 10; 
+    const margin = 10;
+    const boxW = pageW - (2 * margin);
+    const lineHeight = 7; 
+
+    // --- HELPER FUNCTIONS ---
+    const drawText = (text, x, y, size, style = 'normal', color = primaryColor, align = 'left') => {
+        doc.setFontSize(size);
+        doc.setFont("helvetica", style);
+        doc.setTextColor(color);
+        doc.text(text, x, y, { align: align });
+        return size / 3; // Return approximate line height in mm
+    };
+
+    const getTextHeight = (text, fontSize, maxWidth) => {
+        const lineHeightFactor = 1.15;
+        const lines = doc.splitTextToSize(text, maxWidth);
+        return lines.length * fontSize * lineHeightFactor / doc.internal.scaleFactor;
+    };
+
+    // Helper to format amounts without decimals (with .00)
+    const formatAmount = (amount) => {
+        if (amount === null || amount === undefined) return '0.00';
+        const rounded = Math.round(amount);
+        return rounded.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    };
 
   // Add this helper function near the top of generateReceiptPDF function, after the drawText function:
 // Helper to format amounts without decimals (with .00)
@@ -2931,8 +2969,8 @@ const remainingUSD = data.balanceDetails?.balanceRemainingUSD || data.balanceDet
 const remainingKSH = data.balanceDetails?.balanceRemainingKSH || remainingUSD * (data.exchangeRate || 130);
 
 // Show balance in both USD and KSH - UPDATED
-drawText(`Balance Remaining (USD): ${formatAmount(remainingUSD)}`, margin, amountBoxY + 10, 10);
-drawText(`Balance Remaining (KES): ${formatAmount(remainingKSH)}`, margin, amountBoxY + 14, 10);
+drawText(`KES Balance: ${formatAmount(remainingKSH)}`, margin, amountBoxY + 10, 10);
+drawText(`USD Balance: ${formatAmount(remainingUSD)}`, margin, amountBoxY + 14, 10);
 drawText(`Due On/Before: ${data.balanceDetails?.balanceDueDate || 'N/A'}`, margin, amountBoxY + 18, 10);
 
 // Add paid amounts
