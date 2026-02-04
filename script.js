@@ -2873,7 +2873,7 @@ function generateReceiptPDF(data) {
     // The Sum of Money (Words) - UPDATED TO SHOW LATEST PAYMENT WITH REDUCED SPACING
     drawText('THE SUM OF:', margin, y + 3, 10, 'bold');
     doc.setFillColor(240, 240, 240); 
-    const wordsBoxHeight = lineHeight * 0.5; // Reduced height from 3.5 to 3 for less spacing
+    const wordsBoxHeight = lineHeight * 3; // Reduced height from 3.5 to 3 for less spacing
     doc.rect(margin + 35, y, boxW - 35, wordsBoxHeight, 'F');
     doc.setDrawColor(0);
     doc.setLineWidth(0.2);
