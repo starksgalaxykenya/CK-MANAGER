@@ -2870,10 +2870,10 @@ function generateReceiptPDF(data) {
         }
     }
 
-    // The Sum of Money (Words) - UPDATED TO SHOW LATEST PAYMENT
+    // The Sum of Money (Words) - UPDATED TO SHOW LATEST PAYMENT WITH REDUCED SPACING
     drawText('THE SUM OF:', margin, y + 3, 10, 'bold');
     doc.setFillColor(240, 240, 240); 
-    const wordsBoxHeight = lineHeight * 3.5; // Increased height to accommodate figure above words
+    const wordsBoxHeight = lineHeight * 3; // Reduced height from 3.5 to 3 for less spacing
     doc.rect(margin + 35, y, boxW - 35, wordsBoxHeight, 'F');
     doc.setDrawColor(0);
     doc.setLineWidth(0.2);
@@ -2881,23 +2881,23 @@ function generateReceiptPDF(data) {
     
     doc.setTextColor(0);
     
-    // Display the amount figure above the words - ADDED THIS SECTION
+    // Display the amount figure above the words - REDUCED SPACING
     doc.setFontSize(14);
     doc.setFont("helvetica", "bold");
     const amountFigureText = `${latestPaymentCurrency} ${formatAmount(latestPaymentAmount)}`;
     const amountFigureWidth = doc.getStringUnitWidth(amountFigureText) * 14 / doc.internal.scaleFactor;
     const amountFigureX = margin + 35 + ((boxW - 35) - amountFigureWidth) / 2;
-    doc.text(amountFigureText, amountFigureX, y + 8);
+    doc.text(amountFigureText, amountFigureX, y + 7); // Changed from y + 8 to y + 7 (reduced by 1mm)
     
-    // Display the amount in words below the figure
+    // Display the amount in words below the figure - MOVED CLOSER TO FIGURE
     doc.setFontSize(11);
     const wrappedWords = doc.splitTextToSize(latestPaymentWords || '', boxW - 37);
     
-    // Calculate vertical position for centered text (starting below the figure)
+    // Calculate vertical position for centered text (starting closer to the figure)
     const textHeight = wrappedWords.length * 4; // Approximate height in mm
-    const verticalOffset = y + (wordsBoxHeight - textHeight) / 2 + 12; // Adjusted to start below the figure
+    const verticalOffset = y + (wordsBoxHeight - textHeight) / 2 + 10; // Changed from +12 to +10 (reduced by 2mm)
     
-    doc.text(wrappedWords, margin + 36, Math.max(verticalOffset, y + 16));
+    doc.text(wrappedWords, margin + 36, Math.max(verticalOffset, y + 14)); // Adjusted from y + 16
     y += wordsBoxHeight + 5;
 
     // Being Paid For
@@ -3008,7 +3008,7 @@ function generateReceiptPDF(data) {
     y = amountBoxY + amountBoxH + 10;
 
     // =================================================================
-    // PAYMENT HISTORY SECTION (IF EXISTS)
+    // PAYMENT HISTORY SECTION (IF EXISTS) - ADJUSTED COLUMN WIDTHS
     // =================================================================
     const paymentCount = data.paymentCount || paymentHistory.length || 0;
     
@@ -3039,17 +3039,17 @@ function generateReceiptPDF(data) {
         doc.text(`Total Paid (KES): ${totalPaidKSH.toFixed(2)}`, margin + 120, y + 6);
         y += 12;
         
-        // Table Header
+        // Table Header - ADJUSTED COLUMN POSITIONS
         doc.setFillColor(primaryColor);
         doc.rect(margin, y, boxW, 6, 'F');
         doc.setTextColor(255);
         drawText('#', margin + 2, y + 4, 8, 'bold', 255);
-        drawText('Date', margin + 10, y + 4, 8, 'bold', 255);
-        drawText('Amount', margin + 40, y + 4, 8, 'bold', 255);
-        drawText('USD', margin + 75, y + 4, 8, 'bold', 255);
-        drawText('KES', margin + 105, y + 4, 8, 'bold', 255);
-        drawText('Method', margin + 135, y + 4, 8, 'bold', 255);
-        drawText('Description', margin + 170, y + 4, 8, 'bold', 255);
+        drawText('Date', margin + 8, y + 4, 8, 'bold', 255); // Moved left from 10 to 8
+        drawText('Amount', margin + 30, y + 4, 8, 'bold', 255); // Moved left from 40 to 30
+        drawText('USD', margin + 60, y + 4, 8, 'bold', 255); // Moved left from 75 to 60
+        drawText('KES', margin + 85, y + 4, 8, 'bold', 255); // Moved left from 105 to 85
+        drawText('Method', margin + 110, y + 4, 8, 'bold', 255); // Moved left from 135 to 110
+        drawText('Description', margin + 145, y + 4, 8, 'bold', 255); // Moved left from 170 to 145 (more space now)
         y += 6;
         
         // Payment Rows
@@ -3078,18 +3078,20 @@ function generateReceiptPDF(data) {
             
             doc.rect(margin, y, boxW, 5);
             drawText(`${index + 1}`, margin + 2, y + 3.5, 8);
-            drawText(payment.paymentDate || 'N/A', margin + 10, y + 3.5, 8);
-            drawText(`${payment.currency} ${formatAmount(payment.amount)}`, margin + 40, y + 3.5, 8);
-            drawText(`USD ${formatAmount(payment.amountUSD || (payment.currency === 'USD' ? payment.amount : (payment.amount / (payment.exchangeRate || 130))))}`, margin + 75, y + 3.5, 8);
-            drawText(`KES ${formatAmount(payment.amountKSH || (payment.currency === 'KSH' ? payment.amount : (payment.amount * (payment.exchangeRate || 130))))}`, margin + 105, y + 3.5, 8);
+            drawText(payment.paymentDate || 'N/A', margin + 8, y + 3.5, 8); // Moved left from 10 to 8
+            drawText(`${payment.currency} ${formatAmount(payment.amount)}`, margin + 30, y + 3.5, 8); // Moved left from 40 to 30
+            drawText(`USD ${formatAmount(payment.amountUSD || (payment.currency === 'USD' ? payment.amount : (payment.amount / (payment.exchangeRate || 130))))}`, margin + 60, y + 3.5, 8); // Moved left from 75 to 60
+            drawText(`KES ${formatAmount(payment.amountKSH || (payment.currency === 'KSH' ? payment.amount : (payment.amount * (payment.exchangeRate || 130))))}`, margin + 85, y + 3.5, 8); // Moved left from 105 to 85
             
             const method = payment.paymentMethod || 'N/A';
             const shortMethod = method.length > 15 ? method.substring(0, 12) + '...' : method;
-            drawText(shortMethod, margin + 135, y + 3.5, 8);
+            drawText(shortMethod, margin + 110, y + 3.5, 8); // Moved left from 135 to 110
             
             const description = payment.description || 'Payment';
-            const shortDesc = description.length > 20 ? description.substring(0, 17) + '...' : description;
-            drawText(shortDesc, margin + 170, y + 3.5, 8);
+            // Now we have more space (from 170 to 145 = 25mm more), so we can show longer descriptions
+            const maxDescWidth = 35; // Increased from previous
+            const shortDesc = description.length > 40 ? description.substring(0, 37) + '...' : description;
+            drawText(shortDesc, margin + 145, y + 3.5, 8); // Moved left from 170 to 145
             
             y += 5;
         });
