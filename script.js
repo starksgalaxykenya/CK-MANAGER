@@ -2839,24 +2839,65 @@ function generateReceiptPDF(data) {
     drawText(data.receivedFrom, margin + 35, y - 0.5, 12, 'bold', 0);
     y += lineHeight;
 
-    // The Sum of Money (Words) - FIXED OVERLAPPING
+    // Calculate latest payment amount based on date
+    const paymentHistory = data.paymentHistory || [];
+    let latestPayment = null;
+    let latestPaymentAmount = data.amountReceived;
+    let latestPaymentCurrency = data.currency || 'KSH';
+    let latestPaymentWords = data.amountWords || '';
+    
+    if (paymentHistory.length > 0) {
+        // Sort payments by date to get the latest one
+        const sortedPayments = [...paymentHistory].sort((a, b) => {
+            const dateA = a.paymentDate ? new Date(a.paymentDate) : new Date(0);
+            const dateB = b.paymentDate ? new Date(b.paymentDate) : new Date(0);
+            return dateB - dateA;
+        });
+        
+        latestPayment = sortedPayments[0];
+        latestPaymentAmount = latestPayment.amount || data.amountReceived;
+        latestPaymentCurrency = latestPayment.currency || data.currency || 'KSH';
+        
+        // Generate amount words for the latest payment
+        if (latestPaymentAmount) {
+            let words = numberToWords(latestPaymentAmount);
+            if (latestPaymentCurrency === 'USD') {
+                words = words.replace('only', 'US Dollars only.');
+            } else { // KSH
+                words = words.replace('only', 'Kenya Shillings only.');
+            }
+            latestPaymentWords = words;
+        }
+    }
+
+    // The Sum of Money (Words) - UPDATED TO SHOW LATEST PAYMENT
     drawText('THE SUM OF:', margin, y + 3, 10, 'bold');
     doc.setFillColor(240, 240, 240); 
-    const wordsBoxHeight = lineHeight * 2.5;
+    const wordsBoxHeight = lineHeight * 3.5; // Increased height to accommodate figure above words
     doc.rect(margin + 35, y, boxW - 35, wordsBoxHeight, 'F');
     doc.setDrawColor(0);
     doc.setLineWidth(0.2);
     doc.rect(margin + 35, y, boxW - 35, wordsBoxHeight);
     
     doc.setTextColor(0);
+    
+    // Display the amount figure above the words - ADDED THIS SECTION
+    doc.setFontSize(14);
+    doc.setFont("helvetica", "bold");
+    const amountFigureText = `${latestPaymentCurrency} ${formatAmount(latestPaymentAmount)}`;
+    const amountFigureWidth = doc.getStringUnitWidth(amountFigureText) * 14 / doc.internal.scaleFactor;
+    const amountFigureX = margin + 35 + ((boxW - 35) - amountFigureWidth) / 2;
+    doc.text(amountFigureText, amountFigureX, y + 8);
+    
+    // Display the amount in words below the figure
     doc.setFontSize(11);
-    const wrappedWords = doc.splitTextToSize(data.amountWords || '', boxW - 37);
+    const wrappedWords = doc.splitTextToSize(latestPaymentWords || '', boxW - 37);
     
-    // Calculate vertical position for centered text
+    // Calculate vertical position for centered text (starting below the figure)
     const textHeight = wrappedWords.length * 4; // Approximate height in mm
-    const verticalOffset = y + (wordsBoxHeight - textHeight) / 2 + 3;
+    const verticalOffset = y + (wordsBoxHeight - textHeight) / 2 + 12; // Adjusted to start below the figure
     
-    doc.text(wrappedWords, margin + 36, Math.max(verticalOffset, y + 4));
+    doc.text(wrappedWords, margin + 36, Math.max(verticalOffset, y + 16));
     y += wordsBoxHeight + 5;
 
     // Being Paid For
@@ -2921,28 +2962,28 @@ function generateReceiptPDF(data) {
         y = 10;
     }
     
-    // Calculate total paid amount - CHANGED TO SHOW TOTAL SUM OF ALL PAYMENTS
+    // Calculate total paid amount - SHOW TOTAL SUM OF ALL PAYMENTS
     const totalPaidUSD = data.totalPaidUSD || (data.amountReceivedUSD || (data.currency === 'USD' ? data.amountReceived : data.amountReceived / (data.exchangeRate || 130)));
     const totalPaidKSH = data.totalPaidKSH || (data.amountReceivedKSH || (data.currency === 'KSH' ? data.amountReceived : data.amountReceived * (data.exchangeRate || 130)));
     
-    // Determine which currency to display based on the most recent payment or original currency
-    const displayCurrency = data.currency || 'KSH';
+    // Determine which currency to display for the total sum
+    const totalDisplayCurrency = data.currency || 'KSH';
     let totalAmountFigure;
     
-    if (displayCurrency === 'USD') {
+    if (totalDisplayCurrency === 'USD') {
         totalAmountFigure = totalPaidUSD;
     } else {
         // Default to KSH if currency is KSH or unknown
         totalAmountFigure = totalPaidKSH;
     }
     
-    // Total Amount Box - CHANGED TO SHOW TOTAL SUM OF ALL PAYMENTS
+    // Total Amount Box - SHOW TOTAL SUM OF ALL PAYMENTS
     doc.setFillColor(secondaryColor);
     doc.rect(pageW - margin - 70, amountBoxY, 70, amountBoxH, 'F');
     
     doc.setTextColor(255);
     drawText('AMOUNT FIGURE', pageW - margin - 65, amountBoxY + 4, 8, 'bold', 255);
-    drawText(`${displayCurrency} ${formatAmount(totalAmountFigure)}`, 
+    drawText(`${totalDisplayCurrency} ${formatAmount(totalAmountFigure)}`, 
          pageW - margin - 5, amountBoxY + 11, 18, 'bold', 255, 'right');
     
     // Balance Details - FIXED: Use stored USD/KSH amounts
@@ -2969,7 +3010,6 @@ function generateReceiptPDF(data) {
     // =================================================================
     // PAYMENT HISTORY SECTION (IF EXISTS)
     // =================================================================
-    const paymentHistory = data.paymentHistory || [];
     const paymentCount = data.paymentCount || paymentHistory.length || 0;
     
     if (paymentCount > 0 && paymentHistory.length > 0) {
@@ -3016,7 +3056,14 @@ function generateReceiptPDF(data) {
         doc.setFontSize(8);
         doc.setTextColor(0);
         
-        paymentHistory.forEach((payment, index) => {
+        // Sort payments by date for display (newest first)
+        const sortedDisplayPayments = [...paymentHistory].sort((a, b) => {
+            const dateA = a.paymentDate ? new Date(a.paymentDate) : new Date(0);
+            const dateB = b.paymentDate ? new Date(b.paymentDate) : new Date(0);
+            return dateB - dateA;
+        });
+        
+        sortedDisplayPayments.forEach((payment, index) => {
             // Check page boundary
             if (y > pageH - 20) {
                 doc.addPage();
