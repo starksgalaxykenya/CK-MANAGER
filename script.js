@@ -481,6 +481,7 @@ function handleDocumentGenerator() {
             </div>
         </div>
     `;
+  
     
     // Setup enter key listener
     setTimeout(() => {
@@ -1895,17 +1896,23 @@ function toggleAuctionFields() {
     const auctionField = document.getElementById('auction-price-field');
     const priceField = document.getElementById('price');
     const depositTypeField = document.getElementById('depositType');
-    const pricingFieldset = document.querySelector('fieldset legend');
-let pricingFieldsetElement = null;
-if (pricingFieldset && pricingFieldset.textContent.includes('Pricing')) {
-    pricingFieldsetElement = pricingFieldset.closest('fieldset');
-}// Get the pricing fieldset
+    
+    // FIXED: Find the pricing fieldset by looking for the legend with "Pricing" text
+    let pricingFieldsetElement = null;
+    
+    // Get all fieldset legends
+    const legends = document.querySelectorAll('fieldset legend');
+    legends.forEach(legend => {
+        if (legend.textContent.includes('Pricing')) {
+            pricingFieldsetElement = legend.closest('fieldset');
+        }
+    });
     
     if (docType === 'Auction Invoice') {
         auctionField.classList.remove('hidden');
         // Hide the regular pricing fieldset for auction invoices
-        if (pricingFieldset && pricingFieldset.closest('fieldset')) {
-            pricingFieldset.closest('fieldset').classList.add('hidden');
+        if (pricingFieldsetElement) {
+            pricingFieldsetElement.classList.add('hidden');
         }
         document.getElementById('depositPercentage').value = "100"; // Auction invoices are 100% deposit
         if (depositTypeField) {
@@ -1916,8 +1923,8 @@ if (pricingFieldset && pricingFieldset.textContent.includes('Pricing')) {
     } else {
         auctionField.classList.add('hidden');
         // Show the regular pricing fieldset for non-auction invoices
-        if (pricingFieldset && pricingFieldset.closest('fieldset')) {
-            pricingFieldset.closest('fieldset').classList.remove('hidden');
+        if (pricingFieldsetElement) {
+            pricingFieldsetElement.classList.remove('hidden');
         }
         priceField.placeholder = "Unit Price (USD C&F MSA) - Whole number";
         document.getElementById('depositPercentage').value = "50";
@@ -1926,7 +1933,6 @@ if (pricingFieldset && pricingFieldset.textContent.includes('Pricing')) {
         }
     }
 }
-
 /**
  * Saves the invoice data to Firestore and optionally generates a PDF.
  * @param {boolean} onlySave - If true, only saves to Firestore without generating PDF.
