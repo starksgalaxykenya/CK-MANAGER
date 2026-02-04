@@ -1940,13 +1940,17 @@ function toggleAuctionFields() {
 async function saveInvoice(onlySave) {
     const form = document.getElementById('invoice-form');
     
-    // 1. Collect Form Data
+    // Validate price first
     const priceUSD = parseFloat(document.getElementById('price').value);
-    
-    // Validate price
     if (!priceUSD || priceUSD <= 0) {
         alert("Please enter a valid unit price.");
         document.getElementById('price').focus();
+        return;
+    }
+    
+    // Then check form validity
+    if (!form.checkValidity()) {
+        form.reportValidity();
         return;
     }
 
@@ -1986,7 +1990,7 @@ async function saveInvoice(onlySave) {
     const color = document.getElementById('color').value;
     const mileage = document.getElementById('mileage').value;
     const quantity = parseInt(document.getElementById('quantity').value);
-    const priceUSD = parseFloat(document.getElementById('price').value);
+    // priceUSD is already declared and validated above
     const goodsDescription = document.getElementById('goodsDescription').value;
     
     // Auction price for auction invoices with currency
