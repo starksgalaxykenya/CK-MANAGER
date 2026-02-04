@@ -1895,7 +1895,11 @@ function toggleAuctionFields() {
     const auctionField = document.getElementById('auction-price-field');
     const priceField = document.getElementById('price');
     const depositTypeField = document.getElementById('depositType');
-    const pricingFieldset = document.querySelector('fieldset legend:text-secondary-red'); // Get the pricing fieldset
+    const pricingFieldset = document.querySelector('fieldset legend');
+let pricingFieldsetElement = null;
+if (pricingFieldset && pricingFieldset.textContent.includes('Pricing')) {
+    pricingFieldsetElement = pricingFieldset.closest('fieldset');
+}// Get the pricing fieldset
     
     if (docType === 'Auction Invoice') {
         auctionField.classList.remove('hidden');
