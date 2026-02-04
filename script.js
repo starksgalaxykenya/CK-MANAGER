@@ -482,13 +482,21 @@ function handleDocumentGenerator() {
         </div>
     `;
     
-    // Setup enter key listener
-    setTimeout(() => {
-        setupSearchEnterKey();
-    }, 100);
+    // Add event listener for Enter key - FIX: Use async wrapper or proper error handling
+    const searchInput = document.getElementById('document-search');
+    if (searchInput) {
+        searchInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                // Handle async function properly
+                searchDocuments().catch(error => {
+                    console.error("Error searching documents:", error);
+                    alert("Search failed: " + error.message);
+                });
+            }
+        });
+    }
 }
-    // This will be initialized when handleDocumentGenerator is called
-});
 
 // =================================================================
 //                 3. DASHBOARD & NAVIGATION (UPDATED)
