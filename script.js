@@ -1828,7 +1828,7 @@ function renderInvoiceForm() {
                     <legend class="text-base font-semibold text-secondary-red px-2">Pricing</legend>
                     <div class="grid grid-cols-2 gap-4">
                         <input type="number" id="quantity" required value="1" min="1" placeholder="Quantity" class="p-2 border rounded-md">
-                        <input type="number" id="price" step="1" required placeholder="Unit Price (USD C&F MSA) - Whole number" class="p-2 border rounded-md">
+                        <input type="number" id="price" step="1" placeholder="Unit Price (USD C&F MSA) - Whole number" class="p-2 border rounded-md">
                     </div>
                 </fieldset>
 
@@ -1939,8 +1939,14 @@ function toggleAuctionFields() {
  */
 async function saveInvoice(onlySave) {
     const form = document.getElementById('invoice-form');
-    if (!form.checkValidity()) {
-        form.reportValidity();
+    
+    // 1. Collect Form Data
+    const priceUSD = parseFloat(document.getElementById('price').value);
+    
+    // Validate price
+    if (!priceUSD || priceUSD <= 0) {
+        alert("Please enter a valid unit price.");
+        document.getElementById('price').focus();
         return;
     }
 
