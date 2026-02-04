@@ -2064,7 +2064,7 @@ if (docType === 'Auction Invoice') {
     const depositKSH = Math.round(depositUSD * exchangeRate);
     
     // 3. Generate sequential invoice number
-    const generatedInvoiceId = await generateSequentialInvoiceNumber(clientName, carModel, carYear);
+    const generatedInvoiceId = generateSequentialInvoiceNumber(clientName, carModel, carYear);
     
     // 4. Construct Invoice Data Object
     const invoiceData = {
