@@ -4267,12 +4267,12 @@ function generateInvoicePDF(data) {
         const totalPriceText = `The total price of the vehicle is USD ${formatAmount(data.pricing.totalUSD)}`;
         y = drawTerm(doc, y, '1.', totalPriceText, 188 - termIndent);
 
-        // Term 2: Payment Schedule - FIXED PERCENTAGE CALCULATION
+        // Term 2: Payment Schedule - UPDATED AS REQUESTED - REMOVED DUE DATE
         let depositText;
         if (data.depositType === 'percentage' && data.depositPercentage) {
-            depositText = `A deposit of USD ${formatAmount(data.pricing.depositUSD)} (KES ${formatAmount(data.pricing.depositKSH)} equivalent) is required to secure the vehicle and begin shipping/clearing. The balance of USD ${formatAmount(data.pricing.balanceUSD)} is due ${data.dueDate ? `on or before ${data.dueDate}` : 'upon production of the Bill of Landing'}. The seller shall promptly notify the buyer of the date for due compliance.`;
+            depositText = `A deposit of USD ${formatAmount(data.pricing.depositUSD)} (KES ${formatAmount(data.pricing.depositKSH)} equivalent) is required to secure the vehicle and begin shipping/clearing. The due date of the balance of USD ${formatAmount(data.pricing.balanceUSD)} will be promptly be communicated and notified by the seller for compliance.`;
         } else {
-            depositText = `A deposit of ${data.fixedDepositCurrency} ${formatAmount(data.fixedDepositAmount)} (USD ${formatAmount(data.pricing.depositUSD)} / KES ${formatAmount(data.pricing.depositKSH)} equivalent) is required to secure the vehicle and begin shipping/clearing. The balance of USD ${formatAmount(data.pricing.balanceUSD)} is due ${data.dueDate ? `on or before ${data.dueDate}` : 'upon production of the Bill of Landing'}. The seller shall promptly notify the buyer of the date for due compliance.`;
+            depositText = `A deposit of ${data.fixedDepositCurrency} ${formatAmount(data.fixedDepositAmount)} (USD ${formatAmount(data.pricing.depositUSD)} / KES ${formatAmount(data.pricing.depositKSH)} equivalent) is required to secure the vehicle and begin shipping/clearing. The due date of the balance of USD ${formatAmount(data.pricing.balanceUSD)} will be promptly be communicated and notified by the seller for compliance.`;
         }
         y = drawTerm(doc, y, '2.', depositText);
 
@@ -4441,7 +4441,6 @@ y += 32; // Adjusted from y += 30 to maintain proper footer spacing
 
     doc.save(`${data.docType}_${data.invoiceId}.pdf`);
 }
-
 /**
  * Generates and downloads the PDF for the Car Sales Agreement.
  */
