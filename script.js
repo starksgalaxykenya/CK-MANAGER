@@ -176,6 +176,236 @@ function addAnimationStyles() {
     }
 }
 
+// =================================================================
+//                 SECRET BACKDATING FEATURE
+// =================================================================
+
+// Global variables for backdating
+let backdateMode = false;
+let backdateDate = null;
+let backdateButton = null;
+let backdatePanel = null;
+let backdateIndicator = null;
+
+// Initialize secret backdating feature
+function initBackdateFeature() {
+    // Create secret feature elements
+    createBackdateElements();
+    
+    // Listen for secret key combination (Ctrl+Shift+D)
+    document.addEventListener('keydown', function(e) {
+        if (e.ctrlKey && e.shiftKey && e.key === 'D') {
+            e.preventDefault();
+            toggleBackdatePanel();
+        }
+    });
+    
+    // Listen for clicks outside the panel
+    document.addEventListener('click', function(e) {
+        if (backdatePanel && backdatePanel.style.display === 'block') {
+            if (!backdatePanel.contains(e.target) && e.target !== backdateButton) {
+                hideBackdatePanel();
+            }
+        }
+    });
+}
+
+// Create the secret feature UI elements
+function createBackdateElements() {
+    // Create toggle button
+    backdateButton = document.createElement('div');
+    backdateButton.className = 'backdate-toggle-btn';
+    backdateButton.innerHTML = '⚡ BACKDATE MODE ⚡';
+    backdateButton.onclick = toggleBackdatePanel;
+    document.body.appendChild(backdateButton);
+    
+    // Create indicator
+    backdateIndicator = document.createElement('div');
+    backdateIndicator.className = 'secret-feature-indicator';
+    backdateIndicator.innerHTML = '⚡ BACKDATE ACTIVE ⚡';
+    document.body.appendChild(backdateIndicator);
+    
+    // Create panel
+    backdatePanel = document.createElement('div');
+    backdatePanel.className = 'backdate-panel';
+    backdatePanel.innerHTML = `
+        <button class="close-btn" onclick="hideBackdatePanel()">&times;</button>
+        <h3>⚡ SECRET BACKDATE FEATURE ⚡</h3>
+        <div class="form-group">
+            <label>Backdate Date</label>
+            <input type="date" id="backdate-date-input" class="backdate-input" value="${new Date().toISOString().slice(0, 10)}">
+        </div>
+        <div class="form-group">
+            <label>Time (Optional)</label>
+            <input type="time" id="backdate-time-input" class="backdate-input" value="09:00">
+        </div>
+        <div class="button-group">
+            <button class="apply-btn" onclick="applyBackdate()">APPLY BACKDATE</button>
+            <button class="clear-btn" onclick="clearBackdate()">CLEAR</button>
+        </div>
+        <p style="font-size: 11px; color: #666; text-align: center; margin-top: 15px;">
+            All documents created will use this date<br>
+            <span style="color: #ffd700; font-weight: bold;">Ctrl+Shift+D</span> to toggle
+        </p>
+    `;
+    document.body.appendChild(backdatePanel);
+}
+
+// Toggle the backdate panel
+function toggleBackdatePanel() {
+    if (!backdatePanel) return;
+    
+    if (backdatePanel.style.display === 'block') {
+        hideBackdatePanel();
+    } else {
+        showBackdatePanel();
+    }
+}
+
+// Show the backdate panel
+function showBackdatePanel() {
+    if (backdatePanel) {
+        backdatePanel.style.display = 'block';
+        
+        // Set current backdate in input if exists
+        if (backdateDate) {
+            const dateInput = document.getElementById('backdate-date-input');
+            if (dateInput) {
+                dateInput.value = backdateDate.toISOString().slice(0, 10);
+            }
+        }
+    }
+}
+
+// Hide the backdate panel
+function hideBackdatePanel() {
+    if (backdatePanel) {
+        backdatePanel.style.display = 'none';
+    }
+}
+
+// Apply backdate
+function applyBackdate() {
+    const dateInput = document.getElementById('backdate-date-input');
+    const timeInput = document.getElementById('backdate-time-input');
+    
+    if (!dateInput || !dateInput.value) {
+        showErrorToast('Please select a backdate');
+        return;
+    }
+    
+    const dateStr = dateInput.value;
+    const timeStr = timeInput.value || '09:00';
+    
+    // Create date object
+    backdateDate = new Date(`${dateStr}T${timeStr}:00`);
+    
+    // Activate backdate mode
+    backdateMode = true;
+    
+    // Update UI
+    if (backdateButton) {
+        backdateButton.classList.add('visible');
+        backdateButton.style.background = '#ffd700';
+        backdateButton.style.color = '#183263';
+        backdateButton.innerHTML = '⚡ BACKDATE ACTIVE ⚡';
+    }
+    
+    if (backdateIndicator) {
+        backdateIndicator.classList.add('visible');
+    }
+    
+    // Highlight all date fields
+    highlightDateFields(true);
+    
+    hideBackdatePanel();
+    showSuccessToast(`Backdate activated: ${formatBackdateDate(backdateDate)}`);
+}
+
+// Clear backdate
+function clearBackdate() {
+    backdateMode = false;
+    backdateDate = null;
+    
+    // Update UI
+    if (backdateButton) {
+        backdateButton.classList.remove('visible');
+        backdateButton.style.background = '#183263';
+        backdateButton.style.color = 'white';
+        backdateButton.innerHTML = '⚡ BACKDATE MODE ⚡';
+    }
+    
+    if (backdateIndicator) {
+        backdateIndicator.classList.remove('visible');
+    }
+    
+    // Remove highlights
+    highlightDateFields(false);
+    
+    hideBackdatePanel();
+    showSuccessToast('Backdate deactivated - using current date');
+}
+
+// Helper function to format backdate date
+function formatBackdateDate(date) {
+    if (!date) return '';
+    return date.toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit'
+    });
+}
+
+// Highlight all date fields when backdate is active
+function highlightDateFields(active) {
+    const dateFields = document.querySelectorAll('input[type="date"]');
+    dateFields.forEach(field => {
+        if (active) {
+            field.classList.add('backdate-active');
+            // Add backdate badge
+            const parent = field.parentElement;
+            if (parent && !parent.querySelector('.backdate-badge')) {
+                const badge = document.createElement('span');
+                badge.className = 'backdate-badge';
+                badge.innerHTML = 'BACKDATED';
+                parent.style.position = 'relative';
+                badge.style.position = 'absolute';
+                badge.style.right = '10px';
+                badge.style.top = '50%';
+                badge.style.transform = 'translateY(-50%)';
+                parent.appendChild(badge);
+            }
+        } else {
+            field.classList.remove('backdate-active');
+            // Remove backdate badge
+            const badge = field.parentElement?.querySelector('.backdate-badge');
+            if (badge) badge.remove();
+        }
+    });
+}
+
+// Override date functions for receipts and invoices
+function getCurrentDateForDocument() {
+    if (backdateMode && backdateDate) {
+        return backdateDate.toLocaleDateString('en-US');
+    }
+    return new Date().toLocaleDateString('en-US');
+}
+
+function getCurrentDateForStamp() {
+    if (backdateMode && backdateDate) {
+        return backdateDate.toLocaleDateString('en-US');
+    }
+    return new Date().toLocaleDateString('en-US');
+}
+
+// Initialize when DOM is ready
+document.addEventListener('DOMContentLoaded', function() {
+    setTimeout(initBackdateFeature, 1000);
+});
+
 // Initialize animation styles when DOM is ready
 document.addEventListener('DOMContentLoaded', addAnimationStyles);
 
@@ -1674,7 +1904,8 @@ async function saveReceipt() {
     }
 
     const receiptId = generateReceiptId(receiptType, receivedFrom);
-    const receiptDate = new Date().toLocaleDateString('en-US');
+    // Use backdated date if active
+const receiptDate = getCurrentDateForDocument();
 
     // Calculate amounts in both currencies - FIXED: Store both currencies properly
     let amountReceivedUSD = amountReceived;
@@ -2675,7 +2906,8 @@ async function saveInvoice(onlySave) {
         docType,
         clientName,
         clientPhone,
-        issueDate: new Date().toLocaleDateString('en-US'),
+        // Use backdated date if active
+issueDate: getCurrentDateForDocument(),
         dueDate: dueDate || null, // Make due date optional
         exchangeRate,
         depositType,
@@ -3864,8 +4096,8 @@ function generateReceiptPDF(data) {
     const sigX = pageW - margin - 50;
     doc.line(sigX, y + 15, pageW - margin, y + 15);
     
-    // Add stamp with date OVERLAY - UPDATED WITH RED TEXT AND SIZE 14
-    const stampDate = data.receiptDate || new Date().toLocaleDateString('en-US');
+   // Add stamp with date OVERLAY - UPDATED WITH RED TEXT AND SIZE 14
+const stampDate = data.receiptDate || getCurrentDateForDocument();;
     try {
         // Calculate position for 500x500 image to fit properly
         const stampWidth = 30; // Reduced width for better scaling
@@ -4405,6 +4637,11 @@ const sellerSigX = 110;
 // Use document creation date (issueDate) instead of current date
 let stampDate = data.issueDate; // This is already stored when invoice was created
 
+// If backdate is active, ensure we use the backdated date
+if (backdateMode && backdateDate) {
+    stampDate = backdateDate.toLocaleDateString('en-US');
+}
+
 // If issueDate is in a different format, convert it
 if (stampDate) {
     try {
@@ -4684,7 +4921,12 @@ function generateAgreementPDF(data) {
     const sellerX = pageW - margin - 70;
     
     // Use agreement creation date instead of current date
-    let stampDate = data.agreementDate; // This should be stored when agreement was created
+let stampDate = data.agreementDate; // This should be stored when agreement was created
+
+// If backdate is active, use backdated date
+if (backdateMode && backdateDate) {
+    stampDate = backdateDate.toLocaleDateString('en-US');
+}
 
     // If agreementDate is in YYYY-MM-DD format, convert it
     if (stampDate && stampDate.includes('-')) {
@@ -5976,3 +6218,13 @@ async function fetchAllReceiptBalances() {
         `;
     }
 }
+
+// =================================================================
+//                 GLOBAL FUNCTIONS FOR BACKDATING
+// =================================================================
+
+// Global function to toggle backdate panel
+window.toggleBackdatePanel = toggleBackdatePanel;
+window.hideBackdatePanel = hideBackdatePanel;
+window.applyBackdate = applyBackdate;
+window.clearBackdate = clearBackdate;
