@@ -658,6 +658,11 @@ async function performSearch(searchTerm, docTypeFilter) {
             const agreementResults = await searchAgreements(searchTerm);
             allResults = allResults.concat(agreementResults.map(a => ({...a, type: 'agreement'})));
         }
+
+        if (docTypeFilter === 'all' || docTypeFilter === 'portcharges') {
+    const portResults = await searchPortChargesInvoices(searchTerm);
+    allResults = allResults.concat(portResults.map(p => ({...p, type: 'portcharges'})));
+}
         
         // Sort by date (newest first)
         allResults.sort((a, b) => {
@@ -754,7 +759,10 @@ function displaySearchResults(results, searchTerm) {
             resultHtml = renderInvoiceSearchResult(doc, docJson);
         } else if (doc.type === 'agreement') {
             resultHtml = renderAgreementSearchResult(doc, docJson);
-        }
+        }else if (doc.type === 'portcharges') {
+    resultHtml = renderPortChargesSearchResult(doc, docJson);
+}
+        
         
         // Wrap each result with animation
         html += `
@@ -966,6 +974,57 @@ function renderAgreementSearchResult(doc, docJson) {
 }
 
 /**
+ * Renders a port charges invoice search result card
+ */
+function renderPortChargesSearchResult(doc, docJson) {
+    const date = doc.issueDate || (doc.createdAt?.toDate ? doc.createdAt.toDate().toLocaleDateString() : 'N/A');
+    
+    return `
+        <div class="p-4 border border-purple-300 rounded-lg bg-white shadow-sm hover:shadow-md transition-all duration-200 hover:scale-[1.01] hover:border-purple-500 group">
+            <div class="flex justify-between items-start">
+                <div class="flex-1">
+                    <div class="flex items-center gap-2 mb-2">
+                        <span class="bg-purple-600 text-white text-xs font-bold px-3 py-1 rounded-full flex items-center gap-1">
+                            <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M5 2a2 2 0 00-2 2v14l3.5-2 3.5 2 3.5-2 3.5 2V4a2 2 0 00-2-2H5z" clip-rule="evenodd"/></svg>
+                            PORT CHARGES
+                        </span>
+                        <span class="text-sm text-gray-500">${date}</span>
+                    </div>
+                    <h4 class="font-bold text-gray-800 text-lg mb-1">${doc.invoiceId}</h4>
+                    <p class="text-sm text-gray-700 mb-1"><strong>Client:</strong> ${doc.clientName}</p>
+                    <p class="text-sm text-gray-600 mb-1"><strong>Vehicle:</strong> ${doc.vehicleDetails?.makeModel || 'N/A'}</p>
+                    <div class="flex items-center gap-4 mt-2">
+                        <span class="text-sm font-bold text-purple-600">
+                            ${doc.invoiceCurrency} ${doc.totals?.totalInvoiceCurrency?.toFixed(2) || '0.00'}
+                        </span>
+                        <span class="text-xs text-gray-500">${doc.clientPhone || 'N/A'}</span>
+                    </div>
+                    <p class="text-xs text-gray-500 mt-1">Charges: ${doc.chargeItems?.length || 0} items</p>
+                </div>
+                <div class="flex flex-col gap-2 ml-4">
+                    <button onclick='reDownloadPortChargesInvoice(${docJson})' 
+                            class="bg-purple-600 hover:bg-purple-700 text-white text-xs py-2 px-4 rounded-full transition-all duration-150 flex items-center gap-1 group-hover:scale-105">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                        </svg>
+                        Download
+                    </button>
+                    ${!doc.revoked ? `
+                    <button onclick='revokePortChargesInvoice(${docJson})' 
+                            class="bg-red-600 hover:bg-red-800 text-white text-xs py-2 px-4 rounded-full transition-all duration-150 flex items-center gap-1 group-hover:scale-105">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                        </svg>
+                        REVOKE
+                    </button>
+                    ` : ''}
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+/**
  * Clears search and shows the default view
  */
 function clearSearch() {
@@ -1045,6 +1104,7 @@ document.addEventListener('DOMContentLoaded', function() {
                             <option value="receipt">Receipts Only</option>
                             <option value="invoice">Invoices Only</option>
                             <option value="agreement">Sales Agreements Only</option>
+                            <option value="portcharges">Port Charges Only</option>
                         </select>
                     </div>
                 </div>
@@ -1078,6 +1138,18 @@ document.addEventListener('DOMContentLoaded', function() {
                     </svg>
                     Car Sales Agreement
                 </button>
+                <button onclick="renderPortChargesInvoiceForm()" class="bg-purple-600 hover:bg-purple-700 text-white p-3 rounded-lg transition duration-150 mb-2 flex items-center gap-2">
+    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+    </svg>
+    Port Charges Invoice
+</button>
+<button onclick="renderPortChargesHistory()" class="bg-indigo-600 hover:bg-indigo-700 text-white p-3 rounded-lg transition duration-150 mb-2 flex items-center gap-2">
+    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+    </svg>
+    Port Charges History
+</button>
                 <button onclick="renderBankManagement()" class="bg-green-600 hover:bg-green-700 text-white p-3 rounded-lg transition duration-150 mb-2 flex items-center gap-2">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"></path>
@@ -6219,6 +6291,1064 @@ async function fetchAllReceiptBalances() {
     }
 }
 
+
+// =================================================================
+//                 14. PORT CHARGES INVOICE MODULE (NEW)
+// =================================================================
+
+/**
+ * Renders the Port Charges Invoice form with dynamic line items
+ */
+function renderPortChargesInvoiceForm() {
+    const formArea = document.getElementById('document-form-area');
+    formArea.innerHTML = `
+        <div class="p-6 border border-gray-300 rounded-xl bg-white shadow-lg animate-fade-in">
+            <h3 class="text-xl font-semibold mb-4 text-primary-blue">Port Charges Invoice</h3>
+            <form id="port-charges-form" onsubmit="event.preventDefault(); savePortChargesInvoice();">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 p-4 bg-blue-50 rounded-lg animate-fade-in" style="animation-delay: 100ms">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">Document Type</label>
+                        <input type="text" id="docType" value="Port Charges Invoice" readonly class="mt-1 block w-full p-2 border bg-gray-100 rounded-md">
+                    </div>
+                    <div>
+                        <label for="exchangeRate" class="block text-sm font-medium text-gray-700">USD 1 = KES</label>
+                        <input type="number" id="exchangeRate" step="1" required value="130" class="mt-1 block w-full p-2 border rounded-md transition duration-200">
+                    </div>
+                    <div>
+                        <label for="dueDate" class="block text-sm font-medium text-gray-700">Due Date (Optional)</label>
+                        <input type="date" id="dueDate" class="mt-1 block w-full p-2 border rounded-md transition duration-200">
+                    </div>
+                </div>
+                
+                <!-- Invoice Currency Selection -->
+                <div class="mb-4 p-3 bg-yellow-50 rounded-lg border border-yellow-200 animate-fade-in" style="animation-delay: 120ms">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Invoice Currency</label>
+                    <select id="invoiceCurrency" required class="w-full p-2 border rounded-md transition duration-200" onchange="updatePortChargesCalculation()">
+                        <option value="USD">USD - US Dollars</option>
+                        <option value="KSH">KES - Kenya Shillings</option>
+                    </select>
+                    <p class="text-xs text-gray-600 mt-1">All charges will be calculated and displayed in this currency</p>
+                </div>
+                
+                <fieldset class="border p-4 rounded-lg mb-6 animate-fade-in" style="animation-delay: 150ms">
+                    <legend class="text-base font-semibold text-secondary-red px-2">Client Details</legend>
+                    <div class="grid grid-cols-2 gap-4">
+                        <input type="text" id="clientName" required placeholder="Client Full Name" class="p-2 border rounded-md transition duration-200">
+                        <input type="text" id="clientPhone" required placeholder="Client Phone Number" class="p-2 border rounded-md transition duration-200">
+                        <input type="text" id="clientEmail" placeholder="Client Email (Optional)" class="p-2 border rounded-md transition duration-200 col-span-2">
+                    </div>
+                </fieldset>
+
+                <fieldset class="border p-4 rounded-lg mb-6 animate-fade-in" style="animation-delay: 200ms">
+                    <legend class="text-base font-semibold text-primary-blue px-2">Vehicle Information</legend>
+                    <div class="grid grid-cols-2 gap-4">
+                        <input type="text" id="carMakeModel" required placeholder="Make and Model (e.g., Toyota Vitz)" class="p-2 border rounded-md transition duration-200">
+                        <input type="number" id="carYear" required placeholder="Year" class="p-2 border rounded-md transition duration-200">
+                        <input type="text" id="vinNumber" required placeholder="VIN/Chassis Number" class="p-2 border rounded-md transition duration-200">
+                        <input type="text" id="containerNumber" placeholder="Container Number (Optional)" class="p-2 border rounded-md transition duration-200">
+                    </div>
+                </fieldset>
+
+                <fieldset class="border p-4 rounded-lg mb-6 animate-fade-in" style="animation-delay: 250ms">
+                    <legend class="text-base font-semibold text-secondary-red px-2 flex justify-between items-center">
+                        <span>Port Charges Breakdown</span>
+                        <button type="button" onclick="addPortChargeLine()" class="bg-green-600 hover:bg-green-700 text-white text-xs py-1 px-3 rounded-md transition duration-150 flex items-center gap-1">
+                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+                            </svg>
+                            Add Charge
+                        </button>
+                    </legend>
+                    
+                    <div id="port-charges-container">
+                        <!-- Default three charges -->
+                        <div class="charge-item grid grid-cols-12 gap-2 mb-3 items-center" data-index="0">
+                            <div class="col-span-5">
+                                <input type="text" class="charge-description w-full p-2 border rounded-md" value="Duty Payable" placeholder="Charge description">
+                            </div>
+                            <div class="col-span-3">
+                                <input type="number" class="charge-amount w-full p-2 border rounded-md" step="0.01" value="0" placeholder="Amount" onchange="updatePortChargesCalculation()">
+                            </div>
+                            <div class="col-span-2">
+                                <select class="charge-currency w-full p-2 border rounded-md" onchange="updatePortChargesCalculation()">
+                                    <option value="USD">USD</option>
+                                    <option value="KSH">KES</option>
+                                </select>
+                            </div>
+                            <div class="col-span-2 flex gap-1">
+                                <button type="button" onclick="removePortChargeLine(this)" class="text-red-500 hover:text-red-700 transition duration-150">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="charge-item grid grid-cols-12 gap-2 mb-3 items-center" data-index="1">
+                            <div class="col-span-5">
+                                <input type="text" class="charge-description w-full p-2 border rounded-md" value="Port Charges" placeholder="Charge description">
+                            </div>
+                            <div class="col-span-3">
+                                <input type="number" class="charge-amount w-full p-2 border rounded-md" step="0.01" value="0" placeholder="Amount" onchange="updatePortChargesCalculation()">
+                            </div>
+                            <div class="col-span-2">
+                                <select class="charge-currency w-full p-2 border rounded-md" onchange="updatePortChargesCalculation()">
+                                    <option value="USD">USD</option>
+                                    <option value="KSH">KES</option>
+                                </select>
+                            </div>
+                            <div class="col-span-2 flex gap-1">
+                                <button type="button" onclick="removePortChargeLine(this)" class="text-red-500 hover:text-red-700 transition duration-150">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="charge-item grid grid-cols-12 gap-2 mb-3 items-center" data-index="2">
+                            <div class="col-span-5">
+                                <input type="text" class="charge-description w-full p-2 border rounded-md" value="Car Carrier" placeholder="Charge description">
+                            </div>
+                            <div class="col-span-3">
+                                <input type="number" class="charge-amount w-full p-2 border rounded-md" step="0.01" value="0" placeholder="Amount" onchange="updatePortChargesCalculation()">
+                            </div>
+                            <div class="col-span-2">
+                                <select class="charge-currency w-full p-2 border rounded-md" onchange="updatePortChargesCalculation()">
+                                    <option value="USD">USD</option>
+                                    <option value="KSH">KES</option>
+                                </select>
+                            </div>
+                            <div class="col-span-2 flex gap-1">
+                                <button type="button" onclick="removePortChargeLine(this)" class="text-red-500 hover:text-red-700 transition duration-150">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Totals Display -->
+                    <div class="mt-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <p class="text-sm text-gray-600">Subtotal (USD):</p>
+                                <p id="subtotal-usd" class="text-lg font-bold text-primary-blue">$0.00</p>
+                            </div>
+                            <div>
+                                <p class="text-sm text-gray-600">Subtotal (KES):</p>
+                                <p id="subtotal-kes" class="text-lg font-bold text-green-600">KSh 0.00</p>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4 mt-2 pt-2 border-t border-gray-200">
+                            <div>
+                                <p class="text-sm font-semibold text-gray-700">Total in Invoice Currency (<span id="invoice-currency-label">USD</span>):</p>
+                                <p id="total-invoice-currency" class="text-xl font-bold text-secondary-red">$0.00</p>
+                            </div>
+                            <div class="text-right">
+                                <p class="text-sm text-gray-600">Exchange Rate Used:</p>
+                                <p id="exchange-rate-display" class="text-sm font-semibold">USD 1 = KES 130.00</p>
+                            </div>
+                        </div>
+                    </div>
+                </fieldset>
+
+                <fieldset class="border p-4 rounded-lg mb-6 animate-fade-in" style="animation-delay: 300ms">
+                    <legend class="text-base font-semibold text-secondary-red px-2">Bank Account for Payment</legend>
+                    <select id="portBankDetailsSelect" required class="mt-1 block w-full p-2 border rounded-md transition duration-200"></select>
+                    <p class="text-xs text-gray-500 mt-1">Select the bank account for payment</p>
+                </fieldset>
+
+                <fieldset class="border p-4 rounded-lg mb-6 animate-fade-in" style="animation-delay: 350ms">
+                    <legend class="text-base font-semibold text-secondary-red px-2">Terms & Conditions</legend>
+                    <div class="p-3 bg-gray-50 rounded-lg">
+                        <p class="text-sm mb-2">✓ We will hold the reservation of the vehicle for 48hrs from the time of the proforma invoice and purchase agreement issuance</p>
+                        <p class="text-sm mb-2">✓ The reservation cannot be extended unless the TT copy (Telegraphic Transfer Copy) of the full payment is received at seller's end within the 48 hour deadline.</p>
+                        <p class="text-sm">✓ Any and all banks' charges and handling fees shall be borne and paid by the purchaser</p>
+                    </div>
+                </fieldset>
+
+                <div class="flex space-x-4 animate-fade-in" style="animation-delay: 400ms">
+                    <button type="submit" id="save-port-charges-btn" class="flex-1 bg-primary-blue hover:bg-blue-900 text-white font-bold py-3 rounded-lg transition duration-150 flex items-center justify-center gap-2">
+                        <span>Generate & Save Port Charges Invoice</span>
+                        <svg id="port-charges-spinner" class="hidden w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                    </button>
+                    <button type="button" onclick="savePortChargesInvoice(true)" id="save-port-only-btn" class="flex-1 bg-gray-500 hover:bg-gray-700 text-white font-bold py-3 rounded-lg transition duration-150 flex items-center justify-center gap-2">
+                        <span>Save Only (No PDF)</span>
+                        <svg id="port-only-spinner" class="hidden w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                    </button>
+                </div>
+            </form>
+        </div>
+    `;
+    
+    // Populate bank dropdown
+    populateBankDropdown('portBankDetailsSelect', false);
+    
+    // Set initial calculations
+    setTimeout(() => {
+        updatePortChargesCalculation();
+        document.getElementById('invoice-currency-label').textContent = document.getElementById('invoiceCurrency').value;
+    }, 100);
+}
+
+/**
+ * Adds a new charge line to the port charges form
+ */
+function addPortChargeLine() {
+    const container = document.getElementById('port-charges-container');
+    const items = container.querySelectorAll('.charge-item');
+    const newIndex = items.length;
+    
+    const newCharge = document.createElement('div');
+    newCharge.className = 'charge-item grid grid-cols-12 gap-2 mb-3 items-center animate-fade-in';
+    newCharge.setAttribute('data-index', newIndex);
+    newCharge.innerHTML = `
+        <div class="col-span-5">
+            <input type="text" class="charge-description w-full p-2 border rounded-md" value="Additional Charge" placeholder="Charge description">
+        </div>
+        <div class="col-span-3">
+            <input type="number" class="charge-amount w-full p-2 border rounded-md" step="0.01" value="0" placeholder="Amount" onchange="updatePortChargesCalculation()">
+        </div>
+        <div class="col-span-2">
+            <select class="charge-currency w-full p-2 border rounded-md" onchange="updatePortChargesCalculation()">
+                <option value="USD">USD</option>
+                <option value="KSH">KES</option>
+            </select>
+        </div>
+        <div class="col-span-2 flex gap-1">
+            <button type="button" onclick="removePortChargeLine(this)" class="text-red-500 hover:text-red-700 transition duration-150">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                </svg>
+            </button>
+        </div>
+    `;
+    
+    container.appendChild(newCharge);
+    updatePortChargesCalculation();
+}
+
+/**
+ * Removes a charge line from the port charges form
+ */
+function removePortChargeLine(button) {
+    const chargeItem = button.closest('.charge-item');
+    if (chargeItem) {
+        chargeItem.remove();
+        updatePortChargesCalculation();
+    }
+}
+
+/**
+ * Updates the calculation of port charges totals
+ */
+function updatePortChargesCalculation() {
+    const exchangeRate = parseFloat(document.getElementById('exchangeRate').value) || 130;
+    const invoiceCurrency = document.getElementById('invoiceCurrency').value;
+    const chargeItems = document.querySelectorAll('.charge-item');
+    
+    let totalUSD = 0;
+    let totalKSH = 0;
+    
+    chargeItems.forEach(item => {
+        const amount = parseFloat(item.querySelector('.charge-amount').value) || 0;
+        const currency = item.querySelector('.charge-currency').value;
+        
+        if (currency === 'USD') {
+            totalUSD += amount;
+            totalKSH += amount * exchangeRate;
+        } else {
+            totalKSH += amount;
+            totalUSD += amount / exchangeRate;
+        }
+    });
+    
+    // Update displays
+    document.getElementById('subtotal-usd').textContent = `$${totalUSD.toFixed(2)}`;
+    document.getElementById('subtotal-kes').textContent = `KSh ${totalKSH.toFixed(2)}`;
+    document.getElementById('exchange-rate-display').textContent = `USD 1 = KES ${exchangeRate.toFixed(2)}`;
+    
+    // Update total in invoice currency
+    const totalInvoiceCurrency = invoiceCurrency === 'USD' ? totalUSD : totalKSH;
+    const currencySymbol = invoiceCurrency === 'USD' ? '$' : 'KSh ';
+    document.getElementById('total-invoice-currency').textContent = currencySymbol + totalInvoiceCurrency.toFixed(2);
+    document.getElementById('invoice-currency-label').textContent = invoiceCurrency;
+}
+
+/**
+ * Generates a sequential invoice number for port charges invoices
+ */
+async function generatePortChargesInvoiceNumber(clientName, carMakeModel) {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = (now.getMonth() + 1).toString().padStart(2, '0');
+    const day = now.getDate().toString().padStart(2, '0');
+    
+    // Get the first day of current month
+    const firstDayOfMonth = new Date(year, now.getMonth(), 1);
+    
+    // Query port charges invoices from this month
+    const monthStart = firebase.firestore.Timestamp.fromDate(firstDayOfMonth);
+    const snapshot = await db.collection("port_charges_invoices")
+        .where("createdAt", ">=", monthStart)
+        .get();
+    
+    // Calculate next sequential number
+    const nextNumber = (snapshot.size + 1).toString().padStart(4, '0');
+    
+    // Get name and model parts for reference
+    const namePart = clientName.split(' ')[0].toUpperCase().substring(0, 3);
+    const modelPart = carMakeModel.split(' ')[0].toUpperCase().substring(0, 3);
+    
+    return `PORT-${year}${month}${day}-${nextNumber}-${namePart}-${modelPart}`;
+}
+
+/**
+ * Saves the port charges invoice to Firestore
+ */
+async function savePortChargesInvoice(onlySave = false) {
+    const form = document.getElementById('port-charges-form');
+    if (!form.checkValidity()) {
+        form.reportValidity();
+        return;
+    }
+
+    // Show loading state
+    const saveButton = onlySave ? document.getElementById('save-port-only-btn') : document.getElementById('save-port-charges-btn');
+    const spinner = onlySave ? document.getElementById('port-only-spinner') : document.getElementById('port-charges-spinner');
+    
+    if (saveButton && spinner) {
+        saveButton.disabled = true;
+        spinner.classList.remove('hidden');
+        const buttonText = onlySave ? 'Saving...' : 'Generating & Saving...';
+        saveButton.innerHTML = `<span>${buttonText}</span>${spinner.outerHTML}`;
+    }
+
+    try {
+        // Collect form data
+        const clientName = document.getElementById('clientName').value;
+        const clientPhone = document.getElementById('clientPhone').value;
+        const clientEmail = document.getElementById('clientEmail').value;
+        const exchangeRate = parseFloat(document.getElementById('exchangeRate').value);
+        const dueDate = document.getElementById('dueDate').value;
+        const invoiceCurrency = document.getElementById('invoiceCurrency').value;
+        const carMakeModel = document.getElementById('carMakeModel').value;
+        const carYear = document.getElementById('carYear').value;
+        const vinNumber = document.getElementById('vinNumber').value;
+        const containerNumber = document.getElementById('containerNumber').value;
+        
+        // Collect bank details
+        const bankSelect = document.getElementById('portBankDetailsSelect');
+        let selectedBank = null;
+        let bankId = '';
+        
+        if (bankSelect.selectedIndex > 0) {
+            try {
+                const bankValue = bankSelect.options[bankSelect.selectedIndex].value;
+                const decodedValue = bankValue
+                    .replace(/&apos;/g, "'")
+                    .replace(/&quot;/g, '"')
+                    .replace(/&lt;/g, '<')
+                    .replace(/&gt;/g, '>')
+                    .replace(/&amp;/g, '&');
+                
+                selectedBank = JSON.parse(decodedValue);
+                bankId = selectedBank.id;
+            } catch (e) {
+                console.error("Error parsing bank details:", e);
+            }
+        }
+        
+        if (!selectedBank) {
+            showErrorToast("Please select a bank account.");
+            resetPortChargesSaveButton(saveButton, spinner, onlySave);
+            return;
+        }
+        
+        // Collect charge items
+        const chargeItems = [];
+        document.querySelectorAll('.charge-item').forEach(item => {
+            const description = item.querySelector('.charge-description').value;
+            const amount = parseFloat(item.querySelector('.charge-amount').value) || 0;
+            const currency = item.querySelector('.charge-currency').value;
+            
+            if (amount > 0) {
+                chargeItems.push({
+                    description,
+                    amount,
+                    currency,
+                    amountUSD: currency === 'USD' ? amount : amount / exchangeRate,
+                    amountKSH: currency === 'KSH' ? amount : amount * exchangeRate
+                });
+            }
+        });
+        
+        if (chargeItems.length === 0) {
+            showErrorToast("Please add at least one charge amount.");
+            resetPortChargesSaveButton(saveButton, spinner, onlySave);
+            return;
+        }
+        
+        // Calculate totals
+        let totalUSD = 0;
+        let totalKSH = 0;
+        
+        chargeItems.forEach(item => {
+            totalUSD += item.amountUSD;
+            totalKSH += item.amountKSH;
+        });
+        
+        const totalInvoiceCurrency = invoiceCurrency === 'USD' ? totalUSD : totalKSH;
+        
+        // Generate invoice number
+        const invoiceId = await generatePortChargesInvoiceNumber(clientName, carMakeModel);
+        
+        // Prepare invoice data
+        const invoiceData = {
+            docType: 'Port Charges Invoice',
+            invoiceId,
+            clientName,
+            clientPhone,
+            clientEmail,
+            issueDate: getCurrentDateForDocument(),
+            dueDate: dueDate || null,
+            exchangeRate,
+            invoiceCurrency,
+            vehicleDetails: {
+                makeModel: carMakeModel,
+                year: carYear,
+                vin: vinNumber,
+                containerNumber: containerNumber || ''
+            },
+            chargeItems,
+            totals: {
+                totalUSD,
+                totalKSH,
+                totalInvoiceCurrency
+            },
+            bankDetails: selectedBank,
+            bankId,
+            termsConditions: [
+                "We will hold the reservation of the vehicle for 48hrs from the time of the proforma invoice and purchase agreement issuance",
+                "The reservation cannot be extended unless the TT copy (Telegraphic Transfer Copy) of the full payment is received at seller's end within the 48 hour deadline.",
+                "Any and all banks' charges and handling fees shall be borne and paid by the purchaser"
+            ],
+            createdBy: currentUser.email,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+            revoked: false
+        };
+        
+        // Save to Firestore
+        const docRef = await db.collection("port_charges_invoices").add(invoiceData);
+        
+        resetPortChargesSaveButton(saveButton, spinner, onlySave);
+        showSuccessToast(`Port Charges Invoice ${invoiceId} saved successfully!`);
+        
+        if (!onlySave) {
+            invoiceData.firestoreId = docRef.id;
+            generatePortChargesPDF(invoiceData);
+        }
+        
+        // Reset form
+        form.reset();
+        document.getElementById('port-charges-container').innerHTML = `
+            <div class="charge-item grid grid-cols-12 gap-2 mb-3 items-center" data-index="0">
+                <div class="col-span-5">
+                    <input type="text" class="charge-description w-full p-2 border rounded-md" value="Duty Payable" placeholder="Charge description">
+                </div>
+                <div class="col-span-3">
+                    <input type="number" class="charge-amount w-full p-2 border rounded-md" step="0.01" value="0" placeholder="Amount" onchange="updatePortChargesCalculation()">
+                </div>
+                <div class="col-span-2">
+                    <select class="charge-currency w-full p-2 border rounded-md" onchange="updatePortChargesCalculation()">
+                        <option value="USD">USD</option>
+                        <option value="KSH">KES</option>
+                    </select>
+                </div>
+                <div class="col-span-2 flex gap-1">
+                    <button type="button" onclick="removePortChargeLine(this)" class="text-red-500 hover:text-red-700 transition duration-150">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+            <div class="charge-item grid grid-cols-12 gap-2 mb-3 items-center" data-index="1">
+                <div class="col-span-5">
+                    <input type="text" class="charge-description w-full p-2 border rounded-md" value="Port Charges" placeholder="Charge description">
+                </div>
+                <div class="col-span-3">
+                    <input type="number" class="charge-amount w-full p-2 border rounded-md" step="0.01" value="0" placeholder="Amount" onchange="updatePortChargesCalculation()">
+                </div>
+                <div class="col-span-2">
+                    <select class="charge-currency w-full p-2 border rounded-md" onchange="updatePortChargesCalculation()">
+                        <option value="USD">USD</option>
+                        <option value="KSH">KES</option>
+                    </select>
+                </div>
+                <div class="col-span-2 flex gap-1">
+                    <button type="button" onclick="removePortChargeLine(this)" class="text-red-500 hover:text-red-700 transition duration-150">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+            <div class="charge-item grid grid-cols-12 gap-2 mb-3 items-center" data-index="2">
+                <div class="col-span-5">
+                    <input type="text" class="charge-description w-full p-2 border rounded-md" value="Car Carrier" placeholder="Charge description">
+                </div>
+                <div class="col-span-3">
+                    <input type="number" class="charge-amount w-full p-2 border rounded-md" step="0.01" value="0" placeholder="Amount" onchange="updatePortChargesCalculation()">
+                </div>
+                <div class="col-span-2">
+                    <select class="charge-currency w-full p-2 border rounded-md" onchange="updatePortChargesCalculation()">
+                        <option value="USD">USD</option>
+                        <option value="KSH">KES</option>
+                    </select>
+                </div>
+                <div class="col-span-2 flex gap-1">
+                    <button type="button" onclick="removePortChargeLine(this)" class="text-red-500 hover:text-red-700 transition duration-150">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        `;
+        
+        populateBankDropdown('portBankDetailsSelect', false);
+        updatePortChargesCalculation();
+        
+    } catch (error) {
+        console.error("Error saving port charges invoice:", error);
+        resetPortChargesSaveButton(saveButton, spinner, onlySave);
+        showErrorToast("Failed to save invoice: " + error.message);
+    }
+}
+
+/**
+ * Resets the port charges save button state
+ */
+function resetPortChargesSaveButton(saveButton, spinner, onlySave) {
+    if (saveButton && spinner) {
+        saveButton.disabled = false;
+        spinner.classList.add('hidden');
+        const buttonText = onlySave ? 'Save Only (No PDF)' : 'Generate & Save Port Charges Invoice';
+        saveButton.innerHTML = `<span>${buttonText}</span>${spinner.outerHTML}`;
+    }
+}
+
+// =================================================================
+//                 PORT CHARGES PDF GENERATION
+// =================================================================
+
+/**
+ * Generates PDF for Port Charges Invoice
+ */
+function generatePortChargesPDF(data) {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF('p', 'mm', 'a4');
+
+    const primaryColor = '#183263';
+    const secondaryColor = '#D96359';
+    
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    let y = 10;
+    const margin = 10;
+    const lineHeight = 5;
+
+    // Helper to format amounts
+    const formatAmount = (amount) => {
+        if (amount === null || amount === undefined) return '0.00';
+        return amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    };
+
+    const drawText = (text, x, y, size, style = 'normal', color = primaryColor, align = 'left') => {
+        doc.setFontSize(size);
+        doc.setFont("helvetica", style);
+        doc.setTextColor(color);
+        doc.text(text, x, y, { align: align });
+    };
+
+    // Add REVOKED watermark if revoked
+    if (data.revoked) {
+        doc.setFontSize(60);
+        doc.setTextColor(255, 0, 0, 30);
+        doc.setFont("helvetica", "bold");
+        doc.text('REVOKED', pageW / 2, pageH / 2, null, null, "center");
+        doc.setTextColor(255, 0, 0, 30);
+        doc.text('INVALID', pageW / 2, pageH / 2 + 20, null, null, "center");
+        doc.setTextColor(0);
+    }
+
+    // Function to add stamp
+    const addStampWithDate = (x, y, dateText) => {
+        try {
+            const stampWidth = 30;
+            const stampHeight = 30;
+            doc.addImage('STAMP.png', 'JPEG', x - (stampWidth/2), y, stampWidth, stampHeight);
+            doc.setFontSize(14);
+            doc.setTextColor(255, 0, 0);
+            doc.setFont("helvetica", "bold");
+            const textX = x;
+            const textY = y + (stampHeight/2) + 2;
+            doc.text(dateText, textX, textY, null, null, "center");
+            doc.setFontSize(10);
+            doc.setTextColor(primaryColor);
+            doc.text('For WanBite Investment Co. LTD', x, y + stampHeight + 8, null, null, "center");
+        } catch (error) {
+            console.error("Error adding stamp:", error);
+            doc.setFontSize(14);
+            doc.setTextColor(255, 0, 0);
+            doc.text(dateText, x, y - 2, null, null, "center");
+            doc.setFontSize(10);
+            doc.setTextColor(primaryColor);
+            doc.text('For WanBite Investment Co. LTD', x, y + 5, null, null, "center");
+        }
+    };
+
+    // =================================================================
+    // HEADER
+    // =================================================================
+    doc.setFillColor(primaryColor);
+    doc.rect(0, 0, pageW, 15, 'F');
+    
+    drawText('WanBite Investments Co. Ltd.', pageW / 2, 8, 18, 'bold', '#FFFFFF', 'center');
+    drawText('carskenya.co.ke', pageW / 2, 13, 10, 'normal', '#FFFFFF', 'center');
+    
+    y = 25;
+
+    // TITLE
+    doc.setTextColor(secondaryColor);
+    doc.setFontSize(24);
+    doc.setFont("helvetica", "bold");
+    doc.text("PORT CHARGES INVOICE", pageW / 2, y, null, null, "center");
+    y += 10;
+    
+    // Invoice/Date Box
+    doc.setDrawColor(primaryColor);
+    doc.setLineWidth(0.5);
+    doc.rect(margin, y, 188, 18);
+    
+    drawText('INVOICE NO:', margin + 3, y + 6, 10, 'bold', secondaryColor);
+    drawText(data.invoiceId, margin + 3, y + 13, 12, 'bold', primaryColor);
+    
+    drawText('ISSUE DATE:', pageW - margin - 70, y + 6, 10, 'bold', secondaryColor);
+    drawText(data.issueDate, pageW - margin - 70, y + 13, 10, 'bold', primaryColor);
+    
+    drawText('DUE DATE:', pageW - margin - 15, y + 6, 10, 'bold', secondaryColor, 'right');
+    drawText(data.dueDate || 'N/A', pageW - margin - 15, y + 13, 10, 'bold', primaryColor, 'right');
+    y += 23;
+
+    // Client Info
+    doc.setDrawColor(primaryColor);
+    doc.setLineWidth(0.2);
+    doc.rect(margin, y, 188, 15);
+    drawText('BILL TO:', margin + 3, y + 5, 10, 'bold', secondaryColor);
+    drawText(data.clientName, margin + 3, y + 11, 10, 'bold', 0);
+    drawText(`Phone: ${data.clientPhone}`, pageW - margin - 70, y + 8, 9, 'normal', 0);
+    if (data.clientEmail) {
+        drawText(`Email: ${data.clientEmail}`, pageW - margin - 70, y + 13, 9, 'normal', 0);
+    }
+    y += 20;
+
+    // Vehicle Details
+    doc.setFillColor(240, 245, 250);
+    doc.rect(margin, y, 188, 12, 'F');
+    doc.setDrawColor(primaryColor);
+    doc.rect(margin, y, 188, 12);
+    drawText('VEHICLE DETAILS', margin + 5, y + 8, 10, 'bold', primaryColor);
+    drawText(`${data.vehicleDetails.makeModel} (${data.vehicleDetails.year})`, margin + 50, y + 8, 10, 'normal', 0);
+    y += 15;
+    
+    doc.setFillColor(255);
+    doc.rect(margin, y, 188, 10, 'F');
+    doc.setDrawColor(200);
+    doc.rect(margin, y, 188, 10);
+    drawText('VIN:', margin + 5, y + 7, 9, 'bold', secondaryColor);
+    drawText(data.vehicleDetails.vin, margin + 25, y + 7, 9, 'normal', 0);
+    if (data.vehicleDetails.containerNumber) {
+        drawText('Container:', margin + 100, y + 7, 9, 'bold', secondaryColor);
+        drawText(data.vehicleDetails.containerNumber, margin + 125, y + 7, 9, 'normal', 0);
+    }
+    y += 15;
+
+    // =================================================================
+    // CHARGES TABLE
+    // =================================================================
+    doc.setFillColor(primaryColor);
+    doc.rect(margin, y, 188, 8, 'F');
+    doc.setTextColor(255);
+    drawText('DESCRIPTION', margin + 5, y + 5.5, 9, 'bold', 255);
+    drawText('AMOUNT', 130, y + 5.5, 9, 'bold', 255);
+    drawText('CURRENCY', 160, y + 5.5, 9, 'bold', 255);
+    drawText('USD EQUIV', 190, y + 5.5, 9, 'bold', 255, 'right');
+    y += 8;
+
+    let rowY = y;
+    data.chargeItems.forEach((item, index) => {
+        if (rowY > pageH - 50) {
+            doc.addPage();
+            rowY = 20;
+        }
+        
+        if (index % 2 === 0) {
+            doc.setFillColor(250, 250, 250);
+            doc.rect(margin, rowY, 188, 8, 'F');
+        }
+        
+        doc.setDrawColor(220);
+        doc.rect(margin, rowY, 188, 8);
+        doc.setTextColor(0);
+        doc.setFontSize(9);
+        
+        const description = item.description.length > 30 ? item.description.substring(0, 27) + '...' : item.description;
+        doc.text(description, margin + 5, rowY + 5.5);
+        doc.text(formatAmount(item.amount), 130, rowY + 5.5);
+        doc.text(item.currency, 160, rowY + 5.5);
+        doc.text(formatAmount(item.amountUSD), 190, rowY + 5.5, null, null, "right");
+        
+        rowY += 8;
+    });
+
+    y = rowY + 5;
+
+    // =================================================================
+    // TOTALS BOX
+    // =================================================================
+    const totalBoxX = pageW - margin - 80;
+    const totalBoxW = 80;
+    
+    // Exchange Rate
+    doc.setDrawColor(200);
+    doc.rect(totalBoxX, y, totalBoxW, lineHeight);
+    drawText('EXCHANGE RATE:', totalBoxX + 2, y + 3.5, 9, 'normal', 0);
+    drawText(`USD 1 = KES ${formatAmount(data.exchangeRate)}`, totalBoxX + totalBoxW - 2, y + 3.5, 9, 'bold', primaryColor, 'right');
+    y += lineHeight;
+    
+    // Subtotal USD
+    doc.rect(totalBoxX, y, totalBoxW, lineHeight);
+    drawText('SUBTOTAL (USD):', totalBoxX + 2, y + 3.5, 9, 'normal', 0);
+    drawText(formatAmount(data.totals.totalUSD), totalBoxX + totalBoxW - 2, y + 3.5, 9, 'bold', primaryColor, 'right');
+    y += lineHeight;
+    
+    // Subtotal KES
+    doc.rect(totalBoxX, y, totalBoxW, lineHeight);
+    drawText('SUBTOTAL (KES):', totalBoxX + 2, y + 3.5, 9, 'normal', 0);
+    drawText(formatAmount(data.totals.totalKSH), totalBoxX + totalBoxW - 2, y + 3.5, 9, 'bold', primaryColor, 'right');
+    y += lineHeight;
+    
+    // TOTAL in Invoice Currency
+    doc.setFillColor(secondaryColor);
+    doc.rect(totalBoxX, y, totalBoxW, lineHeight + 2, 'F');
+    doc.rect(totalBoxX, y, totalBoxW, lineHeight + 2);
+    doc.setTextColor(255);
+    drawText(`TOTAL (${data.invoiceCurrency}):`, totalBoxX + 2, y + 4.5, 10, 'bold', 255);
+    const totalCurrencySymbol = data.invoiceCurrency === 'USD' ? '$' : 'KSh ';
+    drawText(totalCurrencySymbol + formatAmount(data.totals.totalInvoiceCurrency), totalBoxX + totalBoxW - 2, y + 4.5, 12, 'bold', 255, 'right');
+    y += lineHeight + 7;
+
+    // =================================================================
+    // BANK DETAILS
+    // =================================================================
+    doc.setFillColor(255, 245, 230);
+    doc.rect(margin, y, 188, 22, 'F');
+    doc.setDrawColor(secondaryColor);
+    doc.setLineWidth(0.5);
+    doc.rect(margin, y, 188, 22);
+    
+    let bankY = y + 5;
+    drawText('PAYMENT TO:', margin + 5, bankY, 10, 'bold', primaryColor);
+    bankY += 4;
+    
+    const bank = data.bankDetails;
+    const branchText = bank.branch ? `(Branch: ${bank.branch})` : '';
+    doc.setFontSize(9);
+    doc.setTextColor(0);
+    doc.text(`${bank.name || 'N/A'} ${branchText}`, margin + 5, bankY);
+    bankY += 4;
+    doc.text(`Account Name: ${bank.accountName || 'N/A'}`, margin + 5, bankY);
+    bankY += 4;
+    doc.text(`Account Number: ${bank.accountNumber || 'N/A'}`, margin + 5, bankY);
+    bankY += 4;
+    if (bank.paybillNumber) {
+        doc.text(`Paybill Number: ${bank.paybillNumber}`, margin + 5, bankY);
+        bankY += 4;
+    }
+    doc.text(`SWIFT/BIC: ${bank.swiftCode || 'N/A'} | Currency: ${bank.currency || 'N/A'}`, margin + 5, bankY);
+    y += 26;
+
+    // =================================================================
+    // TERMS & CONDITIONS
+    // =================================================================
+    doc.setFillColor(240, 240, 240);
+    doc.rect(margin, y, 188, 25, 'F');
+    doc.setDrawColor(secondaryColor);
+    doc.rect(margin, y, 188, 25);
+    
+    let termsY = y + 5;
+    drawText('TERMS & CONDITIONS:', margin + 5, termsY, 10, 'bold', secondaryColor);
+    termsY += 4;
+    
+    doc.setFontSize(8);
+    doc.setTextColor(0);
+    data.termsConditions.forEach((term, index) => {
+        const wrappedTerm = doc.splitTextToSize(`• ${term}`, 175);
+        wrappedTerm.forEach(line => {
+            if (termsY > y + 22) {
+                // Add to next page if needed
+                doc.addPage();
+                termsY = 20;
+            }
+            doc.text(line, margin + 5, termsY);
+            termsY += 3.5;
+        });
+    });
+    
+    y = termsY + 5;
+
+    // =================================================================
+    // SIGNATURES
+    // =================================================================
+    if (y > pageH - 35) {
+        doc.addPage();
+        y = 10;
+    }
+    
+    // Buyer signature line
+    doc.line(margin, y, 90, y);
+    drawText('Accepted and Confirmed by Buyer', margin + 45, y + 4, 8, 'normal', 0, "center");
+    
+    // Seller signature with stamp
+    const sellerSigX = 110;
+    const stampY = y - 5;
+    addStampWithDate(sellerSigX + 40, stampY, data.issueDate);
+    
+    y += 15;
+
+    // =================================================================
+    // FOOTER
+    // =================================================================
+    doc.setFillColor(primaryColor);
+    doc.rect(0, pageH - 10, pageW, 10, 'F');
+    doc.setTextColor(255);
+    doc.setFontSize(9);
+    const footerText = `Location: Ngong Road, Kilimani, Nairobi. | Email: sales@carskenya.co.ke | Phone: 0713147136`;
+    doc.text(footerText, pageW / 2, pageH - 4, null, null, "center");
+
+    doc.save(`Port_Charges_${data.invoiceId}.pdf`);
+}
+
+// =================================================================
+//                 PORT CHARGES HISTORY FUNCTIONS
+// =================================================================
+
+/**
+ * Renders the port charges invoice history
+ */
+function renderPortChargesHistory() {
+    const formArea = document.getElementById('document-form-area');
+    formArea.innerHTML = `
+        <div class="p-6 border border-gray-300 rounded-xl bg-white shadow-lg animate-fade-in">
+            <h3 class="text-xl font-semibold mb-6 text-primary-blue">Port Charges Invoice History</h3>
+            <div id="port-charges-history-list">
+                ${createShimmerLoader(3)}
+            </div>
+        </div>
+    `;
+    fetchPortChargesInvoices();
+}
+
+/**
+ * Fetches and displays port charges invoices
+ */
+async function fetchPortChargesInvoices() {
+    const listElement = document.getElementById('port-charges-history-list');
+    if (!listElement) return;
+    
+    try {
+        const snapshot = await db.collection("port_charges_invoices").orderBy("createdAt", "desc").limit(20).get();
+        
+        if (snapshot.empty) {
+            listElement.innerHTML = `
+                <div class="text-center p-8 border border-dashed border-gray-300 rounded-lg">
+                    <svg class="w-12 h-12 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                    </svg>
+                    <p class="text-gray-500">No port charges invoices found.</p>
+                </div>
+            `;
+            return;
+        }
+        
+        let html = `<ul class="space-y-3 divide-y divide-gray-200">`;
+        
+        snapshot.forEach((doc, index) => {
+            const data = doc.data();
+            const invoiceDataJson = JSON.stringify({
+                ...data,
+                firestoreId: doc.id,
+                createdAt: data.createdAt ? data.createdAt.toDate().toISOString() : new Date().toISOString()
+            });
+
+            const isRevoked = data.revoked || false;
+            const animationDelay = index * 50;
+            
+            html += `<li class="p-3 bg-gray-50 flex flex-col sm:flex-row justify-between items-start sm:items-center animate-fade-in ${isRevoked ? 'bg-red-50 border-l-4 border-red-500' : ''}" 
+                         style="animation-delay: ${animationDelay}ms">
+                        <div>
+                            ${isRevoked ? `<span class="bg-red-500 text-white text-xs font-bold px-2 py-1 rounded mb-2 inline-block">REVOKED</span><br>` : ''}
+                            <strong class="text-primary-blue">${data.invoiceId}</strong><br>
+                            <span class="text-sm text-gray-700">Client: ${data.clientName} | Vehicle: ${data.vehicleDetails.makeModel}</span><br>
+                            <span class="text-xs text-gray-600">Total: ${data.invoiceCurrency} ${data.totals.totalInvoiceCurrency.toFixed(2)} | Items: ${data.chargeItems.length}</span>
+                        </div>
+                        <div class="mt-2 sm:mt-0 space-x-2">
+                            <button onclick='reDownloadPortChargesInvoice(${invoiceDataJson})' 
+                                    class="bg-primary-blue hover:bg-blue-600 text-white text-xs py-1 px-3 rounded-full transition duration-150 flex items-center gap-1">
+                                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                                </svg>
+                                PDF
+                            </button>
+                            ${!isRevoked ? `
+                                <button onclick='revokePortChargesInvoice(${invoiceDataJson})' 
+                                        class="bg-red-600 hover:bg-red-800 text-white text-xs py-1 px-3 rounded-full transition duration-150 flex items-center gap-1">
+                                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                                    </svg>
+                                    REVOKE
+                                </button>
+                            ` : `
+                                <button onclick='unrevokePortChargesInvoice(${invoiceDataJson})' 
+                                        class="bg-gray-600 hover:bg-gray-800 text-white text-xs py-1 px-3 rounded-full transition duration-150 flex items-center gap-1">
+                                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                                    </svg>
+                                    UNREVOKE
+                                </button>
+                            `}
+                        </div>
+                    </li>`;
+        });
+        
+        html += `</ul>`;
+        listElement.innerHTML = html;
+        
+    } catch (error) {
+        console.error("Error fetching port charges invoices:", error);
+        listElement.innerHTML = `
+            <div class="text-center p-4 bg-red-50 border border-red-200 rounded-lg">
+                <p class="text-red-600 font-semibold">Error loading port charges invoices</p>
+                <p class="text-xs text-gray-600 mt-1">${error.message}</p>
+            </div>
+        `;
+    }
+}
+
+/**
+ * Re-downloads port charges invoice PDF
+ */
+function reDownloadPortChargesInvoice(data) {
+    generatePortChargesPDF(data);
+}
+
+/**
+ * Revokes a port charges invoice
+ */
+async function revokePortChargesInvoice(data) {
+    if (!confirm(`Are you sure you want to REVOKE port charges invoice ${data.invoiceId}?\n\nThis will mark it as invalid.`)) {
+        return;
+    }
+    
+    const loadingOverlay = showLoadingOverlay("Revoking invoice...");
+    
+    try {
+        await db.collection("port_charges_invoices").doc(data.firestoreId).update({
+            revoked: true,
+            revokedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            revokedBy: currentUser.email
+        });
+        
+        hideLoadingOverlay();
+        showSuccessToast(`Port charges invoice ${data.invoiceId} has been revoked.`);
+        fetchPortChargesInvoices();
+    } catch (error) {
+        console.error("Error revoking port charges invoice:", error);
+        hideLoadingOverlay();
+        showErrorToast("Failed to revoke invoice: " + error.message);
+    }
+}
+
+/**
+ * Unrevokes a port charges invoice
+ */
+async function unrevokePortChargesInvoice(data) {
+    if (!confirm(`Are you sure you want to UNREVOKE port charges invoice ${data.invoiceId}?`)) {
+        return;
+    }
+    
+    const loadingOverlay = showLoadingOverlay("Unrevoking invoice...");
+    
+    try {
+        await db.collection("port_charges_invoices").doc(data.firestoreId).update({
+            revoked: false,
+            unrevokedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            unrevokedBy: currentUser.email
+        });
+        
+        hideLoadingOverlay();
+        showSuccessToast(`Port charges invoice ${data.invoiceId} has been unrevoked.`);
+        fetchPortChargesInvoices();
+    } catch (error) {
+        console.error("Error unrevoking port charges invoice:", error);
+        hideLoadingOverlay();
+        showErrorToast("Failed to unrevoke invoice: " + error.message);
+    }
+}
+
+// =================================================================
+//                 SEARCH FUNCTION FOR PORT CHARGES INVOICES
+// =================================================================
+
+/**
+ * Search port charges invoices
+ */
+async function searchPortChargesInvoices(searchTerm) {
+    try {
+        searchTerm = searchTerm.toLowerCase();
+        
+        const snapshot = await db.collection("port_charges_invoices").get();
+        const results = [];
+        
+        snapshot.forEach(doc => {
+            const data = doc.data();
+            
+            const matches = 
+                (data.clientName && data.clientName.toLowerCase().includes(searchTerm)) ||
+                (data.invoiceId && data.invoiceId.toLowerCase().includes(searchTerm)) ||
+                (data.clientPhone && data.clientPhone.includes(searchTerm)) ||
+                (data.vehicleDetails.makeModel && data.vehicleDetails.makeModel.toLowerCase().includes(searchTerm)) ||
+                (data.vehicleDetails.vin && data.vehicleDetails.vin.toLowerCase().includes(searchTerm));
+            
+            if (matches) {
+                results.push({ id: doc.id, ...data });
+            }
+        });
+        
+        return results;
+    } catch (error) {
+        console.error("Error searching port charges invoices:", error);
+        return [];
+    }
+}
 // =================================================================
 //                 GLOBAL FUNCTIONS FOR BACKDATING
 // =================================================================
