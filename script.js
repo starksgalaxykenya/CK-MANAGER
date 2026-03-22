@@ -346,7 +346,196 @@ function clearBackdate() {
     showSuccessToast('Backdate deactivated - using current date');
 }
 
-// Add this after the clearBackdate() function, before the Firebase initialization
+// Helper function to format backdate date
+function formatBackdateDate(date) {
+    if (!date) return '';
+    return date.toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit'
+    });
+}
+
+// Highlight all date fields when backdate is active
+function highlightDateFields(active) {
+    const dateFields = document.querySelectorAll('input[type="date"]');
+    dateFields.forEach(field => {
+        if (active) {
+            field.classList.add('backdate-active');
+            // Add backdate badge
+            const parent = field.parentElement;
+            if (parent && !parent.querySelector('.backdate-badge')) {
+                const badge = document.createElement('span');
+                badge.className = 'backdate-badge';
+                badge.innerHTML = 'BACKDATED';
+                parent.style.position = 'relative';
+                badge.style.position = 'absolute';
+                badge.style.right = '10px';
+                badge.style.top = '50%';
+                badge.style.transform = 'translateY(-50%)';
+                parent.appendChild(badge);
+            }
+        } else {
+            field.classList.remove('backdate-active');
+            // Remove backdate badge
+            const badge = field.parentElement?.querySelector('.backdate-badge');
+            if (badge) badge.remove();
+        }
+    });
+}
+
+// Override date functions for receipts and invoices
+function getCurrentDateForDocument() {
+    if (backdateMode && backdateDate) {
+        return backdateDate.toLocaleDateString('en-US');
+    }
+    return new Date().toLocaleDateString('en-US');
+}
+
+function getCurrentDateForStamp() {
+    if (backdateMode && backdateDate) {
+        return backdateDate.toLocaleDateString('en-US');
+    }
+    return new Date().toLocaleDateString('en-US');
+}
+
+// =================================================================
+//                 PDF DATE OPTION FUNCTIONS (MOVED BEFORE showDateConfirmationDialog)
+// =================================================================
+
+/**
+ * Generate invoice PDF with selected date option
+ */
+function generateInvoicePDFWithDateOption(data, dateOption) {
+    // Create a deep copy of the data to avoid modifying original
+    const pdfData = JSON.parse(JSON.stringify(data, (key, value) => {
+        if (value && typeof value === 'object' && value.toDate) {
+            return value.toDate().toISOString();
+        }
+        return value;
+    }));
+    
+    // Determine which date to use
+    let displayDate;
+    if (dateOption === 'current') {
+        displayDate = new Date().toLocaleDateString('en-US');
+    } else {
+        // Use creation date from issueDate or createdAt
+        displayDate = pdfData.issueDate;
+        if (!displayDate && pdfData.createdAt) {
+            displayDate = new Date(pdfData.createdAt).toLocaleDateString('en-US');
+        }
+        if (!displayDate) displayDate = new Date().toLocaleDateString('en-US');
+    }
+    
+    // Update the issue date
+    pdfData.issueDate = displayDate;
+    
+    // Call the original PDF generation function
+    generateInvoicePDF(pdfData);
+}
+
+/**
+ * Generate receipt PDF with selected date option
+ */
+function generateReceiptPDFWithDateOption(data, dateOption) {
+    // Create a deep copy of the data to avoid modifying original
+    const pdfData = JSON.parse(JSON.stringify(data, (key, value) => {
+        if (value && typeof value === 'object' && value.toDate) {
+            return value.toDate().toISOString();
+        }
+        return value;
+    }));
+    
+    // Determine which date to use
+    let displayDate;
+    if (dateOption === 'current') {
+        displayDate = new Date().toLocaleDateString('en-US');
+    } else {
+        // Use creation date from receiptDate or createdAt
+        displayDate = pdfData.receiptDate;
+        if (!displayDate && pdfData.createdAt) {
+            displayDate = new Date(pdfData.createdAt).toLocaleDateString('en-US');
+        }
+        if (!displayDate) displayDate = new Date().toLocaleDateString('en-US');
+    }
+    
+    // Update the receipt date
+    pdfData.receiptDate = displayDate;
+    
+    // Call the original PDF generation function
+    generateReceiptPDF(pdfData);
+}
+
+/**
+ * Generate agreement PDF with selected date option
+ */
+function generateAgreementPDFWithDateOption(data, dateOption) {
+    // Create a deep copy of the data to avoid modifying original
+    const pdfData = JSON.parse(JSON.stringify(data, (key, value) => {
+        if (value && typeof value === 'object' && value.toDate) {
+            return value.toDate().toISOString();
+        }
+        return value;
+    }));
+    
+    // Determine which date to use
+    let displayDate;
+    if (dateOption === 'current') {
+        displayDate = new Date().toLocaleDateString('en-US');
+    } else {
+        // Use creation date from agreementDate or createdAt
+        displayDate = pdfData.agreementDate;
+        if (!displayDate && pdfData.createdAt) {
+            displayDate = new Date(pdfData.createdAt).toLocaleDateString('en-US');
+        }
+        if (!displayDate) displayDate = new Date().toLocaleDateString('en-US');
+    }
+    
+    // Update the agreement date
+    pdfData.agreementDate = displayDate;
+    
+    // Call the original PDF generation function
+    generateAgreementPDF(pdfData);
+}
+
+/**
+ * Generate port charges PDF with selected date option
+ */
+function generatePortChargesPDFWithDateOption(data, dateOption) {
+    // Create a deep copy of the data to avoid modifying original
+    const pdfData = JSON.parse(JSON.stringify(data, (key, value) => {
+        if (value && typeof value === 'object' && value.toDate) {
+            return value.toDate().toISOString();
+        }
+        return value;
+    }));
+    
+    // Determine which date to use
+    let displayDate;
+    if (dateOption === 'current') {
+        displayDate = new Date().toLocaleDateString('en-US');
+    } else {
+        // Use creation date from issueDate or createdAt
+        displayDate = pdfData.issueDate;
+        if (!displayDate && pdfData.createdAt) {
+            displayDate = new Date(pdfData.createdAt).toLocaleDateString('en-US');
+        }
+        if (!displayDate) displayDate = new Date().toLocaleDateString('en-US');
+    }
+    
+    // Update the issue date
+    pdfData.issueDate = displayDate;
+    
+    // Call the original PDF generation function
+    generatePortChargesPDF(pdfData);
+}
+
+// =================================================================
+//                 DATE CONFIRMATION DIALOG
+// =================================================================
 
 /**
  * Shows a confirmation dialog to choose between current date or document date
@@ -489,61 +678,6 @@ function showDateConfirmationDialog(docData, docType) {
             generatePortChargesPDFWithDateOption(dataForJson, selectedOption);
         }
     };
-}
-
-// Helper function to format backdate date
-function formatBackdateDate(date) {
-    if (!date) return '';
-    return date.toLocaleDateString('en-US', {
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit'
-    });
-}
-
-// Highlight all date fields when backdate is active
-function highlightDateFields(active) {
-    const dateFields = document.querySelectorAll('input[type="date"]');
-    dateFields.forEach(field => {
-        if (active) {
-            field.classList.add('backdate-active');
-            // Add backdate badge
-            const parent = field.parentElement;
-            if (parent && !parent.querySelector('.backdate-badge')) {
-                const badge = document.createElement('span');
-                badge.className = 'backdate-badge';
-                badge.innerHTML = 'BACKDATED';
-                parent.style.position = 'relative';
-                badge.style.position = 'absolute';
-                badge.style.right = '10px';
-                badge.style.top = '50%';
-                badge.style.transform = 'translateY(-50%)';
-                parent.appendChild(badge);
-            }
-        } else {
-            field.classList.remove('backdate-active');
-            // Remove backdate badge
-            const badge = field.parentElement?.querySelector('.backdate-badge');
-            if (badge) badge.remove();
-        }
-    });
-}
-
-// Override date functions for receipts and invoices
-function getCurrentDateForDocument() {
-    if (backdateMode && backdateDate) {
-        return backdateDate.toLocaleDateString('en-US');
-    }
-    return new Date().toLocaleDateString('en-US');
-}
-
-function getCurrentDateForStamp() {
-    if (backdateMode && backdateDate) {
-        return backdateDate.toLocaleDateString('en-US');
-    }
-    return new Date().toLocaleDateString('en-US');
 }
 
 // Initialize when DOM is ready
@@ -805,9 +939,9 @@ async function performSearch(searchTerm, docTypeFilter) {
         }
 
         if (docTypeFilter === 'all' || docTypeFilter === 'portcharges') {
-    const portResults = await searchPortChargesInvoices(searchTerm);
-    allResults = allResults.concat(portResults.map(p => ({...p, type: 'portcharges'})));
-}
+            const portResults = await searchPortChargesInvoices(searchTerm);
+            allResults = allResults.concat(portResults.map(p => ({...p, type: 'portcharges'})));
+        }
         
         // Sort by date (newest first)
         allResults.sort((a, b) => {
@@ -905,8 +1039,8 @@ function displaySearchResults(results, searchTerm) {
         } else if (doc.type === 'agreement') {
             resultHtml = renderAgreementSearchResult(doc, docJson);
         }else if (doc.type === 'portcharges') {
-    resultHtml = renderPortChargesSearchResult(doc, docJson);
-}
+            resultHtml = renderPortChargesSearchResult(doc, docJson);
+        }
         
         
         // Wrap each result with animation
@@ -2027,7 +2161,7 @@ async function saveReceipt() {
 
     const receiptId = generateReceiptId(receiptType, receivedFrom);
     // Use backdated date if active
-const receiptDate = getCurrentDateForDocument();
+    const receiptDate = getCurrentDateForDocument();
 
     // Calculate amounts in both currencies - FIXED: Store both currencies properly
     let amountReceivedUSD = amountReceived;
@@ -2409,7 +2543,8 @@ async function viewReceiptPaymentDetails(receiptDocId, receiptNumber, clientName
             </tr>`;
         });
         
-        paymentDetailsHtml += `</tbody></table>`;
+        paymentDetailsHtml += `</tbody>
+            </table>`;
         
         // Add summary
         paymentDetailsHtml += `<div class="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
@@ -3029,7 +3164,7 @@ async function saveInvoice(onlySave) {
         clientName,
         clientPhone,
         // Use backdated date if active
-issueDate: getCurrentDateForDocument(),
+        issueDate: getCurrentDateForDocument(),
         dueDate: dueDate || null, // Make due date optional
         exchangeRate,
         depositType,
@@ -4210,8 +4345,8 @@ function generateReceiptPDF(data) {
     const sigX = pageW - margin - 50;
     doc.line(sigX, y + 15, pageW - margin, y + 15);
     
-   // Add stamp with date OVERLAY - UPDATED WITH RED TEXT AND SIZE 14
-const stampDate = data.receiptDate || getCurrentDateForDocument();;
+    // Add stamp with date OVERLAY - UPDATED WITH RED TEXT AND SIZE 14
+    const stampDate = data.receiptDate || getCurrentDateForDocument();
     try {
         // Calculate position for 500x500 image to fit properly
         const stampWidth = 30; // Reduced width for better scaling
@@ -4718,67 +4853,67 @@ function generateInvoicePDF(data) {
     drawText('**NOTE: Buyer Should bear the cost of Bank Charge when remitting T/T', margin, y + (data.bankDetails?.length > 1 ? 55 : 40) - 5, 9, 'bold', secondaryColor);
     y += (data.bankDetails?.length > 1 ? 60 : 45);
 
-   // =================================================================
-// CONFIRMATION SIGNATURES WITH STAMP - UPDATED FOR BETTER LAYOUT
-// =================================================================
-doc.setDrawColor(primaryColor);
+    // =================================================================
+    // CONFIRMATION SIGNATURES WITH STAMP - UPDATED FOR BETTER LAYOUT
+    // =================================================================
+    doc.setDrawColor(primaryColor);
 
-// Buyer Signature Section - UPDATED WITH TEXT WRAPPING
-// Split buyer name into multiple lines if needed
-const maxBuyerWidth = 70; // Width of the signature box
-const buyerNameLines = doc.splitTextToSize(data.buyerNameConfirmation, maxBuyerWidth);
-let buyerNameY = y + 5;
+    // Buyer Signature Section - UPDATED WITH TEXT WRAPPING
+    // Split buyer name into multiple lines if needed
+    const maxBuyerWidth = 70; // Width of the signature box
+    const buyerNameLines = doc.splitTextToSize(data.buyerNameConfirmation, maxBuyerWidth);
+    let buyerNameY = y + 5;
 
-// Draw each line of the buyer's name
-buyerNameLines.forEach((line, index) => {
-    doc.setFontSize(10);
-    doc.setTextColor(primaryColor);
-    doc.setFont("helvetica", "bold");
-    doc.text(line, margin + 35, buyerNameY, null, null, "center");
-    buyerNameY += 4;
-});
+    // Draw each line of the buyer's name
+    buyerNameLines.forEach((line, index) => {
+        doc.setFontSize(10);
+        doc.setTextColor(primaryColor);
+        doc.setFont("helvetica", "bold");
+        doc.text(line, margin + 35, buyerNameY, null, null, "center");
+        buyerNameY += 4;
+    });
 
-// Line for signature
-doc.line(margin, buyerNameY, 90, buyerNameY);
-drawText('Accepted and Confirmed by Buyer', margin + 35, buyerNameY + 4, 8, 'normal', 0, "center");
+    // Line for signature
+    doc.line(margin, buyerNameY, 90, buyerNameY);
+    drawText('Accepted and Confirmed by Buyer', margin + 35, buyerNameY + 4, 8, 'normal', 0, "center");
 
-// Adjust Y position based on number of name lines
-y = buyerNameY + 10;
+    // Adjust Y position based on number of name lines
+    y = buyerNameY + 10;
 
-// Seller Signature with stamp - POSITION ADJUSTED TO BE JUST BELOW BANKING DETAILS
-const sellerSigX = 110;
+    // Seller Signature with stamp - POSITION ADJUSTED TO BE JUST BELOW BANKING DETAILS
+    const sellerSigX = 110;
 
-// Use document creation date (issueDate) instead of current date
-let stampDate = data.issueDate; // This is already stored when invoice was created
+    // Use document creation date (issueDate) instead of current date
+    let stampDate = data.issueDate; // This is already stored when invoice was created
 
-// If backdate is active, ensure we use the backdated date
-if (backdateMode && backdateDate) {
-    stampDate = backdateDate.toLocaleDateString('en-US');
-}
-
-// If issueDate is in a different format, convert it
-if (stampDate) {
-    try {
-        // Try to format the date properly
-        const dateObj = new Date(stampDate);
-        if (!isNaN(dateObj.getTime())) {
-            stampDate = dateObj.toLocaleDateString('en-US');
-        }
-    } catch (e) {
-        // Fallback to original date
-        console.log("Using original issue date format");
+    // If backdate is active, ensure we use the backdated date
+    if (backdateMode && backdateDate) {
+        stampDate = backdateDate.toLocaleDateString('en-US');
     }
-} else {
-    // Fallback to today's date
-    stampDate = new Date().toLocaleDateString('en-US');
-}
 
-// Calculate stamp position - position it just below banking details with proper spacing
-// Banking details section ends at 'y', so we need to add a small gap
-const stampY = y + -15; // Reduced from y + 5 to y + 8 for better positioning
-addStampWithDate(sellerSigX + 40, stampY, stampDate);
+    // If issueDate is in a different format, convert it
+    if (stampDate) {
+        try {
+            // Try to format the date properly
+            const dateObj = new Date(stampDate);
+            if (!isNaN(dateObj.getTime())) {
+                stampDate = dateObj.toLocaleDateString('en-US');
+            }
+        } catch (e) {
+            // Fallback to original date
+            console.log("Using original issue date format");
+        }
+    } else {
+        // Fallback to today's date
+        stampDate = new Date().toLocaleDateString('en-US');
+    }
 
-y += 32; // Adjusted from y += 30 to maintain proper footer spacing
+    // Calculate stamp position - position it just below banking details with proper spacing
+    // Banking details section ends at 'y', so we need to add a small gap
+    const stampY = y + -15; // Reduced from y + 5 to y + 8 for better positioning
+    addStampWithDate(sellerSigX + 40, stampY, stampDate);
+
+    y += 32; // Adjusted from y += 30 to maintain proper footer spacing
 
     // =================================================================
     // FOOTER
@@ -5035,12 +5170,12 @@ function generateAgreementPDF(data) {
     const sellerX = pageW - margin - 70;
     
     // Use agreement creation date instead of current date
-let stampDate = data.agreementDate; // This should be stored when agreement was created
+    let stampDate = data.agreementDate; // This should be stored when agreement was created
 
-// If backdate is active, use backdated date
-if (backdateMode && backdateDate) {
-    stampDate = backdateDate.toLocaleDateString('en-US');
-}
+    // If backdate is active, use backdated date
+    if (backdateMode && backdateDate) {
+        stampDate = backdateDate.toLocaleDateString('en-US');
+    }
 
     // If agreementDate is in YYYY-MM-DD format, convert it
     if (stampDate && stampDate.includes('-')) {
@@ -5054,14 +5189,14 @@ if (backdateMode && backdateDate) {
     }
 
     // Adjust stamp position to be just below payment terms section
-const stampYPosition = sigY; // Position at same Y as buyer signature line
-addStampWithDate(sellerX + 35, stampYPosition, stampDate);
+    const stampYPosition = sigY; // Position at same Y as buyer signature line
+    addStampWithDate(sellerX + 35, stampYPosition, stampDate);
 
-doc.setFontSize(8);
-doc.setTextColor(0);
-doc.text(`Witness: ${data.signatures.sellerWitness}`, sellerX + 35, sigY + 15, null, null, "center");
+    doc.setFontSize(8);
+    doc.setTextColor(0);
+    doc.text(`Witness: ${data.signatures.sellerWitness}`, sellerX + 35, sigY + 15, null, null, "center");
 
-y += 28; // Adjusted for better spacing
+    y += 28; // Adjusted for better spacing
     
     // --- Global Footer ---
     doc.setFillColor(primaryColor);
@@ -6999,242 +7134,6 @@ function generatePortChargesPDF(data) {
         }
     };
 
-
-  /**
- * Generate invoice PDF with selected date option
- */
-function generateInvoicePDFWithDateOption(data, dateOption) {
-    // Create a deep copy of the data to avoid modifying original
-    const pdfData = JSON.parse(JSON.stringify(data, (key, value) => {
-        if (value && typeof value === 'object' && value.toDate) {
-            return value.toDate().toISOString();
-        }
-        return value;
-    }));
-    
-    // Determine which date to use
-    let displayDate;
-    if (dateOption === 'current') {
-        displayDate = new Date().toLocaleDateString('en-US');
-    } else {
-        // Use creation date from issueDate or createdAt
-        displayDate = pdfData.issueDate;
-        if (!displayDate && pdfData.createdAt) {
-            displayDate = new Date(pdfData.createdAt).toLocaleDateString('en-US');
-        }
-        if (!displayDate) displayDate = new Date().toLocaleDateString('en-US');
-    }
-    
-    // Update the issue date
-    pdfData.issueDate = displayDate;
-    
-    // Call the original PDF generation function
-    generateInvoicePDF(pdfData);
-}
-
-/**
- * Generate receipt PDF with selected date option
- */
-function generateReceiptPDFWithDateOption(data, dateOption) {
-    // Create a deep copy of the data to avoid modifying original
-    const pdfData = JSON.parse(JSON.stringify(data, (key, value) => {
-        if (value && typeof value === 'object' && value.toDate) {
-            return value.toDate().toISOString();
-        }
-        return value;
-    }));
-    
-    // Determine which date to use
-    let displayDate;
-    if (dateOption === 'current') {
-        displayDate = new Date().toLocaleDateString('en-US');
-    } else {
-        // Use creation date from receiptDate or createdAt
-        displayDate = pdfData.receiptDate;
-        if (!displayDate && pdfData.createdAt) {
-            displayDate = new Date(pdfData.createdAt).toLocaleDateString('en-US');
-        }
-        if (!displayDate) displayDate = new Date().toLocaleDateString('en-US');
-    }
-    
-    // Update the receipt date
-    pdfData.receiptDate = displayDate;
-    
-    // Call the original PDF generation function
-    generateReceiptPDF(pdfData);
-}
-
-/**
- * Generate agreement PDF with selected date option
- */
-function generateAgreementPDFWithDateOption(data, dateOption) {
-    // Create a deep copy of the data to avoid modifying original
-    const pdfData = JSON.parse(JSON.stringify(data, (key, value) => {
-        if (value && typeof value === 'object' && value.toDate) {
-            return value.toDate().toISOString();
-        }
-        return value;
-    }));
-    
-    // Determine which date to use
-    let displayDate;
-    if (dateOption === 'current') {
-        displayDate = new Date().toLocaleDateString('en-US');
-    } else {
-        // Use creation date from agreementDate or createdAt
-        displayDate = pdfData.agreementDate;
-        if (!displayDate && pdfData.createdAt) {
-            displayDate = new Date(pdfData.createdAt).toLocaleDateString('en-US');
-        }
-        if (!displayDate) displayDate = new Date().toLocaleDateString('en-US');
-    }
-    
-    // Update the agreement date
-    pdfData.agreementDate = displayDate;
-    
-    // Call the original PDF generation function
-    generateAgreementPDF(pdfData);
-}
-
-/**
- * Generate port charges PDF with selected date option
- */
-function generatePortChargesPDFWithDateOption(data, dateOption) {
-    // Create a deep copy of the data to avoid modifying original
-    const pdfData = JSON.parse(JSON.stringify(data, (key, value) => {
-        if (value && typeof value === 'object' && value.toDate) {
-            return value.toDate().toISOString();
-        }
-        return value;
-    }));
-    
-    // Determine which date to use
-    let displayDate;
-    if (dateOption === 'current') {
-        displayDate = new Date().toLocaleDateString('en-US');
-    } else {
-        // Use creation date from issueDate or createdAt
-        displayDate = pdfData.issueDate;
-        if (!displayDate && pdfData.createdAt) {
-            displayDate = new Date(pdfData.createdAt).toLocaleDateString('en-US');
-        }
-        if (!displayDate) displayDate = new Date().toLocaleDateString('en-US');
-    }
-    
-    // Update the issue date
-    pdfData.issueDate = displayDate;
-    
-    // Call the original PDF generation function
-    generatePortChargesPDF(pdfData);
-}
-/**
- * Generate receipt PDF with selected date option
- */
-function generateReceiptPDFWithDateOption(data, dateOption) {
-    // Store original dates
-    const originalReceiptDate = data.receiptDate;
-    const originalCreatedAt = data.createdAt;
-    
-    // Determine which date to use
-    let displayDate;
-    if (dateOption === 'current') {
-        displayDate = new Date().toLocaleDateString('en-US');
-    } else {
-        // Use creation date
-        displayDate = originalReceiptDate;
-        if (!displayDate && originalCreatedAt) {
-            try {
-                if (typeof originalCreatedAt === 'string') {
-                    displayDate = new Date(originalCreatedAt).toLocaleDateString('en-US');
-                } else if (originalCreatedAt && originalCreatedAt.toDate) {
-                    displayDate = originalCreatedAt.toDate().toLocaleDateString('en-US');
-                }
-            } catch (e) {
-                displayDate = originalReceiptDate || new Date().toLocaleDateString('en-US');
-            }
-        }
-        if (!displayDate) displayDate = new Date().toLocaleDateString('en-US');
-    }
-    
-    // Create a copy of data with the selected date
-    const pdfData = { ...data, receiptDate: displayDate };
-    
-    // Call the original PDF generation function
-    generateReceiptPDF(pdfData);
-}
-
-/**
- * Generate agreement PDF with selected date option
- */
-function generateAgreementPDFWithDateOption(data, dateOption) {
-    // Store original dates
-    const originalAgreementDate = data.agreementDate;
-    const originalCreatedAt = data.createdAt;
-    
-    // Determine which date to use
-    let displayDate;
-    if (dateOption === 'current') {
-        displayDate = new Date().toLocaleDateString('en-US');
-    } else {
-        // Use creation date
-        displayDate = originalAgreementDate;
-        if (!displayDate && originalCreatedAt) {
-            try {
-                if (typeof originalCreatedAt === 'string') {
-                    displayDate = new Date(originalCreatedAt).toLocaleDateString('en-US');
-                } else if (originalCreatedAt && originalCreatedAt.toDate) {
-                    displayDate = originalCreatedAt.toDate().toLocaleDateString('en-US');
-                }
-            } catch (e) {
-                displayDate = originalAgreementDate || new Date().toLocaleDateString('en-US');
-            }
-        }
-        if (!displayDate) displayDate = new Date().toLocaleDateString('en-US');
-    }
-    
-    // Create a copy of data with the selected date
-    const pdfData = { ...data, agreementDate: displayDate };
-    
-    // Call the original PDF generation function
-    generateAgreementPDF(pdfData);
-}
-
-/**
- * Generate port charges PDF with selected date option
- */
-function generatePortChargesPDFWithDateOption(data, dateOption) {
-    // Store original dates
-    const originalIssueDate = data.issueDate;
-    const originalCreatedAt = data.createdAt;
-    
-    // Determine which date to use
-    let displayDate;
-    if (dateOption === 'current') {
-        displayDate = new Date().toLocaleDateString('en-US');
-    } else {
-        // Use creation date
-        displayDate = originalIssueDate;
-        if (!displayDate && originalCreatedAt) {
-            try {
-                if (typeof originalCreatedAt === 'string') {
-                    displayDate = new Date(originalCreatedAt).toLocaleDateString('en-US');
-                } else if (originalCreatedAt && originalCreatedAt.toDate) {
-                    displayDate = originalCreatedAt.toDate().toLocaleDateString('en-US');
-                }
-            } catch (e) {
-                displayDate = originalIssueDate || new Date().toLocaleDateString('en-US');
-            }
-        }
-        if (!displayDate) displayDate = new Date().toLocaleDateString('en-US');
-    }
-    
-    // Create a copy of data with the selected date
-    const pdfData = { ...data, issueDate: displayDate };
-    
-    // Call the original PDF generation function
-    generatePortChargesPDF(pdfData);
-}
-
     // =================================================================
     // HEADER
     // =================================================================
@@ -7668,12 +7567,58 @@ async function searchPortChargesInvoices(searchTerm) {
         return [];
     }
 }
+
 // =================================================================
-//                 GLOBAL FUNCTIONS FOR BACKDATING
+//                 MAKE FUNCTIONS GLOBALLY AVAILABLE
 // =================================================================
 
-// Global function to toggle backdate panel
+// Make date-related functions globally available for inline onclick handlers
+window.generateInvoicePDFWithDateOption = generateInvoicePDFWithDateOption;
+window.generateReceiptPDFWithDateOption = generateReceiptPDFWithDateOption;
+window.generateAgreementPDFWithDateOption = generateAgreementPDFWithDateOption;
+window.generatePortChargesPDFWithDateOption = generatePortChargesPDFWithDateOption;
+
+// Make backdate functions globally available
 window.toggleBackdatePanel = toggleBackdatePanel;
 window.hideBackdatePanel = hideBackdatePanel;
 window.applyBackdate = applyBackdate;
 window.clearBackdate = clearBackdate;
+
+// Make other critical functions globally available
+window.searchDocuments = searchDocuments;
+window.clearSearch = clearSearch;
+window.renderInvoiceForm = renderInvoiceForm;
+window.renderInvoiceHistory = renderInvoiceHistory;
+window.renderReceiptForm = renderReceiptForm;
+window.renderAgreementForm = renderAgreementForm;
+window.renderPortChargesInvoiceForm = renderPortChargesInvoiceForm;
+window.renderPortChargesHistory = renderPortChargesHistory;
+window.renderBankManagement = renderBankManagement;
+window.handleDocumentGenerator = handleDocumentGenerator;
+window.handleFleetManagement = handleFleetManagement;
+window.renderDashboard = renderDashboard;
+window.handleLogout = handleLogout;
+window.reDownloadReceipt = reDownloadReceipt;
+window.reDownloadInvoice = reDownloadInvoice;
+window.reDownloadAgreement = reDownloadAgreement;
+window.reDownloadPortChargesInvoice = reDownloadPortChargesInvoice;
+window.addPaymentToReceipt = addPaymentToReceipt;
+window.viewReceiptBalances = viewReceiptBalances;
+window.createAgreementFromReceipt = createAgreementFromReceipt;
+window.revokeReceipt = revokeReceipt;
+window.markInvoiceDepositPaid = markInvoiceDepositPaid;
+window.createReceiptFromInvoice = createReceiptFromInvoice;
+window.createAdditionalInvoice = createAdditionalInvoice;
+window.revokeInvoice = revokeInvoice;
+window.unrevokeInvoice = unrevokeInvoice;
+window.revokePortChargesInvoice = revokePortChargesInvoice;
+window.unrevokePortChargesInvoice = unrevokePortChargesInvoice;
+window.toggleAuctionFields = toggleAuctionFields;
+window.toggleDepositInput = toggleDepositInput;
+window.autoFillBuyerConfirmation = autoFillBuyerConfirmation;
+window.fetchInvoiceDetails = fetchInvoiceDetails;
+window.updateAmountInWords = updateAmountInWords;
+window.updatePortChargesCalculation = updatePortChargesCalculation;
+window.addPortChargeLine = addPortChargeLine;
+window.removePortChargeLine = removePortChargeLine;
+window.savePortChargesInvoice = savePortChargesInvoice;
