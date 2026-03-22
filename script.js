@@ -352,9 +352,50 @@ function clearBackdate() {
  * Shows a confirmation dialog to choose between current date or document date
  * @param {Object} docData - The document data (invoice, receipt, agreement, etc.)
  * @param {string} docType - Type of document ('invoice', 'receipt', 'agreement', 'portcharges')
- * @param {Function} generateCallback - Callback function to generate PDF with selected date
  */
-function showDateConfirmationDialog(docData, docType, generateCallback) {
+function showDateConfirmationDialog(docData, docType) {
+    // Create a clean copy of the data without circular references
+    const cleanData = {};
+    
+    // Copy only the properties we need for the PDF
+    const requiredProps = ['firestoreId', 'receiptId', 'invoiceId', 'receiptDate', 'issueDate', 
+                           'agreementDate', 'clientName', 'receivedFrom', 'createdAt'];
+    
+    for (let prop of requiredProps) {
+        if (docData[prop] !== undefined) {
+            if (prop === 'createdAt' && docData[prop] && docData[prop].toDate) {
+                cleanData[prop] = docData[prop].toDate().toISOString();
+            } else {
+                cleanData[prop] = docData[prop];
+            }
+        }
+    }
+    
+    // Add the full data for PDF generation (but we'll pass it differently)
+    const dataForJson = JSON.parse(JSON.stringify({
+        ...docData,
+        createdAt: docData.createdAt && docData.createdAt.toDate ? 
+                   docData.createdAt.toDate().toISOString() : docData.createdAt
+    }, (key, value) => {
+        // Skip functions and circular references
+        if (typeof value === 'function') return undefined;
+        if (value && typeof value === 'object' && value.toDate) return value.toDate().toISOString();
+        return value;
+    }));
+    
+    // Get the display date for the document
+    let documentDate = docData.issueDate || docData.receiptDate || docData.agreementDate;
+    if (!documentDate && docData.createdAt) {
+        if (docData.createdAt.toDate) {
+            documentDate = docData.createdAt.toDate().toLocaleDateString('en-US');
+        } else if (typeof docData.createdAt === 'string') {
+            documentDate = new Date(docData.createdAt).toLocaleDateString('en-US');
+        }
+    }
+    if (!documentDate) documentDate = 'N/A';
+    
+    const currentDate = new Date().toLocaleDateString('en-US');
+    
     // Create modal dialog
     const modalHtml = `
         <div id="date-confirmation-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-[10001]">
@@ -363,22 +404,22 @@ function showDateConfirmationDialog(docData, docType, generateCallback) {
                 <p class="text-sm text-gray-600 mb-4">Choose which date to use for the stamp and issue date:</p>
                 
                 <div class="space-y-3 mb-6">
-                    <button onclick="window._selectedDateOption = 'creation'" 
-                            class="w-full text-left p-3 border rounded-lg hover:bg-blue-50 transition duration-150 flex items-center justify-between">
+                    <button data-date-option="creation" 
+                            class="date-option-btn w-full text-left p-3 border rounded-lg hover:bg-blue-50 transition duration-150 flex items-center justify-between">
                         <div>
                             <span class="font-bold text-primary-blue">📅 Document Creation Date</span>
-                            <p class="text-xs text-gray-500 mt-1">${docData.issueDate || docData.receiptDate || docData.agreementDate || 'N/A'}</p>
+                            <p class="text-xs text-gray-500 mt-1">${documentDate}</p>
                         </div>
-                        <span class="text-green-500 hidden" id="creation-check">✓</span>
+                        <span class="date-check text-green-500 hidden">✓</span>
                     </button>
                     
-                    <button onclick="window._selectedDateOption = 'current'" 
-                            class="w-full text-left p-3 border rounded-lg hover:bg-blue-50 transition duration-150 flex items-center justify-between">
+                    <button data-date-option="current" 
+                            class="date-option-btn w-full text-left p-3 border rounded-lg hover:bg-blue-50 transition duration-150 flex items-center justify-between">
                         <div>
                             <span class="font-bold text-primary-blue">🕒 Current Date</span>
-                            <p class="text-xs text-gray-500 mt-1">${new Date().toLocaleDateString('en-US')}</p>
+                            <p class="text-xs text-gray-500 mt-1">${currentDate}</p>
                         </div>
-                        <span class="text-green-500 hidden" id="current-check">✓</span>
+                        <span class="date-check text-green-500 hidden">✓</span>
                     </button>
                 </div>
                 
@@ -387,9 +428,9 @@ function showDateConfirmationDialog(docData, docType, generateCallback) {
                             class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-md transition duration-150">
                         Cancel
                     </button>
-                    <button onclick="window._confirmDateSelection('${docType}', ${JSON.stringify(docData).replace(/\\/g, '\\\\').replace(/"/g, '&quot;')})" 
-                            id="confirm-date-btn"
-                            class="bg-primary-blue hover:bg-blue-900 text-white font-bold py-2 px-4 rounded-md transition duration-150">
+                    <button id="confirm-date-btn"
+                            class="bg-primary-blue hover:bg-blue-900 text-white font-bold py-2 px-4 rounded-md transition duration-150 opacity-50" 
+                            disabled>
                         Generate PDF
                     </button>
                 </div>
@@ -403,68 +444,50 @@ function showDateConfirmationDialog(docData, docType, generateCallback) {
     
     document.body.insertAdjacentHTML('beforeend', modalHtml);
     
-    // Add click handlers for selection
-    const creationBtn = document.querySelector('button[onclick*="creation"]');
-    const currentBtn = document.querySelector('button[onclick*="current"]');
-    const confirmBtn = document.getElementById('confirm-date-btn');
-    const creationCheck = document.getElementById('creation-check');
-    const currentCheck = document.getElementById('current-check');
-    
     let selectedOption = null;
+    const confirmBtn = document.getElementById('confirm-date-btn');
     
-    const updateSelection = (option) => {
-        selectedOption = option;
-        creationCheck.classList.add('hidden');
-        currentCheck.classList.add('hidden');
-        
-        if (option === 'creation') {
-            creationCheck.classList.remove('hidden');
-        } else if (option === 'current') {
-            currentCheck.classList.remove('hidden');
-        }
-        
-        confirmBtn.disabled = false;
-        confirmBtn.style.opacity = '1';
-    };
+    // Add click handlers for date options
+    document.querySelectorAll('.date-option-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            // Remove check from all buttons
+            document.querySelectorAll('.date-check').forEach(check => {
+                check.classList.add('hidden');
+            });
+            
+            // Add check to selected button
+            const checkSpan = this.querySelector('.date-check');
+            if (checkSpan) checkSpan.classList.remove('hidden');
+            
+            // Store selected option
+            selectedOption = this.getAttribute('data-date-option');
+            
+            // Enable confirm button
+            confirmBtn.disabled = false;
+            confirmBtn.style.opacity = '1';
+        });
+    });
     
-    const creationHandler = () => {
-        updateSelection('creation');
-        window._selectedDateOption = 'creation';
-    };
-    
-    const currentHandler = () => {
-        updateSelection('current');
-        window._selectedDateOption = 'current';
-    };
-    
-    creationBtn.onclick = creationHandler;
-    currentBtn.onclick = currentHandler;
-    
-    confirmBtn.disabled = true;
-    confirmBtn.style.opacity = '0.5';
-    
-    // Store the callback for when confirmation is done
-    window._confirmDateSelection = function(docType, docDataStr) {
-        if (!window._selectedDateOption) {
+    // Handle confirm button click
+    confirmBtn.onclick = function() {
+        if (!selectedOption) {
             showErrorToast("Please select a date option");
             return;
         }
         
-        const docData = JSON.parse(docDataStr);
+        // Close modal
         document.getElementById('date-confirmation-modal').remove();
         
-        // Call the appropriate PDF generation function with the selected option
+        // Generate PDF with selected option
         if (docType === 'invoice') {
-            generateInvoicePDFWithDateOption(docData, window._selectedDateOption);
+            generateInvoicePDFWithDateOption(dataForJson, selectedOption);
         } else if (docType === 'receipt') {
-            generateReceiptPDFWithDateOption(docData, window._selectedDateOption);
+            generateReceiptPDFWithDateOption(dataForJson, selectedOption);
         } else if (docType === 'agreement') {
-            generateAgreementPDFWithDateOption(docData, window._selectedDateOption);
+            generateAgreementPDFWithDateOption(dataForJson, selectedOption);
         } else if (docType === 'portcharges') {
-            generatePortChargesPDFWithDateOption(docData, window._selectedDateOption);
+            generatePortChargesPDFWithDateOption(dataForJson, selectedOption);
         }
-        
-        window._selectedDateOption = null;
     };
 }
 
@@ -5254,9 +5277,52 @@ async function reDownloadReceipt(data) {
     hideLoadingOverlay();
     
     // Show date confirmation dialog
-    showDateConfirmationDialog(data, 'receipt', null);
+    showDateConfirmationDialog(data, 'receipt');
 }
 
+function reDownloadInvoice(data) {
+    // Show date confirmation dialog
+    showDateConfirmationDialog(data, 'invoice');
+}
+
+async function reDownloadAgreement(data) {
+    // 1. Check if bankDetails are already present
+    if (data.bankDetails && data.bankDetails.name) {
+        showDateConfirmationDialog(data, 'agreement');
+        return;
+    }
+
+    let bankDetails = null;
+    const bankIdValue = data.salesTerms?.bankId;
+
+    if (bankIdValue) {
+        // Check if the value is a stringified JSON object (to support old, bugged data)
+        if (bankIdValue.startsWith('{') && bankIdValue.endsWith('}')) {
+            try {
+                // If it's the bugged full JSON string, parse it
+                bankDetails = JSON.parse(bankIdValue);
+            } catch (e) {
+                console.warn("Could not parse old bankId JSON string. Falling back to ID fetch.");
+            }
+        }
+        
+        // If bankDetails is still null, assume it's the correct new format (just the ID) or the fallback failed
+        if (!bankDetails) {
+            const banks = await _getBankDetailsData();
+            bankDetails = banks.find(b => b.id === bankIdValue);
+        }
+    }
+    
+    // Attach the fetched/parsed details to the data object
+    data.bankDetails = bankDetails || {};
+    
+    // Show date confirmation dialog
+    showDateConfirmationDialog(data, 'agreement');
+}
+
+function reDownloadPortChargesInvoice(data) {
+    showDateConfirmationDialog(data, 'portcharges');
+}
 /**
  * View balances for a specific receipt
  */
@@ -6934,42 +7000,133 @@ function generatePortChargesPDF(data) {
     };
 
 
-    /**
+  /**
  * Generate invoice PDF with selected date option
  */
 function generateInvoicePDFWithDateOption(data, dateOption) {
-    // Store original dates
-    const originalIssueDate = data.issueDate;
-    const originalCreatedAt = data.createdAt;
+    // Create a deep copy of the data to avoid modifying original
+    const pdfData = JSON.parse(JSON.stringify(data, (key, value) => {
+        if (value && typeof value === 'object' && value.toDate) {
+            return value.toDate().toISOString();
+        }
+        return value;
+    }));
     
     // Determine which date to use
     let displayDate;
     if (dateOption === 'current') {
         displayDate = new Date().toLocaleDateString('en-US');
     } else {
-        // Use creation date
-        displayDate = originalIssueDate;
-        if (!displayDate && originalCreatedAt) {
-            try {
-                if (typeof originalCreatedAt === 'string') {
-                    displayDate = new Date(originalCreatedAt).toLocaleDateString('en-US');
-                } else if (originalCreatedAt && originalCreatedAt.toDate) {
-                    displayDate = originalCreatedAt.toDate().toLocaleDateString('en-US');
-                }
-            } catch (e) {
-                displayDate = originalIssueDate || new Date().toLocaleDateString('en-US');
-            }
+        // Use creation date from issueDate or createdAt
+        displayDate = pdfData.issueDate;
+        if (!displayDate && pdfData.createdAt) {
+            displayDate = new Date(pdfData.createdAt).toLocaleDateString('en-US');
         }
         if (!displayDate) displayDate = new Date().toLocaleDateString('en-US');
     }
     
-    // Create a copy of data with the selected date
-    const pdfData = { ...data, issueDate: displayDate };
+    // Update the issue date
+    pdfData.issueDate = displayDate;
     
     // Call the original PDF generation function
     generateInvoicePDF(pdfData);
 }
 
+/**
+ * Generate receipt PDF with selected date option
+ */
+function generateReceiptPDFWithDateOption(data, dateOption) {
+    // Create a deep copy of the data to avoid modifying original
+    const pdfData = JSON.parse(JSON.stringify(data, (key, value) => {
+        if (value && typeof value === 'object' && value.toDate) {
+            return value.toDate().toISOString();
+        }
+        return value;
+    }));
+    
+    // Determine which date to use
+    let displayDate;
+    if (dateOption === 'current') {
+        displayDate = new Date().toLocaleDateString('en-US');
+    } else {
+        // Use creation date from receiptDate or createdAt
+        displayDate = pdfData.receiptDate;
+        if (!displayDate && pdfData.createdAt) {
+            displayDate = new Date(pdfData.createdAt).toLocaleDateString('en-US');
+        }
+        if (!displayDate) displayDate = new Date().toLocaleDateString('en-US');
+    }
+    
+    // Update the receipt date
+    pdfData.receiptDate = displayDate;
+    
+    // Call the original PDF generation function
+    generateReceiptPDF(pdfData);
+}
+
+/**
+ * Generate agreement PDF with selected date option
+ */
+function generateAgreementPDFWithDateOption(data, dateOption) {
+    // Create a deep copy of the data to avoid modifying original
+    const pdfData = JSON.parse(JSON.stringify(data, (key, value) => {
+        if (value && typeof value === 'object' && value.toDate) {
+            return value.toDate().toISOString();
+        }
+        return value;
+    }));
+    
+    // Determine which date to use
+    let displayDate;
+    if (dateOption === 'current') {
+        displayDate = new Date().toLocaleDateString('en-US');
+    } else {
+        // Use creation date from agreementDate or createdAt
+        displayDate = pdfData.agreementDate;
+        if (!displayDate && pdfData.createdAt) {
+            displayDate = new Date(pdfData.createdAt).toLocaleDateString('en-US');
+        }
+        if (!displayDate) displayDate = new Date().toLocaleDateString('en-US');
+    }
+    
+    // Update the agreement date
+    pdfData.agreementDate = displayDate;
+    
+    // Call the original PDF generation function
+    generateAgreementPDF(pdfData);
+}
+
+/**
+ * Generate port charges PDF with selected date option
+ */
+function generatePortChargesPDFWithDateOption(data, dateOption) {
+    // Create a deep copy of the data to avoid modifying original
+    const pdfData = JSON.parse(JSON.stringify(data, (key, value) => {
+        if (value && typeof value === 'object' && value.toDate) {
+            return value.toDate().toISOString();
+        }
+        return value;
+    }));
+    
+    // Determine which date to use
+    let displayDate;
+    if (dateOption === 'current') {
+        displayDate = new Date().toLocaleDateString('en-US');
+    } else {
+        // Use creation date from issueDate or createdAt
+        displayDate = pdfData.issueDate;
+        if (!displayDate && pdfData.createdAt) {
+            displayDate = new Date(pdfData.createdAt).toLocaleDateString('en-US');
+        }
+        if (!displayDate) displayDate = new Date().toLocaleDateString('en-US');
+    }
+    
+    // Update the issue date
+    pdfData.issueDate = displayDate;
+    
+    // Call the original PDF generation function
+    generatePortChargesPDF(pdfData);
+}
 /**
  * Generate receipt PDF with selected date option
  */
