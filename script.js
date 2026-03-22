@@ -4447,15 +4447,15 @@ function generateInvoicePDF(data) {
         y = drawTerm(doc, y, '1.', term1);
 
         // Term 2: Auction Bid Security - NEW CLAUSE (UPDATED WITH CURRENCY)
-        const term2 = `WanBite Investments Ltd will arrange the auction bid once the Buyer deposits ${auctionCurrency} ${formatAmount(auctionPrice)} as bid security. This deposit is refundable.`;
+        const term2 = `WanBite Investments Company Ltd will arrange the auction bid once the Buyer deposits ${auctionCurrency} ${formatAmount(auctionPrice)} as bid security. This deposit is refundable.`;
         y = drawTerm(doc, y, '2.', term2);
 
         // Term 3: Balance Payment - NEW CLAUSE
-        const term3 = `The remaining balance must be paid within Ten (10) days of the Bill of Landing issuance date.`;
+        const term3 = `After the bid is won, the buyer is expected to top up to 50% for shipping to be initiated.`;
         y = drawTerm(doc, y, '3.', term3);
 
         // Term 4: BOL Release
-        const term4 = `The original Bill of Landing will be sent to the Buyer within 20 business days after full payment is received.`;
+        const term4 = `The original Bill of Landing will be issued to the buyer upon confirmation of full receit of the purchase price`;
         y = drawTerm(doc, y, '4.', term4);
 
         // Term 5: As Is Condition
