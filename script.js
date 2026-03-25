@@ -44,7 +44,6 @@ function showLoadingOverlay(message = "Processing...") {
 function hideLoadingOverlay() {
     const existingOverlay = document.getElementById('loading-overlay');
     if (existingOverlay) {
-        // Add fade out animation before removing
         existingOverlay.style.opacity = '0';
         existingOverlay.style.transition = 'opacity 0.3s ease-out';
         setTimeout(() => {
@@ -402,7 +401,7 @@ function getCurrentDateForStamp() {
 }
 
 // =================================================================
-//                 PDF DATE OPTION FUNCTIONS (MOVED BEFORE showDateConfirmationDialog)
+//                 PDF DATE OPTION FUNCTIONS
 // =================================================================
 
 /**
@@ -806,9 +805,8 @@ function handleLogout() {
     }, 500);
 }
 
-// Add this function at the top level (after the authentication section)
 // =================================================================
-//                 GLOBAL SEARCH FUNCTION (NEW)
+//                 GLOBAL SEARCH FUNCTION
 // =================================================================
 
 /**
@@ -844,7 +842,7 @@ function performGlobalSearch(searchTerm = '', filter = 'all') {
 }
 
 // =================================================================
-//                 13. DOCUMENT SEARCH FUNCTIONALITY (NEW)
+//                 13. DOCUMENT SEARCH FUNCTIONALITY
 // =================================================================
 
 /**
@@ -943,6 +941,12 @@ async function performSearch(searchTerm, docTypeFilter) {
             allResults = allResults.concat(portResults.map(p => ({...p, type: 'portcharges'})));
         }
         
+        // Search Top Up Invoices
+        if (docTypeFilter === 'all' || docTypeFilter === 'topup') {
+            const topUpResults = await searchTopUpInvoices(searchTerm);
+            allResults = allResults.concat(topUpResults.map(t => ({...t, type: 'topup'})));
+        }
+        
         // Sort by date (newest first)
         allResults.sort((a, b) => {
             const dateA = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(a.createdAt || 0);
@@ -1038,10 +1042,11 @@ function displaySearchResults(results, searchTerm) {
             resultHtml = renderInvoiceSearchResult(doc, docJson);
         } else if (doc.type === 'agreement') {
             resultHtml = renderAgreementSearchResult(doc, docJson);
-        }else if (doc.type === 'portcharges') {
+        } else if (doc.type === 'portcharges') {
             resultHtml = renderPortChargesSearchResult(doc, docJson);
+        } else if (doc.type === 'topup') {
+            resultHtml = renderTopUpSearchResult(doc, docJson);
         }
-        
         
         // Wrap each result with animation
         html += `
@@ -1304,6 +1309,68 @@ function renderPortChargesSearchResult(doc, docJson) {
 }
 
 /**
+ * Renders a top-up invoice search result card
+ */
+function renderTopUpSearchResult(doc, docJson) {
+    const date = doc.issueDate || (doc.createdAt?.toDate ? doc.createdAt.toDate().toLocaleDateString() : 'N/A');
+    
+    return `
+        <div class="p-4 border border-teal-300 rounded-lg bg-white shadow-sm hover:shadow-md transition-all duration-200 hover:scale-[1.01] hover:border-teal-500 group">
+            <div class="flex justify-between items-start">
+                <div class="flex-1">
+                    <div class="flex items-center gap-2 mb-2">
+                        <span class="bg-teal-600 text-white text-xs font-bold px-3 py-1 rounded-full flex items-center gap-1">
+                            <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M5 2a2 2 0 00-2 2v14l3.5-2 3.5 2 3.5-2 3.5 2V4a2 2 0 00-2-2H5z" clip-rule="evenodd"/></svg>
+                            TOP-UP INVOICE
+                        </span>
+                        <span class="text-sm text-gray-500">${date}</span>
+                    </div>
+                    <h4 class="font-bold text-gray-800 text-lg mb-1">${doc.invoiceId}</h4>
+                    <p class="text-sm text-gray-700 mb-1"><strong>Client:</strong> ${doc.clientName}</p>
+                    <p class="text-sm text-gray-600 mb-1"><strong>Vehicle:</strong> ${doc.carDetails?.make || ''} ${doc.carDetails?.model || ''}</p>
+                    <div class="flex items-center gap-4 mt-2">
+                        <span class="text-sm font-bold text-teal-600">
+                            USD ${doc.pricing?.totalUSD?.toFixed(2) || '0.00'}
+                        </span>
+                        <span class="text-xs bg-blue-50 text-primary-blue px-2 py-1 rounded">
+                            Paid: USD ${doc.pricing?.totalPaid?.toFixed(2) || '0.00'}
+                        </span>
+                    </div>
+                    <p class="text-xs text-gray-500 mt-1">Based on: ${doc.sourceInvoiceId}</p>
+                </div>
+                <div class="flex flex-col gap-2 ml-4">
+                    <button onclick='reDownloadTopUpInvoice(${docJson})' 
+                            class="bg-teal-600 hover:bg-teal-700 text-white text-xs py-2 px-4 rounded-full transition-all duration-150 flex items-center gap-1 group-hover:scale-105">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                        </svg>
+                        Download
+                    </button>
+                    ${!doc.revoked && doc.pricing?.remainingBalance > 0 ? `
+                    <button onclick='createTopUpFromInvoice(${docJson})' 
+                            class="bg-orange-600 hover:bg-orange-700 text-white text-xs py-2 px-4 rounded-full transition-all duration-150 flex items-center gap-1 group-hover:scale-105">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+                        </svg>
+                        Top Up Again
+                    </button>
+                    ` : ''}
+                    ${!doc.revoked ? `
+                    <button onclick='revokeTopUpInvoice(${docJson})' 
+                            class="bg-red-600 hover:bg-red-800 text-white text-xs py-2 px-4 rounded-full transition-all duration-150 flex items-center gap-1 group-hover:scale-105">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                        </svg>
+                        REVOKE
+                    </button>
+                    ` : ''}
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+/**
  * Clears search and shows the default view
  */
 function clearSearch() {
@@ -1364,7 +1431,7 @@ function renderDashboard() {
     appContent.innerHTML = `
         <h2 class="text-4xl font-extrabold mb-8 text-primary-blue animate-fade-in">CDMS Dashboard</h2>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
-            ${createDashboardCard('Document Generator', 'Invoices, Receipts, Agreements', 'bg-gradient-to-br from-green-50 to-green-100 border-green-400', 'handleDocumentGenerator', 0)}
+            ${createDashboardCard('Document Generator', 'Invoices, Receipts, Agreements, Top-Ups', 'bg-gradient-to-br from-green-50 to-green-100 border-green-400', 'handleDocumentGenerator', 0)}
             ${createDashboardCard('Fleet Management', 'Car Tracking, Clearing, ETA', 'bg-gradient-to-br from-yellow-50 to-yellow-100 border-yellow-400', 'handleFleetManagement', 100)}
         </div>
     `;
@@ -1411,7 +1478,7 @@ async function generateSharedRefId(clientName, carModel, carYear, collectionName
 }
 
 // =================================================================
-//                 4. DOCUMENT GENERATOR ROUTING (UPDATED)
+//                 4. DOCUMENT GENERATOR ROUTING (UPDATED WITH TOP-UP)
 // =================================================================
 
 function handleDocumentGenerator() {
@@ -1447,6 +1514,7 @@ function handleDocumentGenerator() {
                         <option value="invoice">Invoices Only</option>
                         <option value="agreement">Sales Agreements Only</option>
                         <option value="portcharges">Port Charges Only</option>
+                        <option value="topup">Top-Up Invoices Only</option>
                     </select>
                 </div>
             </div>
@@ -1462,6 +1530,18 @@ function handleDocumentGenerator() {
                 </svg>
                 Invoice/Proforma
             </button>
+            <button onclick="renderTopUpInvoiceForm()" class="bg-teal-600 hover:bg-teal-700 text-white p-3 rounded-lg transition duration-150 mb-2 flex items-center gap-2">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                </svg>
+                Top-Up Invoice
+            </button>
+          <button onclick="renderAuctionInvoiceHistory()" class="bg-teal-500 hover:bg-teal-600 text-white p-3 rounded-lg transition duration-150 mb-2 flex items-center gap-2">
+    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+    </svg>
+    Auc-Inv History
+</button>
             <button onclick="renderInvoiceHistory()" class="bg-gray-700 hover:bg-gray-900 text-white p-3 rounded-lg transition duration-150 mb-2 flex items-center gap-2">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
@@ -1530,10 +1610,6 @@ function handleDocumentGenerator() {
     }
 }
 
-// -----------------------------------------------------------------
-// NOTE: renderAgreementForm() is fully defined in Section 10 now
-// -----------------------------------------------------------------
-
 // =================================================================
 //                 5. RECEIPT/PAYMENT LOGIC (COMPREHENSIVELY REVISED)
 // =================================================================
@@ -1572,27 +1648,57 @@ function numberToWords(n) {
 // NEW FUNCTION: Fetch invoice amount based on invoice number
 async function fetchInvoiceAmount(invoiceNumber) {
     try {
+        // Search in regular invoices first
         const snapshot = await db.collection("invoices")
             .where("invoiceId", "==", invoiceNumber)
             .limit(1)
             .get();
         
-        if (snapshot.empty) {
-            return null;
+        if (!snapshot.empty) {
+            const invoiceDoc = snapshot.docs[0];
+            const invoiceData = invoiceDoc.data();
+            
+            return {
+                totalUSD: invoiceData.pricing.totalUSD,
+                depositUSD: invoiceData.pricing.depositUSD,
+                balanceUSD: invoiceData.pricing.balanceUSD,
+                depositKSH: invoiceData.pricing.depositKSH,
+                exchangeRate: invoiceData.exchangeRate,
+                clientName: invoiceData.clientName,
+                vehicleInfo: `${invoiceData.carDetails.make} ${invoiceData.carDetails.model} ${invoiceData.carDetails.year}`,
+                invoiceType: 'regular',
+                sourceInvoiceId: invoiceNumber,
+                totalPaid: invoiceData.pricing.depositPaid ? invoiceData.pricing.depositUSD : 0,
+                remainingBalance: invoiceData.pricing.balanceUSD
+            };
         }
         
-        const invoiceDoc = snapshot.docs[0];
-        const invoiceData = invoiceDoc.data();
+        // Search in top-up invoices
+        const topUpSnapshot = await db.collection("top_up_invoices")
+            .where("invoiceId", "==", invoiceNumber)
+            .limit(1)
+            .get();
         
-        return {
-            totalUSD: invoiceData.pricing.totalUSD,
-            depositUSD: invoiceData.pricing.depositUSD,
-            balanceUSD: invoiceData.pricing.balanceUSD,
-            depositKSH: invoiceData.pricing.depositKSH,
-            exchangeRate: invoiceData.exchangeRate,
-            clientName: invoiceData.clientName,
-            vehicleInfo: `${invoiceData.carDetails.make} ${invoiceData.carDetails.model} ${invoiceData.carDetails.year}`
-        };
+        if (!topUpSnapshot.empty) {
+            const topUpDoc = topUpSnapshot.docs[0];
+            const topUpData = topUpDoc.data();
+            
+            return {
+                totalUSD: topUpData.pricing.totalUSD,
+                depositUSD: topUpData.pricing.currentPaymentDue,
+                balanceUSD: topUpData.pricing.remainingBalance,
+                depositKSH: topUpData.pricing.currentPaymentDue * (topUpData.exchangeRate || 130),
+                exchangeRate: topUpData.exchangeRate,
+                clientName: topUpData.clientName,
+                vehicleInfo: `${topUpData.carDetails.make} ${topUpData.carDetails.model} ${topUpData.carDetails.year}`,
+                invoiceType: 'topup',
+                sourceInvoiceId: topUpData.sourceInvoiceId,
+                totalPaid: topUpData.pricing.totalPaid,
+                remainingBalance: topUpData.pricing.remainingBalance
+            };
+        }
+        
+        return null;
     } catch (error) {
         console.error("Error fetching invoice:", error);
         return null;
@@ -2012,15 +2118,15 @@ async function fetchInvoiceDetails() {
         <p id="invoice-client" class="text-sm"><strong>Client:</strong> ${invoiceDetails.clientName}</p>
         <p id="invoice-vehicle" class="text-sm"><strong>Vehicle:</strong> ${invoiceDetails.vehicleInfo}</p>
         <p id="invoice-total" class="text-sm"><strong>Total Price:</strong> USD ${invoiceDetails.totalUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
-        <p id="invoice-deposit" class="text-sm"><strong>Deposit Required:</strong> USD ${invoiceDetails.depositUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })} (KES ${parseFloat(invoiceDetails.depositKSH).toLocaleString('en-US', { minimumFractionDigits: 2 })})</p>
-        <p id="invoice-balance" class="text-sm"><strong>Balance Due:</strong> USD ${invoiceDetails.balanceUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
+        <p id="invoice-deposit" class="text-sm"><strong>Amount Due Now:</strong> USD ${invoiceDetails.depositUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })} (KES ${parseFloat(invoiceDetails.depositKSH).toLocaleString('en-US', { minimumFractionDigits: 2 })})</p>
+        <p id="invoice-balance" class="text-sm"><strong>Remaining Balance After Payment:</strong> USD ${invoiceDetails.balanceUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })}</p>
         <p id="invoice-rate" class="text-sm"><strong>Exchange Rate:</strong> USD 1 = KES ${invoiceDetails.exchangeRate}</p>
     `;
     detailsDiv.style.animation = 'fade-in 0.3s ease-out';
     
     // Auto-populate receipt form
     document.getElementById('receivedFrom').value = invoiceDetails.clientName;
-    document.getElementById('beingPaidFor').value = `${invoiceDetails.vehicleInfo} Deposit`;
+    document.getElementById('beingPaidFor').value = `${invoiceDetails.vehicleInfo} Payment`;
     document.getElementById('exchangeRate').value = invoiceDetails.exchangeRate;
     
     // Store exchange rate in hidden field for calculations
@@ -3285,9 +3391,25 @@ async function fetchInvoices() {
             return;
         }
         
+// In fetchInvoices, add this filter when processing each invoice:
+const isAuctionInvoice = data.docType === 'Auction Invoice';
+const isTopUpOrBalanceFromAuction = data.sourceType === 'auction' || data.auctionOriginalInvoiceId;
+
+// Skip if it's an auction invoice or related to auction
+if (isAuctionInvoice || isTopUpOrBalanceFromAuction) {
+    return; // Skip this invoice
+}
+
         html = `<ul class="space-y-3 divide-y divide-gray-200">`;
         snapshot.forEach((doc, index) => {
             const data = doc.data();
+            // Safely access nested properties
+            const carMake = data.carDetails?.make || 'N/A';
+            const carModel = data.carDetails?.model || '';
+            const totalUSD = data.pricing?.totalUSD || 0;
+            const remainingBalance = data.pricing?.remainingBalance || totalUSD;
+            const depositPaid = data.pricing?.depositPaid || false;
+            
             const invoiceDataJson = JSON.stringify({
                 ...data, 
                 firestoreId: doc.id,
@@ -3301,10 +3423,10 @@ async function fetchInvoices() {
                          style="animation-delay: ${animationDelay}ms">
                         <div>
                             ${isRevoked ? `<span class="bg-red-500 text-white text-xs font-bold px-2 py-1 rounded mb-2 inline-block">REVOKED</span><br>` : ''}
-                            <strong class="text-primary-blue">${data.docType} ${data.invoiceId}</strong><br>
-                            <span class="text-sm text-gray-700">Client: ${data.clientName} | Vehicle: ${data.carDetails.make} ${data.carDetails.model}</span><br>
-                            <span class="text-xs text-gray-600">Total: USD ${data.pricing.totalUSD.toFixed(2)}</span>
-                            ${data.pricing.depositPaid ? `<br><span class="text-xs text-green-600 flex items-center gap-1"><svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg> Deposit Paid</span>` : `<br><span class="text-xs text-secondary-red flex items-center gap-1"><svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM7 9a1 1 0 000 2h6a1 1 0 100-2H7z" clip-rule="evenodd"/></svg> Deposit Pending</span>`}
+                            <strong class="text-primary-blue">${data.docType || 'Invoice'} ${data.invoiceId || 'N/A'}</strong><br>
+                            <span class="text-sm text-gray-700">Client: ${data.clientName || 'N/A'} | Vehicle: ${carMake} ${carModel}</span><br>
+                            <span class="text-xs text-gray-600">Total: USD ${totalUSD.toFixed(2)}</span>
+                            ${depositPaid ? `<br><span class="text-xs text-green-600 flex items-center gap-1"><svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg> Deposit Paid</span>` : `<br><span class="text-xs text-secondary-red flex items-center gap-1"><svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM7 9a1 1 0 000 2h6a1 1 0 100-2H7z" clip-rule="evenodd"/></svg> Deposit Pending</span>`}
                         </div>
                         <div class="mt-2 sm:mt-0 space-x-2">
                             <button onclick='reDownloadInvoice(${invoiceDataJson})' 
@@ -3315,13 +3437,31 @@ async function fetchInvoices() {
                                 PDF
                             </button>
                             ${!isRevoked ? `
-                                ${!data.pricing.depositPaid ? `
+                                ${!depositPaid && data.docType !== 'Auction Invoice' ? `
                                 <button onclick='markInvoiceDepositPaid(${invoiceDataJson})' 
                                         class="bg-green-600 hover:bg-green-700 text-white text-xs py-1 px-3 rounded-full transition duration-150 flex items-center gap-1">
                                     <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
                                     </svg>
                                     Deposit
+                                </button>
+                                ` : ''}
+                                ${data.docType === 'Auction Invoice' && remainingBalance > 0 ? `
+                                <button onclick='createTopUpFromAuctionInvoice(${invoiceDataJson})' 
+                                        class="bg-teal-600 hover:bg-teal-700 text-white text-xs py-1 px-3 rounded-full transition duration-150 flex items-center gap-1">
+                                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                                    </svg>
+                                    Top Up
+                                </button>
+                                ` : ''}
+                                ${(data.docType === 'Top-Up Invoice' || data.docType === 'Invoice' || data.docType === 'Proforma Invoice') && remainingBalance > 0 ? `
+                                <button onclick='createBalanceInvoice(${invoiceDataJson})' 
+                                        class="bg-purple-600 hover:bg-purple-700 text-white text-xs py-1 px-3 rounded-full transition duration-150 flex items-center gap-1">
+                                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+                                    </svg>
+                                    Balance
                                 </button>
                                 ` : ''}
                                 <button onclick='createReceiptFromInvoice(${invoiceDataJson})' 
@@ -3337,6 +3477,13 @@ async function fetchInvoices() {
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
                                     </svg>
                                     Add
+                                </button>
+                                <button onclick='viewClientInvoiceTrail("${(data.clientName || '').replace(/"/g, '&quot;')}")' 
+                                        class="bg-purple-600 hover:bg-purple-700 text-white text-xs py-1 px-3 rounded-full transition duration-150 flex items-center gap-1">
+                                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path>
+                                    </svg>
+                                    Trail
                                 </button>
                                 <button onclick='revokeInvoice(${invoiceDataJson})' 
                                         class="bg-red-600 hover:bg-red-800 text-white text-xs py-1 px-3 rounded-full transition duration-150 flex items-center gap-1">
@@ -3974,7 +4121,7 @@ async function deleteBank(bankId) {
 }
 
 // =================================================================
-//                 PDF GENERATION FUNCTIONS (MOVED TO TOP)
+//                 PDF GENERATION FUNCTIONS
 // =================================================================
 
 /**
@@ -5784,7 +5931,7 @@ function handleFleetManagement() {
 }
 
 // =================================================================
-//                 SEARCH FUNCTIONS (ADDED - WERE MISSING)
+//                 SEARCH FUNCTIONS
 // =================================================================
 
 /**
@@ -5964,6 +6111,18 @@ async function performSearch(searchTerm, docTypeFilter) {
             const agreementResults = await searchAgreements(searchTerm);
             console.log(`Found ${agreementResults.length} agreements`);
             allResults = allResults.concat(agreementResults.map(a => ({...a, type: 'agreement'})));
+        }
+        
+        if (docTypeFilter === 'all' || docTypeFilter === 'portcharges') {
+            const portResults = await searchPortChargesInvoices(searchTerm);
+            console.log(`Found ${portResults.length} port charges`);
+            allResults = allResults.concat(portResults.map(p => ({...p, type: 'portcharges'})));
+        }
+        
+        if (docTypeFilter === 'all' || docTypeFilter === 'topup') {
+            const topUpResults = await searchTopUpInvoices(searchTerm);
+            console.log(`Found ${topUpResults.length} top-up invoices`);
+            allResults = allResults.concat(topUpResults.map(t => ({...t, type: 'topup'})));
         }
         
         console.log(`Total results: ${allResults.length}`);
@@ -6512,7 +6671,7 @@ async function fetchAllReceiptBalances() {
 
 
 // =================================================================
-//                 14. PORT CHARGES INVOICE MODULE (NEW)
+//                 14. PORT CHARGES INVOICE MODULE
 // =================================================================
 
 /**
@@ -7412,6 +7571,13 @@ async function fetchPortChargesInvoices() {
         
         snapshot.forEach((doc, index) => {
             const data = doc.data();
+            // Safely access nested properties with fallbacks
+            const carMake = data.vehicleDetails?.makeModel?.split(' ')[0] || 'N/A';
+            const carModel = data.vehicleDetails?.makeModel?.split(' ')[1] || '';
+            const totalUSD = data.totals?.totalUSD || 0;
+            const remainingBalance = data.totals?.remainingBalance || totalUSD;
+            const depositPaid = data.pricing?.depositPaid || false;
+            
             const invoiceDataJson = JSON.stringify({
                 ...data,
                 firestoreId: doc.id,
@@ -7425,9 +7591,9 @@ async function fetchPortChargesInvoices() {
                          style="animation-delay: ${animationDelay}ms">
                         <div>
                             ${isRevoked ? `<span class="bg-red-500 text-white text-xs font-bold px-2 py-1 rounded mb-2 inline-block">REVOKED</span><br>` : ''}
-                            <strong class="text-primary-blue">${data.invoiceId}</strong><br>
-                            <span class="text-sm text-gray-700">Client: ${data.clientName} | Vehicle: ${data.vehicleDetails.makeModel}</span><br>
-                            <span class="text-xs text-gray-600">Total: ${data.invoiceCurrency} ${data.totals.totalInvoiceCurrency.toFixed(2)} | Items: ${data.chargeItems.length}</span>
+                            <strong class="text-primary-blue">${data.docType || 'Port Charges Invoice'} ${data.invoiceId || 'N/A'}</strong><br>
+                            <span class="text-sm text-gray-700">Client: ${data.clientName || 'N/A'} | Vehicle: ${carMake} ${carModel}</span><br>
+                            <span class="text-xs text-gray-600">Total: USD ${totalUSD.toFixed(2)}</span>
                         </div>
                         <div class="mt-2 sm:mt-0 space-x-2">
                             <button onclick='reDownloadPortChargesInvoice(${invoiceDataJson})' 
@@ -7569,6 +7735,3745 @@ async function searchPortChargesInvoices(searchTerm) {
 }
 
 // =================================================================
+//                 TOP-UP INVOICE MODULE (NEW)
+// =================================================================
+
+/**
+ * Generates a sequential invoice number for top-up invoices
+ */
+async function generateTopUpInvoiceNumber(clientName, carMakeModel, sourceInvoiceId) {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = (now.getMonth() + 1).toString().padStart(2, '0');
+    const day = now.getDate().toString().padStart(2, '0');
+    
+    // Get the first day of current month
+    const firstDayOfMonth = new Date(year, now.getMonth(), 1);
+    
+    // Query top-up invoices from this month
+    const monthStart = firebase.firestore.Timestamp.fromDate(firstDayOfMonth);
+    const snapshot = await db.collection("top_up_invoices")
+        .where("createdAt", ">=", monthStart)
+        .get();
+    
+    // Calculate next sequential number
+    const nextNumber = (snapshot.size + 1).toString().padStart(4, '0');
+    
+    // Get name and model parts for reference
+    const namePart = clientName.split(' ')[0].toUpperCase().substring(0, 3);
+    const modelPart = carMakeModel.split(' ')[0].toUpperCase().substring(0, 3);
+    
+    // Extract source invoice prefix
+    const sourcePrefix = sourceInvoiceId.split('-')[0] || 'TOP';
+    
+    return `TOPUP-${year}${month}${day}-${nextNumber}-${namePart}-${modelPart}-${sourcePrefix}`;
+}
+
+/**
+ * Renders the Top-Up Invoice form
+ */
+function renderTopUpInvoiceForm(sourceInvoiceData = null) {
+    const formArea = document.getElementById('document-form-area');
+    
+    // If no source invoice provided, show selection interface
+    if (!sourceInvoiceData) {
+        formArea.innerHTML = `
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 animate-fade-in">
+                <div class="p-6 border border-gray-300 rounded-xl bg-white shadow-md animate-fade-in" style="animation-delay: 100ms">
+                    <h3 class="text-xl font-semibold mb-4 text-primary-blue">Create Top-Up Invoice</h3>
+                    <div class="mb-6">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Select Source Invoice</label>
+                        <div class="flex gap-2">
+                            <input type="text" id="sourceInvoiceSearch" placeholder="Enter Invoice Number (e.g., 202501-0001-NAM-MOD-2024 or TOPUP-...)" class="flex-1 p-3 border border-gray-300 rounded-lg">
+                            <button onclick="loadSourceInvoiceForTopUp()" class="bg-primary-blue hover:bg-blue-900 text-white px-4 rounded-lg transition duration-150 flex items-center gap-2">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                                </svg>
+                                Load
+                            </button>
+                        </div>
+                        <p class="text-xs text-gray-500 mt-2">Enter the invoice number of an Auction Invoice or existing Top-Up Invoice</p>
+                    </div>
+                    <div id="invoice-preview" class="hidden p-4 bg-blue-50 rounded-lg border border-blue-200">
+                        <h4 class="font-bold text-primary-blue mb-2">Invoice Details:</h4>
+                        <p id="preview-invoice-id" class="text-sm"></p>
+                        <p id="preview-client" class="text-sm"></p>
+                        <p id="preview-vehicle" class="text-sm"></p>
+                        <p id="preview-total" class="text-sm"></p>
+                        <p id="preview-paid" class="text-sm"></p>
+                        <p id="preview-balance" class="text-sm"></p>
+                        <div class="mt-3">
+                            <button onclick="loadTopUpForm()" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md text-sm transition duration-150">
+                                Proceed with Top-Up
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div class="p-6 border border-gray-300 rounded-xl bg-white shadow-md animate-fade-in" style="animation-delay: 200ms">
+                    <h3 class="text-xl font-semibold mb-4 text-primary-blue">Recent Top-Up Invoices</h3>
+                    <div id="recent-topups">
+                        ${createShimmerLoader(2)}
+                    </div>
+                </div>
+            </div>
+        `;
+        fetchTopUpInvoices();
+        return;
+    }
+    
+    // If source invoice provided, render the full top-up form
+    renderTopUpForm(sourceInvoiceData);
+}
+
+/**
+ * Loads source invoice for top-up
+ */
+async function loadSourceInvoiceForTopUp() {
+    const invoiceNumber = document.getElementById('sourceInvoiceSearch')?.value;
+    if (!invoiceNumber) {
+        showErrorToast("Please enter an invoice number");
+        return;
+    }
+    
+    const loadingOverlay = showLoadingOverlay("Loading invoice...");
+    
+    try {
+        // Try to find in regular invoices
+        let invoiceData = null;
+        let invoiceType = 'regular';
+        
+        const regularSnapshot = await db.collection("invoices")
+            .where("invoiceId", "==", invoiceNumber)
+            .limit(1)
+            .get();
+        
+        if (!regularSnapshot.empty) {
+            const doc = regularSnapshot.docs[0];
+            invoiceData = doc.data();
+            invoiceData.firestoreId = doc.id;
+            invoiceData.sourceInvoiceId = invoiceNumber;
+            invoiceData.sourceType = 'regular';
+        } else {
+            // Try top-up invoices
+            const topUpSnapshot = await db.collection("top_up_invoices")
+                .where("invoiceId", "==", invoiceNumber)
+                .limit(1)
+                .get();
+            
+            if (!topUpSnapshot.empty) {
+                const doc = topUpSnapshot.docs[0];
+                invoiceData = doc.data();
+                invoiceData.firestoreId = doc.id;
+                invoiceData.sourceInvoiceId = invoiceNumber;
+                invoiceData.sourceType = 'topup';
+            }
+        }
+        
+        if (!invoiceData) {
+            hideLoadingOverlay();
+            showErrorToast("Invoice not found");
+            return;
+        }
+        
+        // Check if invoice is revoked
+        if (invoiceData.revoked) {
+            hideLoadingOverlay();
+            showErrorToast("Cannot create top-up from a revoked invoice.");
+            return;
+        }
+        
+        // Check if there's remaining balance
+        let remainingBalance = 0;
+        let totalPaid = 0;
+        let totalPrice = 0;
+        
+        if (invoiceData.sourceType === 'regular' && invoiceData.docType === 'Auction Invoice') {
+            // For auction invoices, check receipts to see if any payments were made
+            const receiptsSnapshot = await db.collection("receipts")
+                .where("invoiceReference", "==", invoiceNumber)
+                .get();
+            
+            totalPaid = 0;
+            for (const receiptDoc of receiptsSnapshot.docs) {
+                const receipt = receiptDoc.data();
+                if (receipt.currency === 'USD') {
+                    totalPaid += receipt.amountReceived;
+                } else if (receipt.currency === 'KSH') {
+                    totalPaid += receipt.amountReceived / receipt.exchangeRate;
+                }
+            }
+            
+            totalPrice = invoiceData.pricing.totalUSD;
+            remainingBalance = totalPrice - totalPaid;
+            
+            if (remainingBalance <= 0) {
+                hideLoadingOverlay();
+                showErrorToast("This invoice is already fully paid. No top-up needed.");
+                return;
+            }
+        } else if (invoiceData.sourceType === 'topup') {
+            // For top-up invoices, use the remaining balance from pricing
+            totalPrice = invoiceData.pricing.totalUSD;
+            totalPaid = invoiceData.pricing.totalPaid || 0;
+            remainingBalance = invoiceData.pricing.remainingBalance || (totalPrice - totalPaid);
+            
+            if (remainingBalance <= 0) {
+                hideLoadingOverlay();
+                showErrorToast("This invoice is already fully paid. No top-up needed.");
+                return;
+            }
+        } else {
+            // Regular invoice (non-auction) - check if any payments made
+            const receiptsSnapshot = await db.collection("receipts")
+                .where("invoiceReference", "==", invoiceNumber)
+                .get();
+            
+            totalPaid = 0;
+            for (const receiptDoc of receiptsSnapshot.docs) {
+                const receipt = receiptDoc.data();
+                if (receipt.currency === 'USD') {
+                    totalPaid += receipt.amountReceived;
+                } else if (receipt.currency === 'KSH') {
+                    totalPaid += receipt.amountReceived / receipt.exchangeRate;
+                }
+            }
+            
+            totalPrice = invoiceData.pricing.totalUSD;
+            remainingBalance = totalPrice - totalPaid;
+            
+            if (remainingBalance <= 0) {
+                hideLoadingOverlay();
+                showErrorToast("This invoice is already fully paid. No top-up needed.");
+                return;
+            }
+        }
+        
+        // Store the invoice data for preview
+        window.selectedSourceInvoice = {
+            ...invoiceData,
+            remainingBalance: remainingBalance,
+            totalPaid: totalPaid,
+            totalPrice: totalPrice
+        };
+        
+        // Update preview
+        const previewDiv = document.getElementById('invoice-preview');
+        const previewInvoiceId = document.getElementById('preview-invoice-id');
+        const previewClient = document.getElementById('preview-client');
+        const previewVehicle = document.getElementById('preview-vehicle');
+        const previewTotal = document.getElementById('preview-total');
+        const previewPaid = document.getElementById('preview-paid');
+        const previewBalance = document.getElementById('preview-balance');
+        
+        if (previewDiv && previewInvoiceId) {
+            previewInvoiceId.innerHTML = `<strong>Invoice No:</strong> ${invoiceData.invoiceId}`;
+            previewClient.innerHTML = `<strong>Client:</strong> ${invoiceData.clientName}`;
+            previewVehicle.innerHTML = `<strong>Vehicle:</strong> ${invoiceData.carDetails?.make || ''} ${invoiceData.carDetails?.model || ''} ${invoiceData.carDetails?.year || ''}`;
+            previewTotal.innerHTML = `<strong>Total Price:</strong> USD ${totalPrice.toFixed(2)}`;
+            previewPaid.innerHTML = `<strong>Total Paid:</strong> USD ${totalPaid.toFixed(2)}`;
+            previewBalance.innerHTML = `<strong>Remaining Balance:</strong> USD ${remainingBalance.toFixed(2)}`;
+            
+            previewDiv.classList.remove('hidden');
+        }
+        
+        hideLoadingOverlay();
+        showSuccessToast(`Invoice ${invoiceNumber} loaded successfully`);
+        
+    } catch (error) {
+        console.error("Error loading invoice:", error);
+        hideLoadingOverlay();
+        showErrorToast("Failed to load invoice: " + error.message);
+    }
+}
+
+/**
+ * Loads the top-up form with pre-filled data
+ */
+function loadTopUpForm() {
+    if (!window.selectedSourceInvoice) {
+        showErrorToast("No source invoice selected");
+        return;
+    }
+    
+    renderTopUpForm(window.selectedSourceInvoice);
+}
+
+/**
+ * Renders the actual top-up form with pre-filled data
+ */
+function renderTopUpForm(sourceInvoice) {
+    const formArea = document.getElementById('document-form-area');
+    const remainingBalance = sourceInvoice.remainingBalance || sourceInvoice.pricing?.balanceUSD || 0;
+    const totalPrice = sourceInvoice.totalPrice || sourceInvoice.pricing?.totalUSD || 0;
+    const totalPaid = sourceInvoice.totalPaid || 0;
+    
+    // Calculate 50% of total price for reference
+    const halfPrice = totalPrice / 2;
+    const amountNeededToReachHalf = Math.max(0, halfPrice - totalPaid);
+    const remainingAfterPayment = remainingBalance;
+    
+    // Default current payment due (can be edited by user)
+    const defaultPaymentDue = amountNeededToReachHalf > 0 ? amountNeededToReachHalf : remainingBalance;
+    
+    formArea.innerHTML = `
+        <div class="p-6 border border-gray-300 rounded-xl bg-white shadow-lg animate-fade-in">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-semibold text-primary-blue">Top-Up Invoice</h3>
+                <button onclick="renderTopUpInvoiceForm()" class="text-secondary-red hover:text-red-700 text-sm underline">← Back to Selection</button>
+            </div>
+            
+            <div class="mb-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                <h4 class="font-bold text-primary-blue mb-2">Source Invoice Details</h4>
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                    <div><strong>Invoice No:</strong> ${sourceInvoice.invoiceId}</div>
+                    <div><strong>Client:</strong> ${sourceInvoice.clientName}</div>
+                    <div><strong>Total Price:</strong> USD ${totalPrice.toFixed(2)}</div>
+                    <div><strong>Total Paid:</strong> USD ${totalPaid.toFixed(2)}</div>
+                    <div><strong>Remaining:</strong> USD ${remainingBalance.toFixed(2)}</div>
+                    <div><strong>50% of Total:</strong> USD ${halfPrice.toFixed(2)}</div>
+                    <div><strong>To Reach 50%:</strong> USD ${amountNeededToReachHalf.toFixed(2)}</div>
+                </div>
+            </div>
+            
+            <form id="topup-form" onsubmit="event.preventDefault(); saveTopUpInvoice();">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6 p-4 bg-gray-50 rounded-lg">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">Document Type</label>
+                        <input type="text" value="Top-Up Invoice" readonly class="mt-1 block w-full p-2 border bg-gray-100 rounded-md">
+                    </div>
+                    <div>
+                        <label for="topupExchangeRate" class="block text-sm font-medium text-gray-700">USD 1 = KES</label>
+                        <input type="number" id="topupExchangeRate" step="1" required value="${sourceInvoice.exchangeRate || 130}" class="mt-1 block w-full p-2 border rounded-md transition duration-200">
+                    </div>
+                    <div>
+                        <label for="topupDueDate" class="block text-sm font-medium text-gray-700">Due Date (Optional)</label>
+                        <input type="date" id="topupDueDate" class="mt-1 block w-full p-2 border rounded-md transition duration-200">
+                    </div>
+                    <div>
+                        <label for="topupPaymentDays" class="block text-sm font-medium text-gray-700">Balance Payment Days</label>
+                        <input type="number" id="topupPaymentDays" value="10" min="1" class="mt-1 block w-full p-2 border rounded-md transition duration-200">
+                    </div>
+                </div>
+                
+                <div class="mb-4 p-4 bg-yellow-50 rounded-lg border border-yellow-300">
+                    <h4 class="font-bold text-secondary-red mb-3">Top-Up Payment Details</h4>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label for="currentPaymentDue" class="block text-sm font-medium text-gray-700">Amount to Pay Now (USD)</label>
+                            <input type="number" id="currentPaymentDue" step="0.01" required value="${defaultPaymentDue.toFixed(2)}" min="0" max="${remainingBalance.toFixed(2)}" class="mt-1 block w-full p-2 border rounded-md transition duration-200" oninput="updateTopUpCalculations()">
+                            <p class="text-xs text-gray-500 mt-1">Enter the amount the client is paying now</p>
+                        </div>
+                        <div>
+                            <label for="paymentPercentage" class="block text-sm font-medium text-gray-700">Percentage of Total Price</label>
+                            <input type="text" id="paymentPercentage" readonly class="mt-1 block w-full p-2 border bg-gray-100 rounded-md">
+                        </div>
+                    </div>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
+                        <div class="p-2 bg-white rounded border">
+                            <p class="text-xs text-gray-600">Total Paid (Including This Payment)</p>
+                            <p id="totalPaidAfter" class="text-lg font-bold text-green-600">USD ${(totalPaid + defaultPaymentDue).toFixed(2)}</p>
+                        </div>
+                        <div class="p-2 bg-white rounded border">
+                            <p class="text-xs text-gray-600">Remaining Balance After Payment</p>
+                            <p id="remainingAfter" class="text-lg font-bold text-secondary-red">USD ${(remainingBalance - defaultPaymentDue).toFixed(2)}</p>
+                        </div>
+                        <div class="p-2 bg-white rounded border">
+                            <p class="text-xs text-gray-600">Percentage Paid After Payment</p>
+                            <p id="percentagePaidAfter" class="text-lg font-bold text-primary-blue">${((totalPaid + defaultPaymentDue) / totalPrice * 100).toFixed(1)}%</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <fieldset class="border p-4 rounded-lg mb-6">
+                    <legend class="text-base font-semibold text-primary-blue px-2">Vehicle Details (from source invoice)</legend>
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <input type="text" id="carMakeModel" value="${sourceInvoice.carDetails?.make || ''} ${sourceInvoice.carDetails?.model || ''}" readonly class="p-2 border bg-gray-100 rounded-md">
+                        <input type="text" id="carYear" value="${sourceInvoice.carDetails?.year || ''}" readonly class="p-2 border bg-gray-100 rounded-md">
+                        <input type="text" id="vinNumber" value="${sourceInvoice.carDetails?.vin || ''}" readonly class="p-2 border bg-gray-100 rounded-md">
+                        <input type="text" id="color" value="${sourceInvoice.carDetails?.color || ''}" readonly class="p-2 border bg-gray-100 rounded-md">
+                    </div>
+                </fieldset>
+                
+                <fieldset class="border p-4 rounded-lg mb-6">
+                    <legend class="text-base font-semibold text-secondary-red px-2">Bank Account for Payment</legend>
+                    <select id="topupBankDetailsSelect" required class="mt-1 block w-full p-2 border rounded-md transition duration-200"></select>
+                    <p class="text-xs text-gray-500 mt-1">Select the bank account for this payment</p>
+                </fieldset>
+                
+                <fieldset class="border p-4 rounded-lg mb-6">
+                    <legend class="text-base font-semibold text-secondary-red px-2">Payment Reference</legend>
+                    <input type="text" id="paymentReference" placeholder="Enter payment reference (e.g., Cheque No, RTGS Ref)" class="w-full p-2 border rounded-md transition duration-200">
+                </fieldset>
+                
+                <div class="flex space-x-4">
+                    <button type="submit" id="save-topup-btn" class="flex-1 bg-teal-600 hover:bg-teal-700 text-white font-bold py-3 rounded-lg transition duration-150 flex items-center justify-center gap-2">
+                        <span>Generate & Save Top-Up Invoice</span>
+                        <svg id="topup-spinner" class="hidden w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                    </button>
+                    <button type="button" onclick="saveTopUpInvoice(true)" id="save-topup-only-btn" class="flex-1 bg-gray-500 hover:bg-gray-700 text-white font-bold py-3 rounded-lg transition duration-150 flex items-center justify-center gap-2">
+                        <span>Save Only (No PDF)</span>
+                        <svg id="topup-only-spinner" class="hidden w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                    </button>
+                </div>
+            </form>
+        </div>
+    `;
+    
+    // Populate bank dropdown
+    populateBankDropdown('topupBankDetailsSelect', false);
+    
+    // Store source invoice in global variable for use in save function
+    window.currentTopUpSourceInvoice = sourceInvoice;
+    
+    // Initialize calculations
+    setTimeout(() => {
+        updateTopUpCalculations();
+        
+        // Set default due date to 30 days from now if not set
+        const dueDateInput = document.getElementById('topupDueDate');
+        if (dueDateInput && !dueDateInput.value) {
+            const defaultDate = new Date();
+            defaultDate.setDate(defaultDate.getDate() + 30);
+            dueDateInput.value = defaultDate.toISOString().slice(0, 10);
+        }
+    }, 100);
+}
+
+/**
+ * Updates calculations in the top-up form
+ */
+function updateTopUpCalculations() {
+    const sourceInvoice = window.currentTopUpSourceInvoice;
+    if (!sourceInvoice) return;
+    
+    const currentPaymentDue = parseFloat(document.getElementById('currentPaymentDue').value) || 0;
+    const totalPrice = sourceInvoice.totalPrice || sourceInvoice.pricing?.totalUSD || 0;
+    const totalPaid = sourceInvoice.totalPaid || 0;
+    const remainingBalance = sourceInvoice.remainingBalance || sourceInvoice.pricing?.balanceUSD || 0;
+    
+    const newTotalPaid = totalPaid + currentPaymentDue;
+    const newRemaining = remainingBalance - currentPaymentDue;
+    const percentagePaid = (newTotalPaid / totalPrice * 100);
+    const percentageOfTotal = (currentPaymentDue / totalPrice * 100);
+    
+    // Update displays
+    const totalPaidAfter = document.getElementById('totalPaidAfter');
+    const remainingAfter = document.getElementById('remainingAfter');
+    const percentagePaidAfter = document.getElementById('percentagePaidAfter');
+    const paymentPercentage = document.getElementById('paymentPercentage');
+    
+    if (totalPaidAfter) totalPaidAfter.textContent = `USD ${newTotalPaid.toFixed(2)}`;
+    if (remainingAfter) remainingAfter.textContent = `USD ${Math.max(0, newRemaining).toFixed(2)}`;
+    if (percentagePaidAfter) percentagePaidAfter.textContent = `${percentagePaid.toFixed(1)}%`;
+    if (paymentPercentage) paymentPercentage.value = `${percentageOfTotal.toFixed(1)}% of total price`;
+    
+    // Validate payment amount
+    if (currentPaymentDue > remainingBalance) {
+        document.getElementById('currentPaymentDue').value = remainingBalance.toFixed(2);
+        updateTopUpCalculations();
+        showErrorToast("Payment amount cannot exceed remaining balance");
+    }
+}
+
+/**
+ * Saves the top-up invoice to Firestore
+ */
+async function saveTopUpInvoice(onlySave = false) {
+    const form = document.getElementById('topup-form');
+    if (!form.checkValidity()) {
+        form.reportValidity();
+        return;
+    }
+    
+    const sourceInvoice = window.currentTopUpSourceInvoice;
+    if (!sourceInvoice) {
+        showErrorToast("Source invoice not found");
+        return;
+    }
+    
+    // Show loading state
+    const saveButton = onlySave ? document.getElementById('save-topup-only-btn') : document.getElementById('save-topup-btn');
+    const spinner = onlySave ? document.getElementById('topup-only-spinner') : document.getElementById('topup-spinner');
+    
+    if (saveButton && spinner) {
+        saveButton.disabled = true;
+        spinner.classList.remove('hidden');
+        const buttonText = onlySave ? 'Saving...' : 'Generating & Saving...';
+        saveButton.innerHTML = `<span>${buttonText}</span>${spinner.outerHTML}`;
+    }
+    
+    try {
+        const currentPaymentDue = parseFloat(document.getElementById('currentPaymentDue').value) || 0;
+        const exchangeRate = parseFloat(document.getElementById('topupExchangeRate').value) || 130;
+        const dueDate = document.getElementById('topupDueDate').value;
+        const paymentDays = parseInt(document.getElementById('topupPaymentDays').value) || 10;
+        const paymentReference = document.getElementById('paymentReference').value;
+        
+        // Collect bank details
+        const bankSelect = document.getElementById('topupBankDetailsSelect');
+        let selectedBank = null;
+        
+        if (bankSelect.selectedIndex > 0) {
+            try {
+                const bankValue = bankSelect.options[bankSelect.selectedIndex].value;
+                const decodedValue = bankValue
+                    .replace(/&apos;/g, "'")
+                    .replace(/&quot;/g, '"')
+                    .replace(/&lt;/g, '<')
+                    .replace(/&gt;/g, '>')
+                    .replace(/&amp;/g, '&');
+                
+                selectedBank = JSON.parse(decodedValue);
+            } catch (e) {
+                console.error("Error parsing bank details:", e);
+            }
+        }
+        
+        if (!selectedBank) {
+            showErrorToast("Please select a bank account.");
+            resetTopUpSaveButton(saveButton, spinner, onlySave);
+            return;
+        }
+        
+        // Calculate totals
+        const totalPrice = sourceInvoice.totalPrice || sourceInvoice.pricing?.totalUSD || 0;
+        const totalPaidSoFar = sourceInvoice.totalPaid || 0;
+        const newTotalPaid = totalPaidSoFar + currentPaymentDue;
+        const remainingAfter = totalPrice - newTotalPaid;
+        
+        // Generate invoice number
+        const carMakeModel = sourceInvoice.carDetails?.make && sourceInvoice.carDetails?.model 
+            ? `${sourceInvoice.carDetails.make} ${sourceInvoice.carDetails.model}` 
+            : sourceInvoice.vehicleDetails?.makeModel || 'Unknown';
+        
+        const invoiceId = await generateTopUpInvoiceNumber(sourceInvoice.clientName, carMakeModel, sourceInvoice.invoiceId);
+        
+        // Prepare invoice data
+        const topUpData = {
+            docType: 'Top-Up Invoice',
+            invoiceId,
+            sourceInvoiceId: sourceInvoice.invoiceId,
+            sourceInvoiceFirestoreId: sourceInvoice.firestoreId,
+            sourceInvoiceType: sourceInvoice.sourceType || 'regular',
+            clientName: sourceInvoice.clientName,
+            clientPhone: sourceInvoice.clientPhone || '',
+            issueDate: getCurrentDateForDocument(),
+            dueDate: dueDate || null,
+            paymentDays: paymentDays,
+            exchangeRate,
+            carDetails: sourceInvoice.carDetails || sourceInvoice.vehicleDetails || {
+                make: sourceInvoice.carDetails?.make || '',
+                model: sourceInvoice.carDetails?.model || '',
+                year: sourceInvoice.carDetails?.year || '',
+                vin: sourceInvoice.carDetails?.vin || sourceInvoice.vehicleDetails?.vin || '',
+                color: sourceInvoice.carDetails?.color || ''
+            },
+            pricing: {
+                totalUSD: totalPrice,
+                totalPaid: totalPaidSoFar,
+                currentPaymentDue: currentPaymentDue,
+                newTotalPaid: newTotalPaid,
+                remainingBalance: remainingAfter,
+                paymentPercentage: (currentPaymentDue / totalPrice * 100),
+                totalPaidPercentage: (newTotalPaid / totalPrice * 100)
+            },
+            paymentReference: paymentReference,
+            bankDetails: selectedBank,
+            createdBy: currentUser.email,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+            revoked: false
+        };
+        
+        // Save to Firestore
+        const docRef = await db.collection("top_up_invoices").add(topUpData);
+        
+        resetTopUpSaveButton(saveButton, spinner, onlySave);
+        showSuccessToast(`Top-Up Invoice ${invoiceId} saved successfully!`);
+        
+        if (!onlySave) {
+            topUpData.firestoreId = docRef.id;
+            generateTopUpPDF(topUpData);
+        }
+        
+        // Reset and go back to selection
+        window.currentTopUpSourceInvoice = null;
+        renderTopUpInvoiceForm();
+        fetchTopUpInvoices();
+        
+    } catch (error) {
+        console.error("Error saving top-up invoice:", error);
+        resetTopUpSaveButton(saveButton, spinner, onlySave);
+        showErrorToast("Failed to save invoice: " + error.message);
+    }
+}
+
+/**
+ * Resets the top-up save button state
+ */
+function resetTopUpSaveButton(saveButton, spinner, onlySave) {
+    if (saveButton && spinner) {
+        saveButton.disabled = false;
+        spinner.classList.add('hidden');
+        const buttonText = onlySave ? 'Save Only (No PDF)' : 'Generate & Save Top-Up Invoice';
+        saveButton.innerHTML = `<span>${buttonText}</span>${spinner.outerHTML}`;
+    }
+}
+
+/**
+ * Fetches and displays top-up invoices
+ */
+async function fetchTopUpInvoices() {
+    const listElement = document.getElementById('recent-topups');
+    if (!listElement) return;
+    
+    try {
+        const snapshot = await db.collection("top_up_invoices").orderBy("createdAt", "desc").limit(10).get();
+        
+        if (snapshot.empty) {
+            listElement.innerHTML = `
+                <div class="text-center p-8 border border-dashed border-gray-300 rounded-lg">
+                    <svg class="w-12 h-12 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                    </svg>
+                    <p class="text-gray-500">No top-up invoices found.</p>
+                </div>
+            `;
+            return;
+        }
+        
+        let html = `<ul class="space-y-3">`;
+        snapshot.forEach((doc, index) => {
+            const data = doc.data();
+            const animationDelay = index * 50;
+            const isRevoked = data.revoked || false;
+            
+            // Safely access pricing properties
+            const totalUSD = data.pricing?.totalUSD || 0;
+            const currentPaymentDue = data.pricing?.currentPaymentDue || 0;
+            const newTotalPaid = data.pricing?.newTotalPaid || 0;
+            const remainingBalance = data.pricing?.remainingBalance || 0;
+            const clientName = data.clientName || 'N/A';
+            const sourceInvoiceId = data.sourceInvoiceId || 'N/A';
+            const invoiceId = data.invoiceId || 'N/A';
+            
+            const topUpDataJson = JSON.stringify({
+                ...data,
+                firestoreId: doc.id,
+                createdAt: data.createdAt ? data.createdAt.toDate().toISOString() : new Date().toISOString()
+            });
+            
+            html += `<li class="p-3 border rounded-lg ${isRevoked ? 'bg-red-50 border-red-200' : 'bg-gray-50 border-gray-200'} flex flex-col sm:flex-row justify-between items-start sm:items-center animate-fade-in" style="animation-delay: ${animationDelay}ms">
+                        <div class="flex-1">
+                            ${isRevoked ? `<span class="bg-red-500 text-white text-xs font-bold px-2 py-1 rounded mb-2 inline-block">REVOKED</span><br>` : ''}
+                            <strong class="text-teal-600">${invoiceId}</strong><br>
+                            <span class="text-sm text-gray-700">Client: ${clientName}</span><br>
+                            <span class="text-sm text-gray-600">Source: ${sourceInvoiceId}</span><br>
+                            <span class="text-xs text-gray-500">Payment: USD ${currentPaymentDue.toFixed(2)} | New Total Paid: USD ${newTotalPaid.toFixed(2)}</span>
+                            <span class="text-xs text-green-600 ml-2">Remaining: USD ${remainingBalance.toFixed(2)}</span>
+                        </div>
+                        <div class="mt-2 sm:mt-0 space-x-2">
+                            <button onclick='reDownloadTopUpInvoice(${topUpDataJson})' 
+                                    class="bg-teal-600 hover:bg-teal-700 text-white text-xs py-1 px-3 rounded-full transition duration-150 flex items-center gap-1">
+                                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                                </svg>
+                                PDF
+                            </button>
+                            ${!isRevoked && remainingBalance > 0 ? `
+                            <button onclick='createTopUpFromInvoice(${topUpDataJson})' 
+                                    class="bg-orange-600 hover:bg-orange-700 text-white text-xs py-1 px-3 rounded-full transition duration-150 flex items-center gap-1">
+                                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+                                </svg>
+                                Top Up Again
+                            </button>
+                            ` : ''}
+                            ${!isRevoked ? `
+                            <button onclick='revokeTopUpInvoice(${topUpDataJson})' 
+                                    class="bg-red-600 hover:bg-red-800 text-white text-xs py-1 px-3 rounded-full transition duration-150 flex items-center gap-1">
+                                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                                </svg>
+                                REVOKE
+                            </button>
+                            ` : ''}
+                        </div>
+                    </li>`;
+        });
+        html += `</ul>`;
+        listElement.innerHTML = html;
+        
+    } catch (error) {
+        console.error("Error fetching top-up invoices:", error);
+        listElement.innerHTML = `
+            <div class="text-center p-4 bg-red-50 border border-red-200 rounded-lg">
+                <p class="text-red-600 font-semibold">Error loading top-up invoices</p>
+                <p class="text-xs text-gray-600 mt-1">${error.message}</p>
+            </div>
+        `;
+    }
+}
+
+/**
+ * Renders the top-up invoice history page
+ */
+function renderTopUpHistory() {
+    const formArea = document.getElementById('document-form-area');
+    formArea.innerHTML = `
+        <div class="p-6 border border-gray-300 rounded-xl bg-white shadow-lg animate-fade-in">
+            <h3 class="text-xl font-semibold mb-6 text-primary-blue">Top-Up Invoice History</h3>
+            <div id="topup-history-list">
+                ${createShimmerLoader(3)}
+            </div>
+        </div>
+    `;
+    
+    // Load top-up invoices
+    (async () => {
+        const listElement = document.getElementById('topup-history-list');
+        if (!listElement) return;
+        
+        try {
+            const snapshot = await db.collection("top_up_invoices").orderBy("createdAt", "desc").limit(20).get();
+            
+            if (snapshot.empty) {
+                listElement.innerHTML = `
+                    <div class="text-center p-8 border border-dashed border-gray-300 rounded-lg">
+                        <svg class="w-12 h-12 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                        </svg>
+                        <p class="text-gray-500">No top-up invoices found.</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            let html = `<ul class="space-y-3 divide-y divide-gray-200">`;
+            snapshot.forEach((doc, index) => {
+                const data = doc.data();
+                const invoiceDataJson = JSON.stringify({
+                    ...data,
+                    firestoreId: doc.id,
+                    createdAt: data.createdAt ? data.createdAt.toDate().toISOString() : new Date().toISOString()
+                });
+
+                const isRevoked = data.revoked || false;
+                const animationDelay = index * 50;
+                
+               html += `<li class="p-3 bg-gray-50 flex flex-col sm:flex-row justify-between items-start sm:items-center animate-fade-in ${isRevoked ? 'bg-red-50 border-l-4 border-red-500' : ''}" 
+             style="animation-delay: ${animationDelay}ms">
+            <div>
+                ${isRevoked ? `<span class="bg-red-500 text-white text-xs font-bold px-2 py-1 rounded mb-2 inline-block">REVOKED</span><br>` : ''}
+                <strong class="text-primary-blue">${data.docType} ${data.invoiceId}</strong><br>
+                <span class="text-sm text-gray-700">Client: ${data.clientName} | Vehicle: ${data.carDetails.make} ${data.carDetails.model}</span><br>
+                <span class="text-xs text-gray-600">Total: USD ${data.pricing.totalUSD.toFixed(2)}</span>
+                ${data.pricing.depositPaid ? `<br><span class="text-xs text-green-600 flex items-center gap-1"><svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg> Deposit Paid</span>` : `<br><span class="text-xs text-secondary-red flex items-center gap-1"><svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM7 9a1 1 0 000 2h6a1 1 0 100-2H7z" clip-rule="evenodd"/></svg> Deposit Pending</span>`}
+            </div>
+            <div class="mt-2 sm:mt-0 space-x-2">
+    <button onclick='reDownloadInvoice(${invoiceDataJson})' 
+            class="bg-primary-blue hover:bg-blue-600 text-white text-xs py-1 px-3 rounded-full transition duration-150 flex items-center gap-1">
+        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+        </svg>
+        PDF
+    </button>
+    ${!isRevoked ? `
+        ${!data.pricing.depositPaid && data.docType !== 'Auction Invoice' ? `
+        <button onclick='markInvoiceDepositPaid(${invoiceDataJson})' 
+                class="bg-green-600 hover:bg-green-700 text-white text-xs py-1 px-3 rounded-full transition duration-150 flex items-center gap-1">
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+            </svg>
+            Deposit
+        </button>
+        ` : ''}
+        ${data.docType === 'Auction Invoice' ? `
+        <button onclick='createTopUpFromAuctionInvoice(${invoiceDataJson})' 
+                class="bg-teal-600 hover:bg-teal-700 text-white text-xs py-1 px-3 rounded-full transition duration-150 flex items-center gap-1">
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+            </svg>
+            Top Up
+        </button>
+        ` : ''}
+        ${(data.docType === 'Top-Up Invoice' || data.docType === 'Invoice' || data.docType === 'Proforma Invoice') && (data.pricing?.remainingBalance || data.pricing?.balanceUSD) > 0 ? `
+        <button onclick='createBalanceInvoice(${invoiceDataJson})' 
+                class="bg-purple-600 hover:bg-purple-700 text-white text-xs py-1 px-3 rounded-full transition duration-150 flex items-center gap-1">
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+            </svg>
+            Balance
+        </button>
+        ` : ''}
+        <button onclick='createReceiptFromInvoice(${invoiceDataJson})' 
+                class="bg-secondary-red hover:bg-red-700 text-white text-xs py-1 px-3 rounded-full transition duration-150 flex items-center gap-1">
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+            </svg>
+            Receipt
+        </button>
+        <button onclick='createAdditionalInvoice(${invoiceDataJson})' 
+                class="bg-yellow-600 hover:bg-yellow-700 text-white text-xs py-1 px-3 rounded-full transition duration-150 flex items-center gap-1">
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+            </svg>
+            Add
+        </button>
+        <button onclick='viewClientInvoiceTrail("${data.clientName.replace(/"/g, '&quot;')}")' 
+                class="bg-purple-600 hover:bg-purple-700 text-white text-xs py-1 px-3 rounded-full transition duration-150 flex items-center gap-1">
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path>
+            </svg>
+            Trail
+        </button>
+        <button onclick='revokeInvoice(${invoiceDataJson})' 
+                class="bg-red-600 hover:bg-red-800 text-white text-xs py-1 px-3 rounded-full transition duration-150 flex items-center gap-1">
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+            </svg>
+            REVOKE
+        </button>
+    ` : `
+        <button onclick='unrevokeInvoice(${invoiceDataJson})' 
+                class="bg-gray-600 hover:bg-gray-800 text-white text-xs py-1 px-3 rounded-full transition duration-150 flex items-center gap-1">
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+            </svg>
+            UNREVOKE
+        </button>
+    `}
+</div>
+        </li>`;
+            });
+            html += `</ul>`;
+            listElement.innerHTML = html;
+            
+        } catch (error) {
+            console.error("Error fetching top-up invoices:", error);
+            listElement.innerHTML = `
+                <div class="text-center p-4 bg-red-50 border border-red-200 rounded-lg">
+                    <p class="text-red-600 font-semibold">Error loading top-up invoices</p>
+                    <p class="text-xs text-gray-600 mt-1">${error.message}</p>
+                </div>
+            `;
+        }
+    })();
+}
+
+/**
+ * Creates a new top-up from an existing invoice
+ */
+function createTopUpFromInvoice(invoiceData) {
+    // Check if invoice is revoked
+    if (invoiceData.revoked) {
+        showErrorToast("Cannot create top-up from a revoked invoice.");
+        return;
+    }
+    
+    // Check if there's remaining balance
+    if (invoiceData.pricing?.remainingBalance <= 0) {
+        showErrorToast("This invoice is already fully paid. No top-up needed.");
+        return;
+    }
+    
+    renderTopUpForm({
+        ...invoiceData,
+        totalPrice: invoiceData.pricing?.totalUSD || 0,
+        totalPaid: invoiceData.pricing?.totalPaid || invoiceData.pricing?.newTotalPaid || 0,
+        remainingBalance: invoiceData.pricing?.remainingBalance || 0,
+        sourceInvoiceId: invoiceData.invoiceId,
+        sourceType: 'topup',
+        firestoreId: invoiceData.firestoreId
+    });
+}
+
+/**
+ * Re-downloads a top-up invoice PDF
+ */
+function reDownloadTopUpInvoice(data) {
+    showDateConfirmationDialog(data, 'topup');
+}
+
+/**
+ * Revokes a top-up invoice
+ */
+async function revokeTopUpInvoice(data) {
+    if (!confirm(`Are you sure you want to REVOKE top-up invoice ${data.invoiceId}?\n\nThis will mark it as invalid.`)) {
+        return;
+    }
+    
+    const loadingOverlay = showLoadingOverlay("Revoking invoice...");
+    
+    try {
+        await db.collection("top_up_invoices").doc(data.firestoreId).update({
+            revoked: true,
+            revokedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            revokedBy: currentUser.email
+        });
+        
+        hideLoadingOverlay();
+        showSuccessToast(`Top-up invoice ${data.invoiceId} has been revoked.`);
+        
+        // Refresh the current view
+        if (document.getElementById('topup-history-list')) {
+            renderTopUpHistory();
+        } else if (document.getElementById('recent-topups')) {
+            fetchTopUpInvoices();
+        }
+        
+    } catch (error) {
+        console.error("Error revoking top-up invoice:", error);
+        hideLoadingOverlay();
+        showErrorToast("Failed to revoke invoice: " + error.message);
+    }
+}
+
+/**
+ * Unrevokes a top-up invoice
+ */
+async function unrevokeTopUpInvoice(data) {
+    if (!confirm(`Are you sure you want to UNREVOKE top-up invoice ${data.invoiceId}?`)) {
+        return;
+    }
+    
+    const loadingOverlay = showLoadingOverlay("Unrevoking invoice...");
+    
+    try {
+        await db.collection("top_up_invoices").doc(data.firestoreId).update({
+            revoked: false,
+            unrevokedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            unrevokedBy: currentUser.email
+        });
+        
+        hideLoadingOverlay();
+        showSuccessToast(`Top-up invoice ${data.invoiceId} has been unrevoked.`);
+        
+        if (document.getElementById('topup-history-list')) {
+            renderTopUpHistory();
+        } else if (document.getElementById('recent-topups')) {
+            fetchTopUpInvoices();
+        }
+        
+    } catch (error) {
+        console.error("Error unrevoking top-up invoice:", error);
+        hideLoadingOverlay();
+        showErrorToast("Failed to unrevoke invoice: " + error.message);
+    }
+}
+
+/**
+ * Search top-up invoices
+ */
+async function searchTopUpInvoices(searchTerm) {
+    try {
+        searchTerm = searchTerm.toLowerCase();
+        
+        const snapshot = await db.collection("top_up_invoices").get();
+        const results = [];
+        
+        snapshot.forEach(doc => {
+            const data = doc.data();
+            
+            const matches = 
+                (data.clientName && data.clientName.toLowerCase().includes(searchTerm)) ||
+                (data.invoiceId && data.invoiceId.toLowerCase().includes(searchTerm)) ||
+                (data.sourceInvoiceId && data.sourceInvoiceId.toLowerCase().includes(searchTerm)) ||
+                (data.clientPhone && data.clientPhone.includes(searchTerm));
+            
+            if (matches) {
+                results.push({ id: doc.id, ...data });
+            }
+        });
+        
+        return results;
+    } catch (error) {
+        console.error("Error searching top-up invoices:", error);
+        return [];
+    }
+}
+
+/**
+ * Generates PDF for Top-Up Invoice
+ */
+function generateTopUpPDF(data) {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF('p', 'mm', 'a4');
+
+    const primaryColor = '#183263';
+    const secondaryColor = '#D96359';
+    
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    let y = 10;
+    const margin = 10;
+    const lineHeight = 5;
+    const termIndent = 5;
+
+    // Helper to format amounts
+    const formatAmount = (amount) => {
+        if (amount === null || amount === undefined) return '0.00';
+        const rounded = Math.round(amount);
+        return rounded.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    };
+
+    const drawText = (text, x, y, size, style = 'normal', color = primaryColor, align = 'left') => {
+        doc.setFontSize(size);
+        doc.setFont("helvetica", style);
+        doc.setTextColor(color);
+        doc.text(text, x, y, { align: align });
+    };
+
+    // Add REVOKED watermark if revoked
+    if (data.revoked) {
+        doc.setFontSize(60);
+        doc.setTextColor(255, 0, 0, 30);
+        doc.setFont("helvetica", "bold");
+        doc.text('REVOKED', pageW / 2, pageH / 2, null, null, "center");
+        doc.setTextColor(255, 0, 0, 30);
+        doc.text('INVALID', pageW / 2, pageH / 2 + 20, null, null, "center");
+        doc.setTextColor(0);
+    }
+
+    // Function to add stamp
+    const addStampWithDate = (x, y, dateText) => {
+        try {
+            const stampWidth = 30;
+            const stampHeight = 30;
+            doc.addImage('STAMP.png', 'JPEG', x - (stampWidth/2), y, stampWidth, stampHeight);
+            doc.setFontSize(14);
+            doc.setTextColor(255, 0, 0);
+            doc.setFont("helvetica", "bold");
+            const textX = x;
+            const textY = y + (stampHeight/2) + 2;
+            doc.text(dateText, textX, textY, null, null, "center");
+            doc.setFontSize(10);
+            doc.setTextColor(primaryColor);
+            doc.text('For WanBite Investment Co. LTD', x, y + stampHeight + 8, null, null, "center");
+        } catch (error) {
+            console.error("Error adding stamp:", error);
+            doc.setFontSize(14);
+            doc.setTextColor(255, 0, 0);
+            doc.text(dateText, x, y - 2, null, null, "center");
+            doc.setFontSize(10);
+            doc.setTextColor(primaryColor);
+            doc.text('For WanBite Investment Co. LTD', x, y + 5, null, null, "center");
+        }
+    };
+
+    const drawTerm = (doc, yStart, prefix, text, textWidth = 188 - termIndent) => {
+        doc.setFontSize(9);
+        doc.setTextColor(primaryColor);
+        doc.setFont("helvetica", "bold");
+        doc.text(prefix, margin, yStart);
+        
+        let textX = margin + 5;
+        const lines = doc.splitTextToSize(text, textWidth);
+        let currentY = yStart;
+        const lineSpacing = 4.5;
+        
+        lines.forEach((line, index) => {
+            let currentX = margin + termIndent;
+            if (index === 0) {
+                const prefixWidth = doc.getStringUnitWidth(prefix) * doc.getFontSize() / doc.internal.scaleFactor;
+                currentX = margin + prefixWidth + 1;
+            } else {
+                currentX = margin + termIndent;
+            }
+
+            doc.setTextColor(primaryColor);
+            doc.setFont("helvetica", "normal");
+            doc.text(line, currentX, currentY);
+            currentY += lineSpacing;
+        });
+        
+        return currentY + 1;
+    };
+
+    // =================================================================
+    // HEADER
+    // =================================================================
+    doc.setFillColor(primaryColor);
+    doc.rect(0, 0, pageW, 15, 'F');
+    
+    drawText('WanBite Investments Co. Ltd.', pageW / 2, 8, 18, 'bold', '#FFFFFF', 'center');
+    drawText('carskenya.co.ke', pageW / 2, 13, 10, 'normal', '#FFFFFF', 'center');
+    
+    y = 25;
+
+    // TITLE
+    doc.setTextColor(secondaryColor);
+    doc.setFontSize(24);
+    doc.setFont("helvetica", "bold");
+    doc.text("TOP-UP INVOICE", pageW / 2, y, null, null, "center");
+    y += 10;
+    
+    // Invoice/Date Box
+    doc.setDrawColor(primaryColor);
+    doc.setLineWidth(0.5);
+    doc.rect(margin, y, 188, 18);
+    
+    drawText('INVOICE NO:', margin + 3, y + 6, 10, 'bold', secondaryColor);
+    drawText(data.invoiceId, margin + 3, y + 13, 12, 'bold', primaryColor);
+    
+    drawText('ISSUE DATE:', pageW - margin - 80, y + 6, 10, 'bold', secondaryColor);
+    drawText(data.issueDate, pageW - margin - 80, y + 13, 10, 'bold', primaryColor);
+    
+    drawText('DUE DATE:', pageW - margin - 15, y + 6, 10, 'bold', secondaryColor, 'right');
+    drawText(data.dueDate || 'N/A', pageW - margin - 15, y + 13, 10, 'bold', primaryColor, 'right');
+    y += 23;
+
+    // Client Info
+    doc.setDrawColor(primaryColor);
+    doc.setLineWidth(0.2);
+    doc.rect(margin, y, 188, 15);
+    drawText('BILL TO:', margin + 3, y + 5, 10, 'bold', secondaryColor);
+    drawText(data.clientName, margin + 3, y + 11, 10, 'bold', 0);
+    drawText(`Phone: ${data.clientPhone || 'N/A'}`, pageW - margin - 70, y + 8, 9, 'normal', 0);
+    drawText(`Source Invoice: ${data.sourceInvoiceId}`, pageW - margin - 70, y + 13, 9, 'normal', 0);
+    y += 20;
+
+    // Vehicle Details
+    doc.setFillColor(240, 245, 250);
+    doc.rect(margin, y, 188, 12, 'F');
+    doc.setDrawColor(primaryColor);
+    doc.rect(margin, y, 188, 12);
+    drawText('VEHICLE DETAILS', margin + 5, y + 8, 10, 'bold', primaryColor);
+    drawText(`${data.carDetails?.make || ''} ${data.carDetails?.model || ''} (${data.carDetails?.year || ''})`, margin + 50, y + 8, 10, 'normal', 0);
+    y += 15;
+    
+    doc.setFillColor(255);
+    doc.rect(margin, y, 188, 10, 'F');
+    doc.setDrawColor(200);
+    doc.rect(margin, y, 188, 10);
+    drawText('VIN:', margin + 5, y + 7, 9, 'bold', secondaryColor);
+    drawText(data.carDetails?.vin || 'N/A', margin + 25, y + 7, 9, 'normal', 0);
+    drawText('Color:', margin + 100, y + 7, 9, 'bold', secondaryColor);
+    drawText(data.carDetails?.color || 'N/A', margin + 125, y + 7, 9, 'normal', 0);
+    y += 15;
+
+    // Payment Summary
+    drawText('PAYMENT SUMMARY', margin, y, 12, 'bold', primaryColor);
+    doc.setDrawColor(primaryColor);
+    doc.setLineWidth(0.5);
+    const summaryWidth = doc.getStringUnitWidth('PAYMENT SUMMARY') * 12 / doc.internal.scaleFactor;
+    doc.line(margin, y + 1, margin + summaryWidth, y + 1);
+    y += lineHeight + 2;
+    
+    // Replace the Payment Summary section in generateTopUpPDF
+doc.setFillColor(255, 245, 230);
+doc.rect(margin, y, 188, 20, 'F');  // Reduced height
+doc.setDrawColor(secondaryColor);
+doc.setLineWidth(0.5);
+doc.rect(margin, y, 188, 20);
+
+let summaryY = y + 5;
+doc.setFontSize(10);
+doc.setTextColor(0);
+doc.text(`Total Purchase Price:`, margin + 5, summaryY);
+drawText(`USD ${formatAmount(data.pricing.totalUSD)}`, margin + 70, summaryY, 10, 'bold', primaryColor);
+summaryY += 5;
+
+doc.text(`Amount Payable for this Invoice:`, margin + 5, summaryY);
+drawText(`USD ${formatAmount(data.pricing.currentPaymentDue)}`, margin + 70, summaryY, 12, 'bold', secondaryColor);
+
+y += 25;
+
+    // =================================================================
+    // TERMS & CONDITIONS
+    // =================================================================
+    drawText('TERMS & CONDITIONS', margin, y, 12, 'bold', primaryColor);
+    doc.setDrawColor(primaryColor);
+    doc.setLineWidth(0.5);
+    const termsWidth = doc.getStringUnitWidth('TERMS & CONDITIONS') * 12 / doc.internal.scaleFactor;
+    doc.line(margin, y + 1, margin + termsWidth, y + 1);
+    y += lineHeight + 2;
+    
+    // Term 1: Currency Clause
+    const term1 = `All payments due under this contract shall be made in USD. In the event that payments are made in any other currency, the same shall be subject to the current dollar exchange rate.`;
+    y = drawTerm(doc, y, '1.', term1);
+    
+    // Term 2: Purchase Price and Payment Schedule
+    const term2 = `Purchase Price in the sum of USD ${formatAmount(data.pricing.totalUSD)} shall be paid as follows on/by the ${data.dueDate || 'agreed date'}`;
+    y = drawTerm(doc, y, '2.', term2);
+    
+    // Term 2a: Deposit/Auction Payment
+    const term2a = `a. Deposit of USD ${formatAmount(data.pricing.totalPaid)} was made on ${data.sourceInvoiceId} for the execution of the contract.`;
+    y = drawTerm(doc, y, '   ', term2a);
+    
+    // Term 2b: Additional Payment to reach percentage
+    const percentageToPay = ((data.pricing.totalPaid + data.pricing.currentPaymentDue) / data.pricing.totalUSD * 100).toFixed(1);
+    const term2b = `b. An additional USD ${formatAmount(data.pricing.currentPaymentDue)} is required to reach ${percentageToPay}% of the purchase price.`;
+    y = drawTerm(doc, y, '   ', term2b);
+    
+    // Term 2c: Balance Payment
+    const term2c = `c. The balance of USD ${formatAmount(data.pricing.remainingBalance)} within ${data.paymentDays || 10} days after the date of bill of lading. The Seller shall promptly notify the Buyer of the date for due compliance.`;
+    y = drawTerm(doc, y, '   ', term2c);
+    
+    // Term 3: BOL Release
+    const term3 = `The original bill of lading will be issued to the Buyer upon confirmation of full receipt of the purchase price.`;
+    y = drawTerm(doc, y, '3.', term3);
+    
+    // Term 4: Cancellation/Forfeiture
+    const term4 = `If you cancel to buy before or after shipment after purchase is confirmed, your deposit of 50% is to be forfeited.`;
+    y = drawTerm(doc, y, '4.', term4);
+    
+    // Term 5: As Is Condition
+    const term5 = `All the vehicles are subject to AS IS CONDITION.`;
+    y = drawTerm(doc, y, '5.', term5);
+    
+    // Term 6: Third Party Payment
+    const term6 = `Payment will be made by the invoiced person, if third party person makes a payment, please kindly inform us the relationship, this is due to security reason.`;
+    y = drawTerm(doc, y, '6.', term6);
+    
+    y += 5;
+    
+    // Add revocation note if revoked
+    if (data.revoked) {
+        y += 10;
+        doc.setFontSize(12);
+        doc.setTextColor(255, 0, 0);
+        doc.setFont("helvetica", "bold");
+        doc.text('*** THIS INVOICE HAS BEEN REVOKED AND IS NO LONGER VALID ***', pageW / 2, y, null, null, "center");
+        doc.setTextColor(0);
+        y += 10;
+    }
+
+    // =================================================================
+    // PAYMENT INSTRUCTIONS
+    // =================================================================
+    doc.setFillColor(255, 245, 230);
+    doc.rect(margin, y, 188, 30, 'F');
+    doc.setDrawColor(secondaryColor);
+    doc.setLineWidth(0.5);
+    doc.rect(margin, y, 188, 30);
+    let currentY_bank = y + 5;
+    
+    drawText('KINDLY PAY USD TO THE FOLLOWING BANK ACCOUNT:', 15, currentY_bank, 11, 'bold', primaryColor);
+    currentY_bank += 5;
+    
+    doc.setFontSize(10);
+    doc.setTextColor(0);
+    
+    const bank = data.bankDetails || {};
+    const branchText = bank.branch ? `(Branch: ${bank.branch})` : '';
+    
+    doc.text(`Bank Name: ${bank.name || 'N/A'} ${branchText}`, margin + 5, currentY_bank);
+    currentY_bank += 4;
+    doc.text(`Account Name: ${bank.accountName || 'N/A'}`, margin + 5, currentY_bank);
+    currentY_bank += 4;
+    doc.text(`Account Number: ${bank.accountNumber || 'N/A'}`, margin + 5, currentY_bank);
+    currentY_bank += 4;
+    if (bank.paybillNumber) {
+        doc.text(`Paybill Number: ${bank.paybillNumber}`, margin + 5, currentY_bank);
+        currentY_bank += 4;
+    }
+    doc.text(`SWIFT/BIC Code: ${bank.swiftCode || 'N/A'} | Currency: ${bank.currency || 'N/A'}`, margin + 5, currentY_bank);
+    
+    drawText('**NOTE: Buyer Should bear the cost of Bank Charge when remitting T/T', margin, y + 30 - 5, 9, 'bold', secondaryColor);
+    y += 35;
+
+    // =================================================================
+    // SIGNATURES WITH STAMP
+    // =================================================================
+    if (y > pageH - 35) {
+        doc.addPage();
+        y = 10;
+    }
+    
+    // Buyer signature line
+    doc.line(margin, y, 90, y);
+    drawText('Accepted and Confirmed by Buyer', margin + 45, y + 4, 8, 'normal', 0, "center");
+    
+    // Seller signature with stamp
+    const sellerSigX = 110;
+    const stampY = y - 5;
+    addStampWithDate(sellerSigX + 40, stampY, data.issueDate);
+    
+    y += 15;
+
+    // =================================================================
+    // FOOTER
+    // =================================================================
+    doc.setFillColor(primaryColor);
+    doc.rect(0, pageH - 10, pageW, 10, 'F');
+    doc.setTextColor(255);
+    doc.setFontSize(9);
+    const footerText = `Location: Ngong Road, Kilimani, Nairobi. | Email: sales@carskenya.co.ke | Phone: 0713147136`;
+    doc.text(footerText, pageW / 2, pageH - 4, null, null, "center");
+
+    doc.save(`TopUp_${data.invoiceId}.pdf`);
+}
+
+// =================================================================
+//                 INVOICE TRAIL SYSTEM (NEW)
+// =================================================================
+
+/**
+ * Creates a top-up invoice from an auction invoice
+ */
+async function createTopUpFromAuctionInvoice(auctionInvoiceData) {
+    // Check if invoice is revoked
+    if (auctionInvoiceData.revoked) {
+        showErrorToast("Cannot create top-up from a revoked invoice.");
+        return;
+    }
+    
+    // Check if this is actually an auction invoice
+    if (auctionInvoiceData.docType !== 'Auction Invoice') {
+        showErrorToast("Top-up invoices can only be created from Auction Invoices.");
+        return;
+    }
+    
+    // Calculate total paid from receipts
+    const totalPaid = await calculateTotalPaidForInvoice(auctionInvoiceData.invoiceId);
+    const remainingBalance = auctionInvoiceData.pricing.totalUSD - totalPaid;
+    
+    if (remainingBalance <= 0) {
+        showErrorToast("This invoice is already fully paid. No top-up needed.");
+        return;
+    }
+    
+    // Render top-up form with auction invoice data
+    renderTopUpFormFromAuction({
+        ...auctionInvoiceData,
+        totalPrice: auctionInvoiceData.pricing.totalUSD,
+        totalPaid: totalPaid,
+        remainingBalance: remainingBalance,
+        sourceInvoiceId: auctionInvoiceData.invoiceId,
+        sourceType: 'auction',
+        firestoreId: auctionInvoiceData.firestoreId,
+        auctionPrice: auctionInvoiceData.auctionPriceUSD,
+        auctionPriceCurrency: auctionInvoiceData.auctionPriceCurrency
+    });
+}
+
+/**
+ * Creates a balance invoice from any invoice (top-up or regular)
+ */
+async function createBalanceInvoice(sourceInvoiceData) {
+    // Check if invoice is revoked
+    if (sourceInvoiceData.revoked) {
+        showErrorToast("Cannot create balance invoice from a revoked invoice.");
+        return;
+    }
+    
+    // Calculate remaining balance
+    let remainingBalance = sourceInvoiceData.pricing?.remainingBalance || 0;
+    let totalPaid = sourceInvoiceData.pricing?.totalPaid || 0;
+    let totalPrice = sourceInvoiceData.pricing?.totalUSD || 0;
+    
+    // If this is a top-up invoice, we need to get the latest balance
+    if (sourceInvoiceData.docType === 'Top-Up Invoice') {
+        // Get all balance invoices linked to this top-up
+        const balanceSnapshot = await db.collection("balance_invoices")
+            .where("sourceInvoiceId", "==", sourceInvoiceData.invoiceId)
+            .get();
+        
+        let totalBalancePaid = 0;
+        balanceSnapshot.forEach(doc => {
+            const balanceData = doc.data();
+            totalBalancePaid += balanceData.pricing?.currentPaymentDue || 0;
+        });
+        
+        remainingBalance = sourceInvoiceData.pricing?.remainingBalance - totalBalancePaid;
+        totalPaid = sourceInvoiceData.pricing?.totalPaid + totalBalancePaid;
+    }
+    
+    if (remainingBalance <= 0) {
+        showErrorToast("This invoice is already fully paid. No balance invoice needed.");
+        return;
+    }
+    
+    // Render balance form
+    renderBalanceForm({
+        ...sourceInvoiceData,
+        totalPrice: totalPrice,
+        totalPaid: totalPaid,
+        remainingBalance: remainingBalance,
+        sourceInvoiceId: sourceInvoiceData.invoiceId,
+        sourceType: sourceInvoiceData.docType === 'Top-Up Invoice' ? 'topup' : 'regular',
+        firestoreId: sourceInvoiceData.firestoreId
+    });
+}
+
+/**
+ * Renders the balance invoice form
+ */
+function renderBalanceForm(sourceInvoice) {
+    const formArea = document.getElementById('document-form-area');
+    const remainingBalance = sourceInvoice.remainingBalance || 0;
+    const totalPrice = sourceInvoice.totalPrice || 0;
+    const totalPaid = sourceInvoice.totalPaid || 0;
+    
+    formArea.innerHTML = `
+        <div class="p-6 border border-gray-300 rounded-xl bg-white shadow-lg animate-fade-in">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-semibold text-primary-blue">Balance Invoice</h3>
+                <button onclick="window.location.reload()" class="text-secondary-red hover:text-red-700 text-sm underline">← Back</button>
+            </div>
+            
+            <div class="mb-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                <h4 class="font-bold text-primary-blue mb-2">Source Invoice Details</h4>
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                    <div><strong>Invoice No:</strong> ${sourceInvoice.invoiceId}</div>
+                    <div><strong>Client:</strong> ${sourceInvoice.clientName}</div>
+                    <div><strong>Total Price:</strong> USD ${totalPrice.toFixed(2)}</div>
+                    <div><strong>Total Paid:</strong> USD ${totalPaid.toFixed(2)}</div>
+                    <div><strong>Remaining:</strong> USD ${remainingBalance.toFixed(2)}</div>
+                </div>
+            </div>
+            
+            <form id="balance-form" onsubmit="event.preventDefault(); saveBalanceInvoice();">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 p-4 bg-gray-50 rounded-lg">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">Document Type</label>
+                        <input type="text" value="Balance Invoice" readonly class="mt-1 block w-full p-2 border bg-gray-100 rounded-md">
+                    </div>
+                    <div>
+                        <label for="balanceExchangeRate" class="block text-sm font-medium text-gray-700">USD 1 = KES</label>
+                        <input type="number" id="balanceExchangeRate" step="1" required value="${sourceInvoice.exchangeRate || 130}" class="mt-1 block w-full p-2 border rounded-md transition duration-200">
+                    </div>
+                    <div>
+                        <label for="balanceDueDate" class="block text-sm font-medium text-gray-700">Due Date (Optional)</label>
+                        <input type="date" id="balanceDueDate" class="mt-1 block w-full p-2 border rounded-md transition duration-200">
+                    </div>
+                </div>
+                
+                <div class="mb-4 p-4 bg-yellow-50 rounded-lg border border-yellow-300">
+                    <h4 class="font-bold text-secondary-red mb-3">Balance Payment Details</h4>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label for="balancePaymentDue" class="block text-sm font-medium text-gray-700">Amount to Pay Now (USD)</label>
+                            <input type="number" id="balancePaymentDue" step="0.01" required value="${remainingBalance.toFixed(2)}" min="0" max="${remainingBalance.toFixed(2)}" class="mt-1 block w-full p-2 border rounded-md transition duration-200" oninput="updateBalanceCalculations()">
+                            <p class="text-xs text-gray-500 mt-1">Enter the amount the client is paying now</p>
+                        </div>
+                        <div>
+                            <label for="balancePercentage" class="block text-sm font-medium text-gray-700">Percentage of Total Price</label>
+                            <input type="text" id="balancePercentage" readonly class="mt-1 block w-full p-2 border bg-gray-100 rounded-md">
+                        </div>
+                    </div>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
+                        <div class="p-2 bg-white rounded border">
+                            <p class="text-xs text-gray-600">Total Paid (Including This Payment)</p>
+                            <p id="balanceTotalPaidAfter" class="text-lg font-bold text-green-600">USD ${(totalPaid + remainingBalance).toFixed(2)}</p>
+                        </div>
+                        <div class="p-2 bg-white rounded border">
+                            <p class="text-xs text-gray-600">Remaining Balance After Payment</p>
+                            <p id="balanceRemainingAfter" class="text-lg font-bold text-secondary-red">USD 0.00</p>
+                        </div>
+                        <div class="p-2 bg-white rounded border">
+                            <p class="text-xs text-gray-600">Percentage Paid After Payment</p>
+                            <p id="balancePercentagePaidAfter" class="text-lg font-bold text-primary-blue">100%</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <fieldset class="border p-4 rounded-lg mb-6">
+                    <legend class="text-base font-semibold text-primary-blue px-2">Vehicle Details (from source invoice)</legend>
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <input type="text" id="balanceCarMakeModel" value="${sourceInvoice.carDetails?.make || ''} ${sourceInvoice.carDetails?.model || ''}" readonly class="p-2 border bg-gray-100 rounded-md">
+                        <input type="text" id="balanceCarYear" value="${sourceInvoice.carDetails?.year || ''}" readonly class="p-2 border bg-gray-100 rounded-md">
+                        <input type="text" id="balanceVinNumber" value="${sourceInvoice.carDetails?.vin || ''}" readonly class="p-2 border bg-gray-100 rounded-md">
+                        <input type="text" id="balanceColor" value="${sourceInvoice.carDetails?.color || ''}" readonly class="p-2 border bg-gray-100 rounded-md">
+                    </div>
+                </fieldset>
+                
+                <fieldset class="border p-4 rounded-lg mb-6">
+                    <legend class="text-base font-semibold text-secondary-red px-2">Bank Account for Payment</legend>
+                    <select id="balanceBankDetailsSelect" required class="mt-1 block w-full p-2 border rounded-md transition duration-200"></select>
+                    <p class="text-xs text-gray-500 mt-1">Select the bank account for this payment</p>
+                </fieldset>
+                
+                <fieldset class="border p-4 rounded-lg mb-6">
+                    <legend class="text-base font-semibold text-secondary-red px-2">Payment Reference</legend>
+                    <input type="text" id="balancePaymentReference" placeholder="Enter payment reference (e.g., Cheque No, RTGS Ref)" class="w-full p-2 border rounded-md transition duration-200">
+                </fieldset>
+                
+                <div class="flex space-x-4">
+                    <button type="submit" id="save-balance-btn" class="flex-1 bg-primary-blue hover:bg-blue-700 text-white font-bold py-3 rounded-lg transition duration-150 flex items-center justify-center gap-2">
+                        <span>Generate & Save Balance Invoice</span>
+                        <svg id="balance-spinner" class="hidden w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                    </button>
+                    <button type="button" onclick="saveBalanceInvoice(true)" id="save-balance-only-btn" class="flex-1 bg-gray-500 hover:bg-gray-700 text-white font-bold py-3 rounded-lg transition duration-150 flex items-center justify-center gap-2">
+                        <span>Save Only (No PDF)</span>
+                        <svg id="balance-only-spinner" class="hidden w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                    </button>
+                </div>
+            </form>
+        </div>
+    `;
+    
+    // Populate bank dropdown
+    populateBankDropdown('balanceBankDetailsSelect', false);
+    
+    // Store source invoice in global variable
+    window.currentBalanceSourceInvoice = sourceInvoice;
+    
+    // Initialize calculations
+    setTimeout(() => {
+        updateBalanceCalculations();
+        
+        // Set default due date to 30 days from now
+        const dueDateInput = document.getElementById('balanceDueDate');
+        if (dueDateInput && !dueDateInput.value) {
+            const defaultDate = new Date();
+            defaultDate.setDate(defaultDate.getDate() + 30);
+            dueDateInput.value = defaultDate.toISOString().slice(0, 10);
+        }
+    }, 100);
+}
+
+/**
+ * Renders top-up form from auction invoice
+ */
+function renderTopUpFormFromAuction(auctionData) {
+    const formArea = document.getElementById('document-form-area');
+    const remainingBalance = auctionData.remainingBalance || 0;
+    const totalPrice = auctionData.totalPrice || 0;
+    const totalPaid = auctionData.totalPaid || 0;
+    
+    // Default to 50% of total price
+    const halfPrice = totalPrice / 2;
+    const amountToReachHalf = Math.max(0, halfPrice - totalPaid);
+    const defaultPaymentDue = amountToReachHalf > 0 ? amountToReachHalf : remainingBalance;
+    
+    formArea.innerHTML = `
+        <div class="p-6 border border-gray-300 rounded-xl bg-white shadow-lg animate-fade-in">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-semibold text-primary-blue">Top-Up Invoice (from Auction)</h3>
+                <button onclick="window.location.reload()" class="text-secondary-red hover:text-red-700 text-sm underline">← Back</button>
+            </div>
+            
+            <div class="mb-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                <h4 class="font-bold text-primary-blue mb-2">Auction Invoice Details</h4>
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                    <div><strong>Invoice No:</strong> ${auctionData.invoiceId}</div>
+                    <div><strong>Client:</strong> ${auctionData.clientName}</div>
+                    <div><strong>Auction Price:</strong> USD ${auctionData.auctionPrice?.toFixed(2) || '0.00'}</div>
+                    <div><strong>Total Paid:</strong> USD ${totalPaid.toFixed(2)}</div>
+                    <div><strong>Remaining:</strong> USD ${remainingBalance.toFixed(2)}</div>
+                    <div><strong>50% of Total:</strong> USD ${halfPrice.toFixed(2)}</div>
+                </div>
+            </div>
+            
+            <form id="topup-auction-form" onsubmit="event.preventDefault(); saveTopUpFromAuction();">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 p-4 bg-gray-50 rounded-lg">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">Document Type</label>
+                        <input type="text" value="Top-Up Invoice" readonly class="mt-1 block w-full p-2 border bg-gray-100 rounded-md">
+                    </div>
+                    <div>
+                        <label for="topupTotalPrice" class="block text-sm font-medium text-gray-700">Total Vehicle Price (USD)</label>
+                        <input type="number" id="topupTotalPrice" step="0.01" required value="${totalPrice.toFixed(2)}" min="${totalPaid.toFixed(2)}" class="mt-1 block w-full p-2 border rounded-md transition duration-200" oninput="updateTopUpFromAuctionCalculations()">
+                    </div>
+                    <div>
+                        <label for="topupDueDate" class="block text-sm font-medium text-gray-700">Due Date (Optional)</label>
+                        <input type="date" id="topupDueDate" class="mt-1 block w-full p-2 border rounded-md transition duration-200">
+                    </div>
+                </div>
+                
+                <div class="mb-4 p-4 bg-yellow-50 rounded-lg border border-yellow-300">
+                    <h4 class="font-bold text-secondary-red mb-3">Top-Up Payment Details</h4>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label for="topupPercentageTarget" class="block text-sm font-medium text-gray-700">Target Percentage to Reach (%)</label>
+                            <input type="number" id="topupPercentageTarget" step="1" required value="50" min="1" max="100" class="mt-1 block w-full p-2 border rounded-md transition duration-200" oninput="updateTopUpFromAuctionCalculations()">
+                            <p class="text-xs text-gray-500 mt-1">Percentage of total price to reach with this payment</p>
+                        </div>
+                        <div>
+                            <label for="topupAmountToPay" class="block text-sm font-medium text-gray-700">Amount to Pay Now (USD)</label>
+                            <input type="number" id="topupAmountToPay" step="0.01" required value="${defaultPaymentDue.toFixed(2)}" min="0" class="mt-1 block w-full p-2 border rounded-md transition duration-200" oninput="updateTopUpFromAuctionCalculations()">
+                            <p class="text-xs text-gray-500 mt-1">Enter the amount the client is paying now</p>
+                        </div>
+                    </div>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
+                        <div class="p-2 bg-white rounded border">
+                            <p class="text-xs text-gray-600">New Total Price</p>
+                            <p id="topupNewTotalPrice" class="text-lg font-bold text-primary-blue">USD ${totalPrice.toFixed(2)}</p>
+                        </div>
+                        <div class="p-2 bg-white rounded border">
+                            <p class="text-xs text-gray-600">Total Paid After Payment</p>
+                            <p id="topupTotalPaidAfter" class="text-lg font-bold text-green-600">USD ${(totalPaid + defaultPaymentDue).toFixed(2)}</p>
+                        </div>
+                        <div class="p-2 bg-white rounded border">
+                            <p class="text-xs text-gray-600">Remaining Balance</p>
+                            <p id="topupRemainingAfter" class="text-lg font-bold text-secondary-red">USD ${(totalPrice - (totalPaid + defaultPaymentDue)).toFixed(2)}</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <fieldset class="border p-4 rounded-lg mb-6">
+                    <legend class="text-base font-semibold text-primary-blue px-2">Vehicle Details</legend>
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <input type="text" id="topupCarMakeModel" value="${auctionData.carDetails?.make || ''} ${auctionData.carDetails?.model || ''}" readonly class="p-2 border bg-gray-100 rounded-md">
+                        <input type="text" id="topupCarYear" value="${auctionData.carDetails?.year || ''}" readonly class="p-2 border bg-gray-100 rounded-md">
+                        <input type="text" id="topupVinNumber" value="${auctionData.carDetails?.vin || ''}" readonly class="p-2 border bg-gray-100 rounded-md">
+                        <input type="text" id="topupColor" value="${auctionData.carDetails?.color || ''}" readonly class="p-2 border bg-gray-100 rounded-md">
+                    </div>
+                </fieldset>
+                
+                <fieldset class="border p-4 rounded-lg mb-6">
+                    <legend class="text-base font-semibold text-secondary-red px-2">Bank Account for Payment</legend>
+                    <select id="topupAuctionBankDetailsSelect" required class="mt-1 block w-full p-2 border rounded-md transition duration-200"></select>
+                    <p class="text-xs text-gray-500 mt-1">Select the bank account for this payment</p>
+                </fieldset>
+                
+                <fieldset class="border p-4 rounded-lg mb-6">
+                    <legend class="text-base font-semibold text-secondary-red px-2">Payment Reference</legend>
+                    <input type="text" id="topupPaymentReference" placeholder="Enter payment reference (e.g., Cheque No, RTGS Ref)" class="w-full p-2 border rounded-md transition duration-200">
+                </fieldset>
+                
+                <div class="flex space-x-4">
+                    <button type="submit" id="save-topup-auction-btn" class="flex-1 bg-teal-600 hover:bg-teal-700 text-white font-bold py-3 rounded-lg transition duration-150 flex items-center justify-center gap-2">
+                        <span>Generate & Save Top-Up Invoice</span>
+                        <svg id="topup-auction-spinner" class="hidden w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                    </button>
+                    <button type="button" onclick="saveTopUpFromAuction(true)" id="save-topup-auction-only-btn" class="flex-1 bg-gray-500 hover:bg-gray-700 text-white font-bold py-3 rounded-lg transition duration-150 flex items-center justify-center gap-2">
+                        <span>Save Only (No PDF)</span>
+                        <svg id="topup-auction-only-spinner" class="hidden w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                    </button>
+                </div>
+            </form>
+        </div>
+    `;
+    
+    // Populate bank dropdown
+    populateBankDropdown('topupAuctionBankDetailsSelect', false);
+    
+    // Store auction data in global variable
+    window.currentTopUpAuctionData = {
+        ...auctionData,
+        totalPrice: totalPrice,
+        totalPaid: totalPaid,
+        remainingBalance: remainingBalance
+    };
+    
+    // Initialize calculations
+    setTimeout(() => {
+        updateTopUpFromAuctionCalculations();
+        
+        // Set default due date to 30 days from now
+        const dueDateInput = document.getElementById('topupDueDate');
+        if (dueDateInput && !dueDateInput.value) {
+            const defaultDate = new Date();
+            defaultDate.setDate(defaultDate.getDate() + 30);
+            dueDateInput.value = defaultDate.toISOString().slice(0, 10);
+        }
+    }, 100);
+}
+
+/**
+ * Updates calculations for top-up from auction form
+ */
+function updateTopUpFromAuctionCalculations() {
+    const auctionData = window.currentTopUpAuctionData;
+    if (!auctionData) return;
+    
+    const newTotalPrice = parseFloat(document.getElementById('topupTotalPrice').value) || auctionData.totalPrice;
+    const percentageTarget = parseFloat(document.getElementById('topupPercentageTarget').value) || 50;
+    const amountToPay = parseFloat(document.getElementById('topupAmountToPay').value) || 0;
+    
+    const totalPaidSoFar = auctionData.totalPaid || 0;
+    const targetAmount = (percentageTarget / 100) * newTotalPrice;
+    const suggestedAmount = Math.max(0, targetAmount - totalPaidSoFar);
+    const totalPaidAfter = totalPaidSoFar + amountToPay;
+    const remainingAfter = newTotalPrice - totalPaidAfter;
+    
+    // Update displays
+    document.getElementById('topupNewTotalPrice').textContent = `USD ${newTotalPrice.toFixed(2)}`;
+    document.getElementById('topupTotalPaidAfter').textContent = `USD ${totalPaidAfter.toFixed(2)}`;
+    document.getElementById('topupRemainingAfter').textContent = `USD ${Math.max(0, remainingAfter).toFixed(2)}`;
+    
+    // If the amount to pay is less than suggested, show warning
+    if (amountToPay < suggestedAmount && amountToPay > 0) {
+        const warningMsg = document.getElementById('topup-warning');
+        if (!warningMsg) {
+            const warning = document.createElement('p');
+            warning.id = 'topup-warning';
+            warning.className = 'text-xs text-orange-600 mt-1';
+            warning.innerHTML = `⚠️ To reach ${percentageTarget}%, you need to pay USD ${suggestedAmount.toFixed(2)} more`;
+            document.getElementById('topupAmountToPay').parentNode.appendChild(warning);
+        } else {
+            warningMsg.innerHTML = `⚠️ To reach ${percentageTarget}%, you need to pay USD ${suggestedAmount.toFixed(2)} more`;
+        }
+    } else {
+        const warningMsg = document.getElementById('topup-warning');
+        if (warningMsg) warningMsg.remove();
+    }
+}
+
+/**
+ * Saves top-up invoice from auction
+ */
+async function saveTopUpFromAuction(onlySave = false) {
+    const form = document.getElementById('topup-auction-form');
+    if (!form.checkValidity()) {
+        form.reportValidity();
+        return;
+    }
+    
+    const auctionData = window.currentTopUpAuctionData;
+    if (!auctionData) {
+        showErrorToast("Source auction data not found");
+        return;
+    }
+    
+    // Show loading state
+    const saveButton = onlySave ? document.getElementById('save-topup-auction-only-btn') : document.getElementById('save-topup-auction-btn');
+    const spinner = onlySave ? document.getElementById('topup-auction-only-spinner') : document.getElementById('topup-auction-spinner');
+    
+    if (saveButton && spinner) {
+        saveButton.disabled = true;
+        spinner.classList.remove('hidden');
+        const buttonText = onlySave ? 'Saving...' : 'Generating & Saving...';
+        saveButton.innerHTML = `<span>${buttonText}</span>${spinner.outerHTML}`;
+    }
+    
+    try {
+        const newTotalPrice = parseFloat(document.getElementById('topupTotalPrice').value) || 0;
+        const amountToPay = parseFloat(document.getElementById('topupAmountToPay').value) || 0;
+        const percentageTarget = parseFloat(document.getElementById('topupPercentageTarget').value) || 50;
+        const exchangeRate = parseFloat(document.getElementById('balanceExchangeRate')?.value) || 130;
+        const dueDate = document.getElementById('topupDueDate').value;
+        const paymentReference = document.getElementById('topupPaymentReference').value;
+        
+        // Collect bank details
+        const bankSelect = document.getElementById('topupAuctionBankDetailsSelect');
+        let selectedBank = null;
+        
+        if (bankSelect.selectedIndex > 0) {
+            try {
+                const bankValue = bankSelect.options[bankSelect.selectedIndex].value;
+                const decodedValue = bankValue
+                    .replace(/&apos;/g, "'")
+                    .replace(/&quot;/g, '"')
+                    .replace(/&lt;/g, '<')
+                    .replace(/&gt;/g, '>')
+                    .replace(/&amp;/g, '&');
+                
+                selectedBank = JSON.parse(decodedValue);
+            } catch (e) {
+                console.error("Error parsing bank details:", e);
+            }
+        }
+        
+        if (!selectedBank) {
+            showErrorToast("Please select a bank account.");
+            resetTopUpAuctionSaveButton(saveButton, spinner, onlySave);
+            return;
+        }
+        
+        // Calculate totals
+        const totalPaidSoFar = auctionData.totalPaid || 0;
+        const newTotalPaid = totalPaidSoFar + amountToPay;
+        const remainingAfter = newTotalPrice - newTotalPaid;
+        
+        // Generate invoice number
+        const carMakeModel = `${auctionData.carDetails?.make || ''} ${auctionData.carDetails?.model || ''}`.trim() || 'Unknown';
+        const invoiceId = await generateTopUpInvoiceNumber(auctionData.clientName, carMakeModel, auctionData.invoiceId);
+        
+        // Prepare invoice data
+        const topUpData = {
+            docType: 'Top-Up Invoice',
+            invoiceId,
+            sourceInvoiceId: auctionData.invoiceId,
+            sourceInvoiceFirestoreId: auctionData.firestoreId,
+            sourceType: 'auction',
+            clientName: auctionData.clientName,
+            clientPhone: auctionData.clientPhone || '',
+            issueDate: getCurrentDateForDocument(),
+            dueDate: dueDate || null,
+            paymentDays: 10,
+            exchangeRate: exchangeRate,
+            carDetails: auctionData.carDetails || {
+                make: '',
+                model: '',
+                year: '',
+                vin: '',
+                color: ''
+            },
+            pricing: {
+                totalUSD: newTotalPrice,
+                totalPaid: totalPaidSoFar,
+                currentPaymentDue: amountToPay,
+                newTotalPaid: newTotalPaid,
+                remainingBalance: remainingAfter,
+                paymentPercentage: (amountToPay / newTotalPrice * 100),
+                totalPaidPercentage: (newTotalPaid / newTotalPrice * 100),
+                targetPercentage: percentageTarget
+            },
+            paymentReference: paymentReference,
+            bankDetails: selectedBank,
+            createdBy: currentUser.email,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+            revoked: false,
+            auctionOriginalPrice: auctionData.auctionPrice,
+            auctionOriginalCurrency: auctionData.auctionPriceCurrency
+        };
+        
+        // Save to Firestore
+        const docRef = await db.collection("top_up_invoices").add(topUpData);
+        
+        resetTopUpAuctionSaveButton(saveButton, spinner, onlySave);
+        showSuccessToast(`Top-Up Invoice ${invoiceId} saved successfully!`);
+        
+        if (!onlySave) {
+            topUpData.firestoreId = docRef.id;
+            generateTopUpPDF(topUpData);
+        }
+        
+        // Clear global data and refresh
+        window.currentTopUpAuctionData = null;
+        renderInvoiceHistory();
+        fetchTopUpInvoices();
+        
+    } catch (error) {
+        console.error("Error saving top-up invoice:", error);
+        resetTopUpAuctionSaveButton(saveButton, spinner, onlySave);
+        showErrorToast("Failed to save invoice: " + error.message);
+    }
+}
+
+/**
+ * Resets top-up auction save button
+ */
+function resetTopUpAuctionSaveButton(saveButton, spinner, onlySave) {
+    if (saveButton && spinner) {
+        saveButton.disabled = false;
+        spinner.classList.add('hidden');
+        const buttonText = onlySave ? 'Save Only (No PDF)' : 'Generate & Save Top-Up Invoice';
+        saveButton.innerHTML = `<span>${buttonText}</span>${spinner.outerHTML}`;
+    }
+}
+
+/**
+ * Updates calculations for balance form
+ */
+function updateBalanceCalculations() {
+    const sourceInvoice = window.currentBalanceSourceInvoice;
+    if (!sourceInvoice) return;
+    
+    const paymentDue = parseFloat(document.getElementById('balancePaymentDue').value) || 0;
+    const totalPrice = sourceInvoice.totalPrice || 0;
+    const totalPaid = sourceInvoice.totalPaid || 0;
+    const remainingBalance = sourceInvoice.remainingBalance || 0;
+    
+    // Validate payment amount
+    if (paymentDue > remainingBalance) {
+        document.getElementById('balancePaymentDue').value = remainingBalance.toFixed(2);
+        updateBalanceCalculations();
+        return;
+    }
+    
+    const newTotalPaid = totalPaid + paymentDue;
+    const newRemaining = remainingBalance - paymentDue;
+    const percentagePaid = (newTotalPaid / totalPrice * 100);
+    const percentageOfTotal = (paymentDue / totalPrice * 100);
+    
+    // Update displays
+    document.getElementById('balanceTotalPaidAfter').textContent = `USD ${newTotalPaid.toFixed(2)}`;
+    document.getElementById('balanceRemainingAfter').textContent = `USD ${Math.max(0, newRemaining).toFixed(2)}`;
+    document.getElementById('balancePercentagePaidAfter').textContent = `${percentagePaid.toFixed(1)}%`;
+    document.getElementById('balancePercentage').value = `${percentageOfTotal.toFixed(1)}% of total price`;
+}
+
+/**
+ * Saves balance invoice
+ */
+async function saveBalanceInvoice(onlySave = false) {
+    const form = document.getElementById('balance-form');
+    if (!form.checkValidity()) {
+        form.reportValidity();
+        return;
+    }
+    
+    const sourceInvoice = window.currentBalanceSourceInvoice;
+    if (!sourceInvoice) {
+        showErrorToast("Source invoice data not found");
+        return;
+    }
+    
+    // Show loading state
+    const saveButton = onlySave ? document.getElementById('save-balance-only-btn') : document.getElementById('save-balance-btn');
+    const spinner = onlySave ? document.getElementById('balance-only-spinner') : document.getElementById('balance-spinner');
+    
+    if (saveButton && spinner) {
+        saveButton.disabled = true;
+        spinner.classList.remove('hidden');
+        const buttonText = onlySave ? 'Saving...' : 'Generating & Saving...';
+        saveButton.innerHTML = `<span>${buttonText}</span>${spinner.outerHTML}`;
+    }
+    
+    try {
+        const paymentDue = parseFloat(document.getElementById('balancePaymentDue').value) || 0;
+        const exchangeRate = parseFloat(document.getElementById('balanceExchangeRate').value) || 130;
+        const dueDate = document.getElementById('balanceDueDate').value;
+        const paymentReference = document.getElementById('balancePaymentReference').value;
+        
+        // Collect bank details
+        const bankSelect = document.getElementById('balanceBankDetailsSelect');
+        let selectedBank = null;
+        
+        if (bankSelect.selectedIndex > 0) {
+            try {
+                const bankValue = bankSelect.options[bankSelect.selectedIndex].value;
+                const decodedValue = bankValue
+                    .replace(/&apos;/g, "'")
+                    .replace(/&quot;/g, '"')
+                    .replace(/&lt;/g, '<')
+                    .replace(/&gt;/g, '>')
+                    .replace(/&amp;/g, '&');
+                
+                selectedBank = JSON.parse(decodedValue);
+            } catch (e) {
+                console.error("Error parsing bank details:", e);
+            }
+        }
+        
+        if (!selectedBank) {
+            showErrorToast("Please select a bank account.");
+            resetBalanceSaveButton(saveButton, spinner, onlySave);
+            return;
+        }
+        
+        // Calculate totals
+        const totalPrice = sourceInvoice.totalPrice || 0;
+        const totalPaidSoFar = sourceInvoice.totalPaid || 0;
+        const remainingBalance = sourceInvoice.remainingBalance || 0;
+        const newTotalPaid = totalPaidSoFar + paymentDue;
+        const remainingAfter = remainingBalance - paymentDue;
+        
+        // Generate invoice number
+        const carMakeModel = sourceInvoice.carDetails?.make && sourceInvoice.carDetails?.model 
+            ? `${sourceInvoice.carDetails.make} ${sourceInvoice.carDetails.model}` 
+            : sourceInvoice.vehicleDetails?.makeModel || 'Unknown';
+        
+        const invoiceId = await generateBalanceInvoiceNumber(sourceInvoice.clientName, carMakeModel, sourceInvoice.invoiceId);
+        
+        // Prepare invoice data
+        const balanceData = {
+            docType: 'Balance Invoice',
+            invoiceId,
+            sourceInvoiceId: sourceInvoice.invoiceId,
+            sourceInvoiceFirestoreId: sourceInvoice.firestoreId,
+            sourceType: sourceInvoice.sourceType || 'regular',
+            clientName: sourceInvoice.clientName,
+            clientPhone: sourceInvoice.clientPhone || '',
+            issueDate: getCurrentDateForDocument(),
+            dueDate: dueDate || null,
+            exchangeRate,
+            carDetails: sourceInvoice.carDetails || sourceInvoice.vehicleDetails || {
+                make: '',
+                model: '',
+                year: '',
+                vin: '',
+                color: ''
+            },
+            pricing: {
+                totalUSD: totalPrice,
+                totalPaid: totalPaidSoFar,
+                currentPaymentDue: paymentDue,
+                newTotalPaid: newTotalPaid,
+                remainingBalance: remainingAfter,
+                paymentPercentage: (paymentDue / totalPrice * 100),
+                totalPaidPercentage: (newTotalPaid / totalPrice * 100)
+            },
+            paymentReference: paymentReference,
+            bankDetails: selectedBank,
+            createdBy: currentUser.email,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+            revoked: false
+        };
+        
+        // Save to Firestore
+        const docRef = await db.collection("balance_invoices").add(balanceData);
+        
+        resetBalanceSaveButton(saveButton, spinner, onlySave);
+        showSuccessToast(`Balance Invoice ${invoiceId} saved successfully!`);
+        
+        if (!onlySave) {
+            balanceData.firestoreId = docRef.id;
+            generateBalancePDF(balanceData);
+        }
+        
+        // Clear global data and refresh
+        window.currentBalanceSourceInvoice = null;
+        renderInvoiceHistory();
+        
+    } catch (error) {
+        console.error("Error saving balance invoice:", error);
+        resetBalanceSaveButton(saveButton, spinner, onlySave);
+        showErrorToast("Failed to save invoice: " + error.message);
+    }
+}
+
+/**
+ * Generates balance invoice number
+ */
+async function generateBalanceInvoiceNumber(clientName, carMakeModel, sourceInvoiceId) {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = (now.getMonth() + 1).toString().padStart(2, '0');
+    const day = now.getDate().toString().padStart(2, '0');
+    
+    const firstDayOfMonth = new Date(year, now.getMonth(), 1);
+    const monthStart = firebase.firestore.Timestamp.fromDate(firstDayOfMonth);
+    const snapshot = await db.collection("balance_invoices")
+        .where("createdAt", ">=", monthStart)
+        .get();
+    
+    const nextNumber = (snapshot.size + 1).toString().padStart(4, '0');
+    const namePart = clientName.split(' ')[0].toUpperCase().substring(0, 3);
+    const modelPart = carMakeModel.split(' ')[0].toUpperCase().substring(0, 3);
+    const sourcePrefix = sourceInvoiceId.split('-')[0] || 'BAL';
+    
+    return `BAL-${year}${month}${day}-${nextNumber}-${namePart}-${modelPart}`;
+}
+
+/**
+ * Generates PDF for Balance Invoice
+ */
+function generateBalancePDF(data) {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF('p', 'mm', 'a4');
+
+    const primaryColor = '#183263';
+    const secondaryColor = '#D96359';
+    
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    let y = 10;
+    const margin = 10;
+    const lineHeight = 5;
+    const termIndent = 5;
+
+    const formatAmount = (amount) => {
+        if (amount === null || amount === undefined) return '0.00';
+        const rounded = Math.round(amount);
+        return rounded.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    };
+
+    const drawText = (text, x, y, size, style = 'normal', color = primaryColor, align = 'left') => {
+        doc.setFontSize(size);
+        doc.setFont("helvetica", style);
+        doc.setTextColor(color);
+        doc.text(text, x, y, { align: align });
+    };
+
+    if (data.revoked) {
+        doc.setFontSize(60);
+        doc.setTextColor(255, 0, 0, 30);
+        doc.setFont("helvetica", "bold");
+        doc.text('REVOKED', pageW / 2, pageH / 2, null, null, "center");
+        doc.setTextColor(255, 0, 0, 30);
+        doc.text('INVALID', pageW / 2, pageH / 2 + 20, null, null, "center");
+        doc.setTextColor(0);
+    }
+
+    const addStampWithDate = (x, y, dateText) => {
+        try {
+            const stampWidth = 30;
+            const stampHeight = 30;
+            doc.addImage('STAMP.png', 'JPEG', x - (stampWidth/2), y, stampWidth, stampHeight);
+            doc.setFontSize(14);
+            doc.setTextColor(255, 0, 0);
+            doc.setFont("helvetica", "bold");
+            const textX = x;
+            const textY = y + (stampHeight/2) + 2;
+            doc.text(dateText, textX, textY, null, null, "center");
+            doc.setFontSize(10);
+            doc.setTextColor(primaryColor);
+            doc.text('For WanBite Investment Co. LTD', x, y + stampHeight + 8, null, null, "center");
+        } catch (error) {
+            console.error("Error adding stamp:", error);
+            doc.setFontSize(14);
+            doc.setTextColor(255, 0, 0);
+            doc.text(dateText, x, y - 2, null, null, "center");
+            doc.setFontSize(10);
+            doc.setTextColor(primaryColor);
+            doc.text('For WanBite Investment Co. LTD', x, y + 5, null, null, "center");
+        }
+    };
+
+    const drawTerm = (doc, yStart, prefix, text, textWidth = 188 - termIndent) => {
+        doc.setFontSize(9);
+        doc.setTextColor(primaryColor);
+        doc.setFont("helvetica", "bold");
+        doc.text(prefix, margin, yStart);
+        
+        let textX = margin + 5;
+        const lines = doc.splitTextToSize(text, textWidth);
+        let currentY = yStart;
+        const lineSpacing = 4.5;
+        
+        lines.forEach((line, index) => {
+            let currentX = margin + termIndent;
+            if (index === 0) {
+                const prefixWidth = doc.getStringUnitWidth(prefix) * doc.getFontSize() / doc.internal.scaleFactor;
+                currentX = margin + prefixWidth + 1;
+            } else {
+                currentX = margin + termIndent;
+            }
+
+            doc.setTextColor(primaryColor);
+            doc.setFont("helvetica", "normal");
+            doc.text(line, currentX, currentY);
+            currentY += lineSpacing;
+        });
+        
+        return currentY + 1;
+    };
+
+    // HEADER
+    doc.setFillColor(primaryColor);
+    doc.rect(0, 0, pageW, 15, 'F');
+    
+    drawText('WanBite Investments Co. Ltd.', pageW / 2, 8, 18, 'bold', '#FFFFFF', 'center');
+    drawText('carskenya.co.ke', pageW / 2, 13, 10, 'normal', '#FFFFFF', 'center');
+    
+    y = 25;
+
+    doc.setTextColor(secondaryColor);
+    doc.setFontSize(24);
+    doc.setFont("helvetica", "bold");
+    doc.text("BALANCE INVOICE", pageW / 2, y, null, null, "center");
+    y += 10;
+    
+    doc.setDrawColor(primaryColor);
+    doc.setLineWidth(0.5);
+    doc.rect(margin, y, 188, 18);
+    
+    drawText('INVOICE NO:', margin + 3, y + 6, 10, 'bold', secondaryColor);
+    drawText(data.invoiceId, margin + 3, y + 13, 12, 'bold', primaryColor);
+    
+    drawText('ISSUE DATE:', pageW - margin - 80, y + 6, 10, 'bold', secondaryColor);
+    drawText(data.issueDate, pageW - margin - 80, y + 13, 10, 'bold', primaryColor);
+    
+    drawText('DUE DATE:', pageW - margin - 15, y + 6, 10, 'bold', secondaryColor, 'right');
+    drawText(data.dueDate || 'N/A', pageW - margin - 15, y + 13, 10, 'bold', primaryColor, 'right');
+    y += 23;
+
+    doc.setDrawColor(primaryColor);
+    doc.setLineWidth(0.2);
+    doc.rect(margin, y, 188, 15);
+    drawText('BILL TO:', margin + 3, y + 5, 10, 'bold', secondaryColor);
+    drawText(data.clientName, margin + 3, y + 11, 10, 'bold', 0);
+    drawText(`Phone: ${data.clientPhone || 'N/A'}`, pageW - margin - 70, y + 8, 9, 'normal', 0);
+    drawText(`Source Invoice: ${data.sourceInvoiceId}`, pageW - margin - 70, y + 13, 9, 'normal', 0);
+    y += 20;
+
+    doc.setFillColor(240, 245, 250);
+    doc.rect(margin, y, 188, 12, 'F');
+    doc.setDrawColor(primaryColor);
+    doc.rect(margin, y, 188, 12);
+    drawText('VEHICLE DETAILS', margin + 5, y + 8, 10, 'bold', primaryColor);
+    drawText(`${data.carDetails?.make || ''} ${data.carDetails?.model || ''} (${data.carDetails?.year || ''})`, margin + 50, y + 8, 10, 'normal', 0);
+    y += 15;
+    
+    doc.setFillColor(255);
+    doc.rect(margin, y, 188, 10, 'F');
+    doc.setDrawColor(200);
+    doc.rect(margin, y, 188, 10);
+    drawText('VIN:', margin + 5, y + 7, 9, 'bold', secondaryColor);
+    drawText(data.carDetails?.vin || 'N/A', margin + 25, y + 7, 9, 'normal', 0);
+    drawText('Color:', margin + 100, y + 7, 9, 'bold', secondaryColor);
+    drawText(data.carDetails?.color || 'N/A', margin + 125, y + 7, 9, 'normal', 0);
+    y += 15;
+
+    // Payment Summary
+    drawText('PAYMENT SUMMARY', margin, y, 12, 'bold', primaryColor);
+    doc.setDrawColor(primaryColor);
+    doc.setLineWidth(0.5);
+    const summaryWidth = doc.getStringUnitWidth('PAYMENT SUMMARY') * 12 / doc.internal.scaleFactor;
+    doc.line(margin, y + 1, margin + summaryWidth, y + 1);
+    y += lineHeight + 2;
+    
+   doc.setFillColor(255, 245, 230);
+doc.rect(margin, y, 188, 20, 'F');  // Reduced height from 30 to 20
+doc.setDrawColor(secondaryColor);
+doc.setLineWidth(0.5);
+doc.rect(margin, y, 188, 20);
+
+let summaryY = y + 5;
+doc.setFontSize(10);
+doc.setTextColor(0);
+doc.text(`Total Purchase Price:`, margin + 5, summaryY);
+drawText(`USD ${formatAmount(data.pricing.totalUSD)}`, margin + 70, summaryY, 10, 'bold', primaryColor);
+summaryY += 5;
+
+doc.text(`Amount Payable for this Invoice:`, margin + 5, summaryY);
+drawText(`USD ${formatAmount(data.pricing.currentPaymentDue)}`, margin + 70, summaryY, 12, 'bold', secondaryColor);
+
+    doc.text(`Remaining Balance:`, margin + 5, summaryY);
+    drawText(`USD ${formatAmount(data.pricing.remainingBalance)}`, margin + 70, summaryY, 10, 'bold', data.pricing.remainingBalance > 0 ? secondaryColor : primaryColor);
+    
+    y += 25;
+
+    // Terms & Conditions
+    drawText('TERMS & CONDITIONS', margin, y, 12, 'bold', primaryColor);
+    doc.setDrawColor(primaryColor);
+    doc.setLineWidth(0.5);s
+    const termsWidth = doc.getStringUnitWidth('TERMS & CONDITIONS') * 12 / doc.internal.scaleFactor;
+    doc.line(margin, y + 1, margin + termsWidth, y + 1);
+    y += lineHeight + 2;
+    
+    const term1 = `All payments due under this contract shall be made in USD. In the event that payments are made in any other currency, the same shall be subject to the current dollar exchange rate.`;
+    y = drawTerm(doc, y, '1.', term1);
+    
+    const term2 = `The original bill of lading will be issued to the Buyer upon confirmation of full receipt of the purchase price.`;
+    y = drawTerm(doc, y, '2.', term2);
+    
+    const term3 = `If you cancel to buy before or after shipment after purchase is confirmed, your deposit is to be forfeited.`;
+    y = drawTerm(doc, y, '3.', term3);
+    
+    const term4 = `All the vehicles are subject to AS IS CONDITION.`;
+    y = drawTerm(doc, y, '4.', term4);
+    
+    const term5 = `Payment will be made by the invoiced person, if third party person makes a payment, please kindly inform us the relationship, this is due to security reason.`;
+    y = drawTerm(doc, y, '5.', term5);
+    
+    y += 5;
+    
+    if (data.revoked) {
+        y += 10;
+        doc.setFontSize(12);
+        doc.setTextColor(255, 0, 0);
+        doc.setFont("helvetica", "bold");
+        doc.text('*** THIS INVOICE HAS BEEN REVOKED AND IS NO LONGER VALID ***', pageW / 2, y, null, null, "center");
+        doc.setTextColor(0);
+        y += 10;
+    }
+
+    // Payment Instructions
+    doc.setFillColor(255, 245, 230);
+    doc.rect(margin, y, 188, 25, 'F');
+    doc.setDrawColor(secondaryColor);
+    doc.setLineWidth(0.5);
+    doc.rect(margin, y, 188, 25);
+    let currentY_bank = y + 5;
+    
+    drawText('KINDLY PAY USD TO THE FOLLOWING BANK ACCOUNT:', 15, currentY_bank, 11, 'bold', primaryColor);
+    currentY_bank += 5;
+    
+    doc.setFontSize(10);
+    doc.setTextColor(0);
+    
+    const bank = data.bankDetails || {};
+    const branchText = bank.branch ? `(Branch: ${bank.branch})` : '';
+    
+    doc.text(`Bank Name: ${bank.name || 'N/A'} ${branchText}`, margin + 5, currentY_bank);
+    currentY_bank += 4;
+    doc.text(`Account Name: ${bank.accountName || 'N/A'}`, margin + 5, currentY_bank);
+    currentY_bank += 4;
+    doc.text(`Account Number: ${bank.accountNumber || 'N/A'}`, margin + 5, currentY_bank);
+    currentY_bank += 4;
+    if (bank.paybillNumber) {
+        doc.text(`Paybill Number: ${bank.paybillNumber}`, margin + 5, currentY_bank);
+        currentY_bank += 4;
+    }
+    doc.text(`SWIFT/BIC Code: ${bank.swiftCode || 'N/A'} | Currency: ${bank.currency || 'N/A'}`, margin + 5, currentY_bank);
+    
+    drawText('**NOTE: Buyer Should bear the cost of Bank Charge when remitting T/T', margin, y + 25 - 5, 9, 'bold', secondaryColor);
+    y += 30;
+
+    // Signatures
+    if (y > pageH - 35) {
+        doc.addPage();
+        y = 10;
+    }
+    
+    doc.line(margin, y, 90, y);
+    drawText('Accepted and Confirmed by Buyer', margin + 45, y + 4, 8, 'normal', 0, "center");
+    
+    const sellerSigX = 110;
+    const stampY = y - 5;
+    addStampWithDate(sellerSigX + 40, stampY, data.issueDate);
+    
+    y += 15;
+
+    // Footer
+    doc.setFillColor(primaryColor);
+    doc.rect(0, pageH - 10, pageW, 10, 'F');
+    doc.setTextColor(255);
+    doc.setFontSize(9);
+    const footerText = `Location: Ngong Road, Kilimani, Nairobi. | Email: sales@carskenya.co.ke | Phone: 0713147136`;
+    doc.text(footerText, pageW / 2, pageH - 4, null, null, "center");
+
+    doc.save(`Balance_${data.invoiceId}.pdf`);
+}
+
+/**
+ * Resets balance save button
+ */
+function resetBalanceSaveButton(saveButton, spinner, onlySave) {
+    if (saveButton && spinner) {
+        saveButton.disabled = false;
+        spinner.classList.add('hidden');
+        const buttonText = onlySave ? 'Save Only (No PDF)' : 'Generate & Save Balance Invoice';
+        saveButton.innerHTML = `<span>${buttonText}</span>${spinner.outerHTML}`;
+    }
+}
+
+/**
+ * Calculates total paid for an invoice from receipts
+ */
+async function calculateTotalPaidForInvoice(invoiceId) {
+    try {
+        const receiptsSnapshot = await db.collection("receipts")
+            .where("invoiceReference", "==", invoiceId)
+            .get();
+        
+        let totalPaid = 0;
+        for (const receiptDoc of receiptsSnapshot.docs) {
+            const receipt = receiptDoc.data();
+            if (receipt.currency === 'USD') {
+                totalPaid += receipt.amountReceived;
+            } else if (receipt.currency === 'KSH') {
+                totalPaid += receipt.amountReceived / receipt.exchangeRate;
+            }
+        }
+        
+        return totalPaid;
+    } catch (error) {
+        console.error("Error calculating total paid:", error);
+        return 0;
+    }
+}
+
+/**
+ * Views full invoice trail for a client
+ */
+async function viewClientInvoiceTrail(clientName) {
+    const loadingOverlay = showLoadingOverlay("Loading invoice trail...");
+    
+    try {
+        // Get all invoices for this client
+        const regularInvoices = await db.collection("invoices")
+            .where("clientName", "==", clientName)
+            .get();
+        
+        const topUpInvoices = await db.collection("top_up_invoices")
+            .where("clientName", "==", clientName)
+            .get();
+        
+        const balanceInvoices = await db.collection("balance_invoices")
+            .where("clientName", "==", clientName)
+            .get();
+        
+        // Combine all invoices
+        const allInvoices = [];
+        
+        regularInvoices.forEach(doc => {
+            allInvoices.push({ ...doc.data(), firestoreId: doc.id, type: 'regular', docType: doc.data().docType });
+        });
+        
+        topUpInvoices.forEach(doc => {
+            allInvoices.push({ ...doc.data(), firestoreId: doc.id, type: 'topup', docType: 'Top-Up Invoice' });
+        });
+        
+        balanceInvoices.forEach(doc => {
+            allInvoices.push({ ...doc.data(), firestoreId: doc.id, type: 'balance', docType: 'Balance Invoice' });
+        });
+        
+        // Sort by date
+        allInvoices.sort((a, b) => {
+            const dateA = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(a.issueDate || 0);
+            const dateB = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(b.issueDate || 0);
+            return dateA - dateB;
+        });
+        
+        hideLoadingOverlay();
+        
+        // Render trail view
+        renderInvoiceTrailView(clientName, allInvoices);
+        
+    } catch (error) {
+        console.error("Error loading invoice trail:", error);
+        hideLoadingOverlay();
+        showErrorToast("Failed to load invoice trail: " + error.message);
+    }
+}
+
+/**
+ * Renders the invoice trail view
+ */
+function renderInvoiceTrailView(clientName, invoices) {
+    const formArea = document.getElementById('document-form-area');
+    
+    let html = `
+        <div class="p-6 border border-gray-300 rounded-xl bg-white shadow-lg animate-fade-in">
+            <div class="flex justify-between items-center mb-6">
+                <h3 class="text-xl font-semibold text-primary-blue">Invoice Trail: ${clientName}</h3>
+                <div class="space-x-2">
+                    <button onclick="downloadFullTrailPDF('${clientName}')" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg transition duration-150 flex items-center gap-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                        </svg>
+                        Download Full Trail PDF
+                    </button>
+                    <button onclick="renderInvoiceHistory()" class="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded-lg transition duration-150">
+                        Back
+                    </button>
+                </div>
+            </div>
+            
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200">
+                       <thead class="bg-gray-50">
+        <tr>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Invoice No</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
+            <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Total Price</th>
+            <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Amount Paid</th>
+            <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Remaining</th>
+            <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Actions</th>
+        </tr>
+    </thead>
+    <tbody class="bg-white divide-y divide-gray-200">
+`;
+    
+    let totalPriceSum = 0;
+    let totalPaidSum = 0;
+    
+    invoices.forEach((invoice, index) => {
+        const issueDate = invoice.issueDate || (invoice.createdAt?.toDate ? invoice.createdAt.toDate().toLocaleDateString() : 'N/A');
+        const totalPrice = invoice.pricing?.totalUSD || invoice.pricing?.totalPrice || 0;
+        const totalPaid = invoice.pricing?.newTotalPaid || invoice.pricing?.totalPaid || 0;
+        const remaining = invoice.pricing?.remainingBalance || (totalPrice - totalPaid);
+        
+        totalPriceSum += totalPrice;
+        totalPaidSum += totalPaid;
+        
+        const typeColors = {
+            'Auction Invoice': 'bg-yellow-100 text-yellow-800',
+            'Invoice': 'bg-blue-100 text-blue-800',
+            'Proforma Invoice': 'bg-blue-100 text-blue-800',
+            'Top-Up Invoice': 'bg-teal-100 text-teal-800',
+            'Balance Invoice': 'bg-purple-100 text-purple-800'
+        };
+        
+        const typeColor = typeColors[invoice.docType] || 'bg-gray-100 text-gray-800';
+        
+        const invoiceDataJson = JSON.stringify({
+            ...invoice,
+            firestoreId: invoice.firestoreId
+        });
+        
+       html += `
+    <td class="px-4 py-3 text-center">
+        <div class="flex justify-center gap-2">
+            <button onclick='reDownloadInvoiceForTrail(${invoiceDataJson})' 
+                    class="text-primary-blue hover:text-blue-700" title="Download PDF">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                </svg>
+            </button>
+            <button onclick='createReceiptFromInvoiceTrail(${invoiceDataJson})' 
+                    class="text-green-600 hover:text-green-800" title="Create Receipt">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                </svg>
+            </button>
+            ${invoice.pricing?.remainingBalance > 0 ? `
+            <button onclick='createBalanceInvoice(${invoiceDataJson})' 
+                    class="text-purple-600 hover:text-purple-800" title="Create Balance Invoice">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+                </svg>
+            </button>
+            ` : ''}
+        </div>
+    </td>
+`;
+    });
+    
+    html += `
+                    </tbody>
+                    <tfoot class="bg-gray-50">
+                        <tr class="font-bold">
+                            <td colspan="3" class="px-4 py-3 text-right">TOTALS:</td>
+                            <td class="px-4 py-3 text-right">USD ${totalPriceSum.toFixed(2)}</td>
+                            <td class="px-4 py-3 text-right text-green-600">USD ${totalPaidSum.toFixed(2)}</td>
+                            <td class="px-4 py-3 text-right ${(totalPriceSum - totalPaidSum) > 0 ? 'text-red-600' : 'text-green-600'}">USD ${(totalPriceSum - totalPaidSum).toFixed(2)}</td>
+                            <td class="px-4 py-3"></td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+        </div>
+    `;
+    
+    formArea.innerHTML = html;
+    
+    // Store invoices for PDF generation
+    window.currentTrailInvoices = invoices;
+    window.currentTrailClientName = clientName;
+}
+
+/**
+ * Downloads full trail PDF
+ */
+async function downloadFullTrailPDF(clientName) {
+    if (!window.currentTrailInvoices || window.currentTrailInvoices.length === 0) {
+        showErrorToast("No invoices to download");
+        return;
+    }
+    
+    const loadingOverlay = showLoadingOverlay("Generating trail PDF...");
+    
+    try {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF('p', 'mm', 'a4');
+        
+        const primaryColor = '#183263';
+        const secondaryColor = '#D96359';
+        const pageW = doc.internal.pageSize.getWidth();
+        let y = 20;
+        const margin = 10;
+        
+        // Header
+        doc.setFillColor(primaryColor);
+        doc.rect(0, 0, pageW, 20, 'F');
+        
+        doc.setFontSize(18);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(255);
+        doc.text("WanBite Investments Co. Ltd.", pageW / 2, 10, null, null, "center");
+        
+        doc.setFontSize(12);
+        doc.text("Invoice Trail Report", pageW / 2, 16, null, null, "center");
+        
+        doc.setTextColor(0);
+        doc.setFontSize(10);
+        y = 30;
+        
+        // Client Info
+        doc.setFont("helvetica", "bold");
+        doc.text(`Client: ${clientName}`, margin, y);
+        doc.text(`Generated: ${new Date().toLocaleDateString()}`, pageW - margin - 50, y);
+        y += 10;
+        
+        doc.setFont("helvetica", "normal");
+        doc.text("This document provides a complete trail of all invoices issued to the client.", margin, y);
+        y += 15;
+        
+        // Table Header
+        doc.setFillColor(primaryColor);
+        doc.rect(margin, y, pageW - (margin * 2), 10, 'F');
+        doc.setTextColor(255);
+        doc.setFontSize(9);
+        doc.setFont("helvetica", "bold");
+        
+        const colWidths = [30, 35, 25, 30, 30, 30];
+        let x = margin + 2;
+        
+        doc.text("Date", x, y + 6);
+        x += colWidths[0];
+        doc.text("Invoice No", x, y + 6);
+        x += colWidths[1];
+        doc.text("Type", x, y + 6);
+        x += colWidths[2];
+        doc.text("Total (USD)", x, y + 6);
+        x += colWidths[3];
+        doc.text("Paid (USD)", x, y + 6);
+        x += colWidths[4];
+        doc.text("Remaining (USD)", x, y + 6);
+        
+        y += 10;
+        
+        // Table Rows
+        doc.setTextColor(0);
+        doc.setFont("helvetica", "normal");
+        let totalPriceSum = 0;
+        let totalPaidSum = 0;
+        
+        for (const invoice of window.currentTrailInvoices) {
+            if (y > doc.internal.pageSize.getHeight() - 30) {
+                doc.addPage();
+                y = 20;
+            }
+            
+            const issueDate = invoice.issueDate || (invoice.createdAt?.toDate ? invoice.createdAt.toDate().toLocaleDateString() : 'N/A');
+            const totalPrice = invoice.pricing?.totalUSD || invoice.pricing?.totalPrice || 0;
+            const totalPaid = invoice.pricing?.newTotalPaid || invoice.pricing?.totalPaid || 0;
+            const remaining = totalPrice - totalPaid;
+            
+            totalPriceSum += totalPrice;
+            totalPaidSum += totalPaid;
+            
+            x = margin + 2;
+            doc.text(issueDate, x, y + 4);
+            x += colWidths[0];
+            doc.text(invoice.invoiceId, x, y + 4);
+            x += colWidths[1];
+            doc.text(invoice.docType, x, y + 4);
+            x += colWidths[2];
+            doc.text(totalPrice.toFixed(2), x, y + 4, null, null, "right");
+            x += colWidths[3];
+            doc.text(totalPaid.toFixed(2), x, y + 4, null, null, "right");
+            x += colWidths[4];
+            doc.text(remaining.toFixed(2), x, y + 4, null, null, "right");
+            
+            y += 8;
+        }
+        
+        // Totals
+        y += 5;
+        doc.setDrawColor(200);
+        doc.line(margin, y, pageW - margin, y);
+        y += 3;
+        
+        doc.setFont("helvetica", "bold");
+        doc.text(`TOTAL:`, margin + 100, y + 4);
+        doc.text(`USD ${totalPriceSum.toFixed(2)}`, margin + 140, y + 4, null, null, "right");
+        doc.text(`USD ${totalPaidSum.toFixed(2)}`, margin + 170, y + 4, null, null, "right");
+        doc.text(`USD ${(totalPriceSum - totalPaidSum).toFixed(2)}`, margin + 200, y + 4, null, null, "right");
+        
+        y += 15;
+        
+        // Footer
+        doc.setFillColor(primaryColor);
+        doc.rect(0, doc.internal.pageSize.getHeight() - 10, pageW, 10, 'F');
+        doc.setTextColor(255);
+        doc.setFontSize(8);
+        const footerText = `Location: Ngong Road, Kilimani, Nairobi. | Email: sales@carskenya.co.ke | Phone: 0713147136`;
+        doc.text(footerText, pageW / 2, doc.internal.pageSize.getHeight() - 4, null, null, "center");
+        
+        doc.save(`Invoice_Trail_${clientName.replace(/\s/g, '_')}.pdf`);
+        
+        hideLoadingOverlay();
+        showSuccessToast("Trail PDF downloaded successfully");
+        
+    } catch (error) {
+        console.error("Error generating trail PDF:", error);
+        hideLoadingOverlay();
+        showErrorToast("Failed to generate trail PDF: " + error.message);
+    }
+}
+
+/**
+ * Re-download invoice for trail view
+ */
+function reDownloadInvoiceForTrail(invoiceData) {
+    if (invoiceData.docType === 'Balance Invoice') {
+        generateBalancePDF(invoiceData);
+    } else if (invoiceData.docType === 'Top-Up Invoice') {
+        generateTopUpPDF(invoiceData);
+    } else {
+        generateInvoicePDF(invoiceData);
+    }
+}
+
+// =================================================================
+//                 CORRECTED TOP-UP AND BALANCE FUNCTIONS
+// =================================================================
+
+/**
+ * Creates a top-up invoice from an auction invoice
+ * The auction invoice amount is a deposit that counts toward the total vehicle price
+ */
+async function createTopUpFromAuctionInvoice(auctionInvoiceData) {
+    // Check if invoice is revoked
+    if (auctionInvoiceData.revoked) {
+        showErrorToast("Cannot create top-up from a revoked invoice.");
+        return;
+    }
+    
+    // Check if this is actually an auction invoice
+    if (auctionInvoiceData.docType !== 'Auction Invoice') {
+        showErrorToast("Top-up invoices can only be created from Auction Invoices.");
+        return;
+    }
+    
+    // Get the deposit amount from auction invoice (this is the amount already paid)
+    const auctionDepositAmount = auctionInvoiceData.pricing?.totalUSD || auctionInvoiceData.auctionPriceUSD || 0;
+    
+    // Check if there's already a top-up invoice created from this auction
+    const existingTopUp = await db.collection("top_up_invoices")
+        .where("sourceInvoiceId", "==", auctionInvoiceData.invoiceId)
+        .limit(1)
+        .get();
+    
+    if (!existingTopUp.empty) {
+        // If top-up already exists, go to balance invoice directly
+        const existingTopUpData = existingTopUp.docs[0].data();
+        const remainingBalance = existingTopUpData.pricing?.remainingBalance || 0;
+        
+        if (remainingBalance > 0) {
+            showSuccessToast("Top-up invoice already exists. Creating balance invoice instead.");
+            createBalanceInvoice({ ...existingTopUpData, firestoreId: existingTopUp.docs[0].id });
+        } else {
+            showErrorToast("This auction invoice has already been fully paid.");
+        }
+        return;
+    }
+    
+    // Get all receipts for this auction invoice to confirm the deposit paid
+    const receiptsSnapshot = await db.collection("receipts")
+        .where("invoiceReference", "==", auctionInvoiceData.invoiceId)
+        .get();
+    
+    let totalPaidFromReceipts = 0;
+    for (const receiptDoc of receiptsSnapshot.docs) {
+        const receipt = receiptDoc.data();
+        if (receipt.currency === 'USD') {
+            totalPaidFromReceipts += receipt.amountReceived;
+        } else if (receipt.currency === 'KSH') {
+            totalPaidFromReceipts += receipt.amountReceived / receipt.exchangeRate;
+        }
+    }
+    
+    // The deposit amount is what was paid (either from auction price or receipts)
+    const depositPaid = auctionDepositAmount > 0 ? auctionDepositAmount : totalPaidFromReceipts;
+    
+    if (depositPaid <= 0) {
+        showErrorToast("No deposit found for this auction invoice. Please add a receipt first.");
+        return;
+    }
+    
+    // Render top-up form with auction invoice data
+    renderTopUpFormFromAuctionCorrected({
+        ...auctionInvoiceData,
+        depositPaid: depositPaid,
+        auctionDepositAmount: auctionDepositAmount,
+        sourceInvoiceId: auctionInvoiceData.invoiceId,
+        sourceType: 'auction',
+        firestoreId: auctionInvoiceData.firestoreId
+    });
+}
+
+/**
+ * Renders corrected top-up form from auction invoice
+ */
+function renderTopUpFormFromAuctionCorrected(auctionData) {
+    const formArea = document.getElementById('document-form-area');
+    const depositPaid = auctionData.depositPaid || 0;
+    
+    // Default total price - user can change this
+    const defaultTotalPrice = depositPaid * 4; // Assuming deposit is 25% as a default
+    
+    formArea.innerHTML = `
+        <div class="p-6 border border-gray-300 rounded-xl bg-white shadow-lg animate-fade-in">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-semibold text-primary-blue">Top-Up Invoice (from Auction)</h3>
+                <button onclick="renderInvoiceHistory()" class="text-secondary-red hover:text-red-700 text-sm underline">← Back</button>
+            </div>
+            
+            <div class="mb-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                <h4 class="font-bold text-primary-blue mb-2">Auction Invoice Details</h4>
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                    <div><strong>Invoice No:</strong> ${auctionData.invoiceId}</div>
+                    <div><strong>Client:</strong> ${auctionData.clientName}</div>
+                    <div><strong>Deposit Already Paid:</strong> USD ${depositPaid.toFixed(2)}</div>
+                    <div><strong>This deposit represents:</strong> <span id="depositPercentageDisplay">0%</span> of total</div>
+                </div>
+                <p class="text-xs text-gray-500 mt-2">Note: The auction deposit amount will be applied toward the total vehicle price.</p>
+            </div>
+            
+            <form id="topup-auction-form-corrected" onsubmit="event.preventDefault(); saveTopUpFromAuctionCorrected();">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 p-4 bg-gray-50 rounded-lg">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">Document Type</label>
+                        <input type="text" value="Top-Up Invoice" readonly class="mt-1 block w-full p-2 border bg-gray-100 rounded-md">
+                    </div>
+                    <div>
+                        <label for="topupTotalPriceCorrected" class="block text-sm font-medium text-gray-700">Total Vehicle Price (USD)</label>
+                        <input type="number" id="topupTotalPriceCorrected" step="0.01" required value="${defaultTotalPrice.toFixed(2)}" min="${depositPaid.toFixed(2)}" class="mt-1 block w-full p-2 border rounded-md transition duration-200" oninput="updateTopUpFromAuctionCalculationsCorrected()">
+                        <p class="text-xs text-gray-500 mt-1">Enter the full vehicle price (e.g., 8000 USD)</p>
+                    </div>
+                    <div>
+                        <label for="topupDueDateCorrected" class="block text-sm font-medium text-gray-700">Due Date (Optional)</label>
+                        <input type="date" id="topupDueDateCorrected" class="mt-1 block w-full p-2 border rounded-md transition duration-200">
+                    </div>
+                </div>
+                
+                <div class="mb-4 p-4 bg-yellow-50 rounded-lg border border-yellow-300">
+                    <h4 class="font-bold text-secondary-red mb-3">Top-Up Payment Details</h4>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                            <label for="topupPercentageTargetCorrected" class="block text-sm font-medium text-gray-700">Target Percentage to Reach (%)</label>
+                            <input type="number" id="topupPercentageTargetCorrected" step="1" required value="50" min="1" max="100" class="mt-1 block w-full p-2 border rounded-md transition duration-200" oninput="updateTopUpFromAuctionCalculationsCorrected()">
+                            <p class="text-xs text-gray-500 mt-1">Target percentage of total price after this payment (e.g., 50%)</p>
+                        </div>
+                        <div>
+                            <label for="topupAmountToPayCorrected" class="block text-sm font-medium text-gray-700">Amount to Pay Now (USD)</label>
+                            <input type="number" id="topupAmountToPayCorrected" step="0.01" required value="0" min="0" class="mt-1 block w-full p-2 border rounded-md transition duration-200" oninput="updateTopUpFromAuctionCalculationsCorrected()">
+                            <p class="text-xs text-gray-500 mt-1">Enter the amount the client is paying now (e.g., 2000 USD)</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700">Exchange Rate (USD 1 = KES)</label>
+                            <input type="number" id="topupExchangeRateCorrected" step="1" value="${auctionData.exchangeRate || 130}" class="mt-1 block w-full p-2 border rounded-md transition duration-200">
+                        </div>
+                    </div>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mt-4">
+                        <div class="p-2 bg-white rounded border">
+                            <p class="text-xs text-gray-600">Deposit Already Paid</p>
+                            <p class="text-lg font-bold text-green-600">USD ${depositPaid.toFixed(2)}</p>
+                        </div>
+                        <div class="p-2 bg-white rounded border">
+                            <p class="text-xs text-gray-600">Amount to Pay Now</p>
+                            <p id="topupAmountNowDisplay" class="text-lg font-bold text-primary-blue">USD 0.00</p>
+                        </div>
+                        <div class="p-2 bg-white rounded border">
+                            <p class="text-xs text-gray-600">Total Paid After Payment</p>
+                            <p id="topupTotalPaidAfterCorrected" class="text-lg font-bold text-green-600">USD ${depositPaid.toFixed(2)}</p>
+                        </div>
+                        <div class="p-2 bg-white rounded border">
+                            <p class="text-xs text-gray-600">Remaining Balance</p>
+                            <p id="topupRemainingAfterCorrected" class="text-lg font-bold text-secondary-red">USD 0.00</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <fieldset class="border p-4 rounded-lg mb-6">
+                    <legend class="text-base font-semibold text-primary-blue px-2">Vehicle Details</legend>
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <input type="text" value="${auctionData.carDetails?.make || ''} ${auctionData.carDetails?.model || ''}" readonly class="p-2 border bg-gray-100 rounded-md">
+                        <input type="text" value="${auctionData.carDetails?.year || ''}" readonly class="p-2 border bg-gray-100 rounded-md">
+                        <input type="text" value="${auctionData.carDetails?.vin || ''}" readonly class="p-2 border bg-gray-100 rounded-md">
+                        <input type="text" value="${auctionData.carDetails?.color || ''}" readonly class="p-2 border bg-gray-100 rounded-md">
+                    </div>
+                </fieldset>
+                
+                <fieldset class="border p-4 rounded-lg mb-6">
+                    <legend class="text-base font-semibold text-secondary-red px-2">Bank Account for Payment</legend>
+                    <select id="topupAuctionBankSelectCorrected" required class="mt-1 block w-full p-2 border rounded-md transition duration-200"></select>
+                </fieldset>
+                
+                <fieldset class="border p-4 rounded-lg mb-6">
+                    <legend class="text-base font-semibold text-secondary-red px-2">Payment Reference</legend>
+                    <input type="text" id="topupPaymentRefCorrected" placeholder="Enter payment reference (e.g., Cheque No, RTGS Ref)" class="w-full p-2 border rounded-md">
+                </fieldset>
+                
+                <div class="flex space-x-4">
+                    <button type="submit" id="save-topup-corrected-btn" class="flex-1 bg-teal-600 hover:bg-teal-700 text-white font-bold py-3 rounded-lg transition duration-150 flex items-center justify-center gap-2">
+                        <span>Generate & Save Top-Up Invoice</span>
+                        <svg id="topup-corrected-spinner" class="hidden w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                    </button>
+                    <button type="button" onclick="saveTopUpFromAuctionCorrected(true)" id="save-topup-corrected-only-btn" class="flex-1 bg-gray-500 hover:bg-gray-700 text-white font-bold py-3 rounded-lg transition duration-150 flex items-center justify-center gap-2">
+                        <span>Save Only (No PDF)</span>
+                        <svg id="topup-corrected-only-spinner" class="hidden w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                    </button>
+                </div>
+            </form>
+        </div>
+    `;
+    
+    // Populate bank dropdown
+    populateBankDropdown('topupAuctionBankSelectCorrected', false);
+    
+    // Store auction data in global variable
+    window.currentTopUpAuctionDataCorrected = {
+        ...auctionData,
+        depositPaid: depositPaid
+    };
+    
+    // Initialize calculations
+    setTimeout(() => {
+        updateTopUpFromAuctionCalculationsCorrected();
+        
+        // Set default due date to 30 days from now
+        const dueDateInput = document.getElementById('topupDueDateCorrected');
+        if (dueDateInput && !dueDateInput.value) {
+            const defaultDate = new Date();
+            defaultDate.setDate(defaultDate.getDate() + 30);
+            dueDateInput.value = defaultDate.toISOString().slice(0, 10);
+        }
+    }, 100);
+}
+
+/**
+ * Updates calculations for top-up from auction form (corrected)
+ * Based on the analogy: Deposit = 2000, Total Price = 8000, Target = 50%
+ * Amount needed = (50% of 8000) - 2000 = 4000 - 2000 = 2000
+ */
+function updateTopUpFromAuctionCalculationsCorrected() {
+    const auctionData = window.currentTopUpAuctionDataCorrected;
+    if (!auctionData) return;
+    
+    const newTotalPrice = parseFloat(document.getElementById('topupTotalPriceCorrected').value) || 0;
+    const percentageTarget = parseFloat(document.getElementById('topupPercentageTargetCorrected').value) || 50;
+    const amountToPay = parseFloat(document.getElementById('topupAmountToPayCorrected').value) || 0;
+    const depositPaid = auctionData.depositPaid || 0;
+    
+    // Calculate target amount based on percentage
+    // Target amount = (percentageTarget / 100) * newTotalPrice
+    const targetAmount = (percentageTarget / 100) * newTotalPrice;
+    
+    // Calculate suggested amount needed to reach target
+    const suggestedAmount = Math.max(0, targetAmount - depositPaid);
+    
+    // Calculate totals
+    const totalPaidAfter = depositPaid + amountToPay;
+    const remainingAfter = newTotalPrice - totalPaidAfter;
+    const depositPercentage = (depositPaid / newTotalPrice * 100);
+    const percentageAfter = (totalPaidAfter / newTotalPrice * 100);
+    
+    // Update displays
+    document.getElementById('depositPercentageDisplay').textContent = `${depositPercentage.toFixed(1)}%`;
+    document.getElementById('topupAmountNowDisplay').textContent = `USD ${amountToPay.toFixed(2)}`;
+    document.getElementById('topupTotalPaidAfterCorrected').textContent = `USD ${totalPaidAfter.toFixed(2)}`;
+    document.getElementById('topupRemainingAfterCorrected').textContent = `USD ${Math.max(0, remainingAfter).toFixed(2)}`;
+    
+    // Add a helpful note showing suggested amount
+    const noteId = 'topup-suggested-note';
+    let existingNote = document.getElementById(noteId);
+    
+    if (suggestedAmount > 0 && amountToPay !== suggestedAmount) {
+        if (!existingNote) {
+            const note = document.createElement('div');
+            note.id = noteId;
+            note.className = 'text-xs text-blue-600 mt-2 p-2 bg-blue-50 rounded';
+            note.innerHTML = `💡 To reach ${percentageTarget}% (USD ${targetAmount.toFixed(2)}), you need to pay USD ${suggestedAmount.toFixed(2)} more. Current deposit: USD ${depositPaid.toFixed(2)}.`;
+            document.getElementById('topupAmountToPayCorrected').parentNode.appendChild(note);
+        } else {
+            existingNote.innerHTML = `💡 To reach ${percentageTarget}% (USD ${targetAmount.toFixed(2)}), you need to pay USD ${suggestedAmount.toFixed(2)} more. Current deposit: USD ${depositPaid.toFixed(2)}.`;
+        }
+    } else if (existingNote) {
+        existingNote.remove();
+    }
+    
+    // Validate payment amount
+    if (amountToPay > newTotalPrice - depositPaid) {
+        document.getElementById('topupAmountToPayCorrected').value = (newTotalPrice - depositPaid).toFixed(2);
+        updateTopUpFromAuctionCalculationsCorrected();
+        showErrorToast("Payment amount cannot exceed remaining balance");
+    }
+}
+
+/**
+ * Saves top-up invoice from auction (corrected)
+ */
+async function saveTopUpFromAuctionCorrected(onlySave = false) {
+    const form = document.getElementById('topup-auction-form-corrected');
+    if (!form.checkValidity()) {
+        form.reportValidity();
+        return;
+    }
+    
+    const auctionData = window.currentTopUpAuctionDataCorrected;
+    if (!auctionData) {
+        showErrorToast("Source auction data not found");
+        return;
+    }
+    
+    // Show loading state
+    const saveButton = onlySave ? document.getElementById('save-topup-corrected-only-btn') : document.getElementById('save-topup-corrected-btn');
+    const spinner = onlySave ? document.getElementById('topup-corrected-only-spinner') : document.getElementById('topup-corrected-spinner');
+    
+    if (saveButton && spinner) {
+        saveButton.disabled = true;
+        spinner.classList.remove('hidden');
+        const buttonText = onlySave ? 'Saving...' : 'Generating & Saving...';
+        saveButton.innerHTML = `<span>${buttonText}</span>${spinner.outerHTML}`;
+    }
+    
+    try {
+        const newTotalPrice = parseFloat(document.getElementById('topupTotalPriceCorrected').value) || 0;
+        const amountToPay = parseFloat(document.getElementById('topupAmountToPayCorrected').value) || 0;
+        const percentageTarget = parseFloat(document.getElementById('topupPercentageTargetCorrected').value) || 50;
+        const exchangeRate = parseFloat(document.getElementById('topupExchangeRateCorrected').value) || 130;
+        const dueDate = document.getElementById('topupDueDateCorrected').value;
+        const paymentReference = document.getElementById('topupPaymentRefCorrected').value;
+        
+        // Collect bank details
+        const bankSelect = document.getElementById('topupAuctionBankSelectCorrected');
+        let selectedBank = null;
+        
+        if (bankSelect.selectedIndex > 0) {
+            try {
+                const bankValue = bankSelect.options[bankSelect.selectedIndex].value;
+                const decodedValue = bankValue
+                    .replace(/&apos;/g, "'")
+                    .replace(/&quot;/g, '"')
+                    .replace(/&lt;/g, '<')
+                    .replace(/&gt;/g, '>')
+                    .replace(/&amp;/g, '&');
+                
+                selectedBank = JSON.parse(decodedValue);
+            } catch (e) {
+                console.error("Error parsing bank details:", e);
+            }
+        }
+        
+        if (!selectedBank) {
+            showErrorToast("Please select a bank account.");
+            resetTopUpAuctionCorrectedSaveButton(saveButton, spinner, onlySave);
+            return;
+        }
+        
+        const depositPaid = auctionData.depositPaid || 0;
+        const newTotalPaid = depositPaid + amountToPay;
+        const remainingAfter = newTotalPrice - newTotalPaid;
+        
+        // Generate invoice number
+        const carMakeModel = `${auctionData.carDetails?.make || ''} ${auctionData.carDetails?.model || ''}`.trim() || 'Unknown';
+        const invoiceId = await generateTopUpInvoiceNumber(auctionData.clientName, carMakeModel, auctionData.invoiceId);
+        
+        // Calculate target amount for display
+        const targetAmount = (percentageTarget / 100) * newTotalPrice;
+        
+        // Prepare top-up invoice data
+        const topUpData = {
+            docType: 'Top-Up Invoice',
+            invoiceId,
+            sourceInvoiceId: auctionData.invoiceId,
+            sourceInvoiceFirestoreId: auctionData.firestoreId,
+            sourceType: 'auction',
+            clientName: auctionData.clientName,
+            clientPhone: auctionData.clientPhone || '',
+            issueDate: getCurrentDateForDocument(),
+            dueDate: dueDate || null,
+            exchangeRate,
+            carDetails: auctionData.carDetails || {
+                make: '',
+                model: '',
+                year: '',
+                vin: '',
+                color: ''
+            },
+            pricing: {
+                totalUSD: newTotalPrice,
+                depositPaid: depositPaid,
+                currentPaymentDue: amountToPay,
+                totalPaid: newTotalPaid,
+                remainingBalance: remainingAfter,
+                paymentPercentage: (amountToPay / newTotalPrice * 100),
+                totalPaidPercentage: (newTotalPaid / newTotalPrice * 100),
+                targetPercentage: percentageTarget,
+                targetAmount: targetAmount
+            },
+            paymentReference: paymentReference,
+            bankDetails: selectedBank,
+            createdBy: currentUser.email,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+            revoked: false,
+            auctionOriginalInvoiceId: auctionData.invoiceId,
+            auctionDepositAmount: depositPaid
+        };
+        
+        // Save to Firestore
+        const docRef = await db.collection("top_up_invoices").add(topUpData);
+        
+        // Mark the auction invoice as having a top-up created
+        await db.collection("invoices").doc(auctionData.firestoreId).update({
+            topUpCreated: true,
+            topUpInvoiceId: invoiceId,
+            topUpCreatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            totalVehiclePrice: newTotalPrice
+        });
+        
+        resetTopUpAuctionCorrectedSaveButton(saveButton, spinner, onlySave);
+        showSuccessToast(`Top-Up Invoice ${invoiceId} saved successfully!`);
+        
+        if (!onlySave) {
+            topUpData.firestoreId = docRef.id;
+            generateTopUpPDF(topUpData);
+        }
+        
+        // Clear global data and refresh
+        window.currentTopUpAuctionDataCorrected = null;
+        renderInvoiceHistory();
+        fetchTopUpInvoices();
+        
+    } catch (error) {
+        console.error("Error saving top-up invoice:", error);
+        resetTopUpAuctionCorrectedSaveButton(saveButton, spinner, onlySave);
+        showErrorToast("Failed to save invoice: " + error.message);
+    }
+}
+
+/**
+ * Creates a balance invoice from any invoice (top-up or regular) - CORRECTED
+ */
+async function createBalanceInvoice(sourceInvoiceData) {
+    // Check if invoice is revoked
+    if (sourceInvoiceData.revoked) {
+        showErrorToast("Cannot create balance invoice from a revoked invoice.");
+        return;
+    }
+    
+    // Get the remaining balance
+    let remainingBalance = 0;
+    let totalPrice = 0;
+    let totalPaid = 0;
+    
+    if (sourceInvoiceData.docType === 'Top-Up Invoice') {
+        // For top-up invoices, use the remaining balance from the top-up
+        totalPrice = sourceInvoiceData.pricing?.totalUSD || 0;
+        totalPaid = sourceInvoiceData.pricing?.totalPaid || 0;
+        remainingBalance = sourceInvoiceData.pricing?.remainingBalance || (totalPrice - totalPaid);
+        
+        // Check if there are existing balance invoices for this top-up
+        const existingBalanceInvoices = await db.collection("balance_invoices")
+            .where("sourceInvoiceId", "==", sourceInvoiceData.invoiceId)
+            .get();
+        
+        let totalBalancePaid = 0;
+        existingBalanceInvoices.forEach(doc => {
+            const balanceData = doc.data();
+            totalBalancePaid += balanceData.pricing?.currentPaymentDue || 0;
+        });
+        
+        remainingBalance = remainingBalance - totalBalancePaid;
+        totalPaid = totalPaid + totalBalancePaid;
+    } else if (sourceInvoiceData.docType === 'Invoice' || sourceInvoiceData.docType === 'Proforma Invoice') {
+        // For regular invoices, calculate remaining balance
+        totalPrice = sourceInvoiceData.pricing?.totalUSD || 0;
+        
+        // Get receipts for this invoice
+        const receiptsSnapshot = await db.collection("receipts")
+            .where("invoiceReference", "==", sourceInvoiceData.invoiceId)
+            .get();
+        
+        totalPaid = 0;
+        for (const receiptDoc of receiptsSnapshot.docs) {
+            const receipt = receiptDoc.data();
+            if (receipt.currency === 'USD') {
+                totalPaid += receipt.amountReceived;
+            } else if (receipt.currency === 'KSH') {
+                totalPaid += receipt.amountReceived / receipt.exchangeRate;
+            }
+        }
+        
+        remainingBalance = totalPrice - totalPaid;
+    } else {
+        showErrorToast("Cannot create balance invoice from this document type.");
+        return;
+    }
+    
+    if (remainingBalance <= 0) {
+        showErrorToast("This invoice is already fully paid. No balance invoice needed.");
+        return;
+    }
+    
+    // Render balance form with corrected logic
+    renderBalanceFormCorrected({
+        ...sourceInvoiceData,
+        totalPrice: totalPrice,
+        totalPaid: totalPaid,
+        remainingBalance: remainingBalance,
+        sourceInvoiceId: sourceInvoiceData.invoiceId,
+        sourceType: sourceInvoiceData.docType === 'Top-Up Invoice' ? 'topup' : 'regular',
+        firestoreId: sourceInvoiceData.firestoreId
+    });
+}
+
+/**
+ * Renders corrected balance invoice form
+ */
+function renderBalanceFormCorrected(sourceInvoice) {
+    const formArea = document.getElementById('document-form-area');
+    const remainingBalance = sourceInvoice.remainingBalance || 0;
+    const totalPrice = sourceInvoice.totalPrice || 0;
+    const totalPaid = sourceInvoice.totalPaid || 0;
+    const percentagePaid = (totalPaid / totalPrice * 100);
+    
+    formArea.innerHTML = `
+        <div class="p-6 border border-gray-300 rounded-xl bg-white shadow-lg animate-fade-in">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-semibold text-primary-blue">Balance Invoice</h3>
+                <button onclick="renderInvoiceHistory()" class="text-secondary-red hover:text-red-700 text-sm underline">← Back</button>
+            </div>
+            
+            <div class="mb-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                <h4 class="font-bold text-primary-blue mb-2">Source Invoice Details</h4>
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                    <div><strong>Invoice No:</strong> ${sourceInvoice.invoiceId}</div>
+                    <div><strong>Client:</strong> ${sourceInvoice.clientName}</div>
+                    <div><strong>Total Price:</strong> USD ${totalPrice.toFixed(2)}</div>
+                    <div><strong>Already Paid:</strong> USD ${totalPaid.toFixed(2)} (${percentagePaid.toFixed(1)}%)</div>
+                    <div><strong>Remaining Balance:</strong> USD ${remainingBalance.toFixed(2)}</div>
+                </div>
+            </div>
+            
+            <form id="balance-form-corrected" onsubmit="event.preventDefault(); saveBalanceInvoiceCorrected();">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 p-4 bg-gray-50 rounded-lg">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700">Document Type</label>
+                        <input type="text" value="Balance Invoice" readonly class="mt-1 block w-full p-2 border bg-gray-100 rounded-md">
+                    </div>
+                    <div>
+                        <label for="balanceExchangeRateCorrected" class="block text-sm font-medium text-gray-700">USD 1 = KES</label>
+                        <input type="number" id="balanceExchangeRateCorrected" step="1" required value="${sourceInvoice.exchangeRate || 130}" class="mt-1 block w-full p-2 border rounded-md transition duration-200">
+                    </div>
+                    <div>
+                        <label for="balanceDueDateCorrected" class="block text-sm font-medium text-gray-700">Due Date (Optional)</label>
+                        <input type="date" id="balanceDueDateCorrected" class="mt-1 block w-full p-2 border rounded-md transition duration-200">
+                    </div>
+                </div>
+                
+                <div class="mb-4 p-4 bg-yellow-50 rounded-lg border border-yellow-300">
+                    <h4 class="font-bold text-secondary-red mb-3">Balance Payment Details</h4>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label for="balancePaymentDueCorrected" class="block text-sm font-medium text-gray-700">Amount to Pay Now (USD)</label>
+                            <input type="number" id="balancePaymentDueCorrected" step="0.01" required value="${remainingBalance.toFixed(2)}" min="0" max="${remainingBalance.toFixed(2)}" class="mt-1 block w-full p-2 border rounded-md transition duration-200" oninput="updateBalanceCalculationsCorrected()">
+                            <p class="text-xs text-gray-500 mt-1">Enter the amount the client is paying now (e.g., 2000 USD)</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700">Percentage of Total Price</label>
+                            <input type="text" id="balancePercentageCorrected" readonly class="mt-1 block w-full p-2 border bg-gray-100 rounded-md">
+                        </div>
+                    </div>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
+                        <div class="p-2 bg-white rounded border">
+                            <p class="text-xs text-gray-600">Total Paid After Payment</p>
+                            <p id="balanceTotalPaidAfterCorrected" class="text-lg font-bold text-green-600">USD ${totalPaid.toFixed(2)}</p>
+                        </div>
+                        <div class="p-2 bg-white rounded border">
+                            <p class="text-xs text-gray-600">Remaining After Payment</p>
+                            <p id="balanceRemainingAfterCorrected" class="text-lg font-bold text-secondary-red">USD ${remainingBalance.toFixed(2)}</p>
+                        </div>
+                        <div class="p-2 bg-white rounded border">
+                            <p class="text-xs text-gray-600">Percentage Paid After</p>
+                            <p id="balancePercentagePaidAfterCorrected" class="text-lg font-bold text-primary-blue">${percentagePaid.toFixed(1)}%</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <fieldset class="border p-4 rounded-lg mb-6">
+                    <legend class="text-base font-semibold text-primary-blue px-2">Vehicle Details</legend>
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <input type="text" value="${sourceInvoice.carDetails?.make || ''} ${sourceInvoice.carDetails?.model || ''}" readonly class="p-2 border bg-gray-100 rounded-md">
+                        <input type="text" value="${sourceInvoice.carDetails?.year || ''}" readonly class="p-2 border bg-gray-100 rounded-md">
+                        <input type="text" value="${sourceInvoice.carDetails?.vin || ''}" readonly class="p-2 border bg-gray-100 rounded-md">
+                        <input type="text" value="${sourceInvoice.carDetails?.color || ''}" readonly class="p-2 border bg-gray-100 rounded-md">
+                    </div>
+                </fieldset>
+                
+                <fieldset class="border p-4 rounded-lg mb-6">
+                    <legend class="text-base font-semibold text-secondary-red px-2">Bank Account for Payment</legend>
+                    <select id="balanceBankSelectCorrected" required class="mt-1 block w-full p-2 border rounded-md transition duration-200"></select>
+                </fieldset>
+                
+                <fieldset class="border p-4 rounded-lg mb-6">
+                    <legend class="text-base font-semibold text-secondary-red px-2">Payment Reference</legend>
+                    <input type="text" id="balancePaymentRefCorrected" placeholder="Enter payment reference (e.g., Cheque No, RTGS Ref)" class="w-full p-2 border rounded-md">
+                </fieldset>
+                
+                <div class="flex space-x-4">
+                    <button type="submit" id="save-balance-corrected-btn" class="flex-1 bg-primary-blue hover:bg-blue-700 text-white font-bold py-3 rounded-lg transition duration-150 flex items-center justify-center gap-2">
+                        <span>Generate & Save Balance Invoice</span>
+                        <svg id="balance-corrected-spinner" class="hidden w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                    </button>
+                    <button type="button" onclick="saveBalanceInvoiceCorrected(true)" id="save-balance-corrected-only-btn" class="flex-1 bg-gray-500 hover:bg-gray-700 text-white font-bold py-3 rounded-lg transition duration-150 flex items-center justify-center gap-2">
+                        <span>Save Only (No PDF)</span>
+                        <svg id="balance-corrected-only-spinner" class="hidden w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                    </button>
+                </div>
+            </form>
+        </div>
+    `;
+    
+    // Populate bank dropdown
+    populateBankDropdown('balanceBankSelectCorrected', false);
+    
+    // Store source invoice in global variable
+    window.currentBalanceSourceInvoiceCorrected = sourceInvoice;
+    
+    // Initialize calculations
+    setTimeout(() => {
+        updateBalanceCalculationsCorrected();
+        
+        const dueDateInput = document.getElementById('balanceDueDateCorrected');
+        if (dueDateInput && !dueDateInput.value) {
+            const defaultDate = new Date();
+            defaultDate.setDate(defaultDate.getDate() + 30);
+            dueDateInput.value = defaultDate.toISOString().slice(0, 10);
+        }
+    }, 100);
+}
+
+/**
+ * Updates calculations for balance form (corrected)
+ */
+function updateBalanceCalculationsCorrected() {
+    const sourceInvoice = window.currentBalanceSourceInvoiceCorrected;
+    if (!sourceInvoice) return;
+    
+    const paymentDue = parseFloat(document.getElementById('balancePaymentDueCorrected').value) || 0;
+    const totalPrice = sourceInvoice.totalPrice || 0;
+    const totalPaid = sourceInvoice.totalPaid || 0;
+    const remainingBalance = sourceInvoice.remainingBalance || 0;
+    
+    // Validate payment amount
+    if (paymentDue > remainingBalance) {
+        document.getElementById('balancePaymentDueCorrected').value = remainingBalance.toFixed(2);
+        updateBalanceCalculationsCorrected();
+        return;
+    }
+    
+    const newTotalPaid = totalPaid + paymentDue;
+    const newRemaining = remainingBalance - paymentDue;
+    const percentagePaid = (newTotalPaid / totalPrice * 100);
+    const percentageOfTotal = (paymentDue / totalPrice * 100);
+    
+    // Update displays
+    document.getElementById('balanceTotalPaidAfterCorrected').textContent = `USD ${newTotalPaid.toFixed(2)}`;
+    document.getElementById('balanceRemainingAfterCorrected').textContent = `USD ${Math.max(0, newRemaining).toFixed(2)}`;
+    document.getElementById('balancePercentagePaidAfterCorrected').textContent = `${percentagePaid.toFixed(1)}%`;
+    document.getElementById('balancePercentageCorrected').value = `${percentageOfTotal.toFixed(1)}% of total price`;
+    
+    // Add helpful note
+    const noteId = 'balance-suggested-note';
+    let existingNote = document.getElementById(noteId);
+    
+    if (paymentDue < remainingBalance && paymentDue > 0) {
+        if (!existingNote) {
+            const note = document.createElement('div');
+            note.id = noteId;
+            note.className = 'text-xs text-blue-600 mt-2 p-2 bg-blue-50 rounded';
+            note.innerHTML = `💡 After this payment of USD ${paymentDue.toFixed(2)}, the remaining balance will be USD ${newRemaining.toFixed(2)}. You can create another balance invoice for the remaining amount.`;
+            document.getElementById('balancePaymentDueCorrected').parentNode.appendChild(note);
+        } else {
+            existingNote.innerHTML = `💡 After this payment of USD ${paymentDue.toFixed(2)}, the remaining balance will be USD ${newRemaining.toFixed(2)}. You can create another balance invoice for the remaining amount.`;
+        }
+    } else if (existingNote) {
+        existingNote.remove();
+    }
+}
+
+/**
+ * Saves balance invoice (corrected)
+ */
+async function saveBalanceInvoiceCorrected(onlySave = false) {
+    const form = document.getElementById('balance-form-corrected');
+    if (!form.checkValidity()) {
+        form.reportValidity();
+        return;
+    }
+    
+    const sourceInvoice = window.currentBalanceSourceInvoiceCorrected;
+    if (!sourceInvoice) {
+        showErrorToast("Source invoice data not found");
+        return;
+    }
+    
+    // Show loading state
+    const saveButton = onlySave ? document.getElementById('save-balance-corrected-only-btn') : document.getElementById('save-balance-corrected-btn');
+    const spinner = onlySave ? document.getElementById('balance-corrected-only-spinner') : document.getElementById('balance-corrected-spinner');
+    
+    if (saveButton && spinner) {
+        saveButton.disabled = true;
+        spinner.classList.remove('hidden');
+        const buttonText = onlySave ? 'Saving...' : 'Generating & Saving...';
+        saveButton.innerHTML = `<span>${buttonText}</span>${spinner.outerHTML}`;
+    }
+    
+    try {
+        const paymentDue = parseFloat(document.getElementById('balancePaymentDueCorrected').value) || 0;
+        const exchangeRate = parseFloat(document.getElementById('balanceExchangeRateCorrected').value) || 130;
+        const dueDate = document.getElementById('balanceDueDateCorrected').value;
+        const paymentReference = document.getElementById('balancePaymentRefCorrected').value;
+        
+        // Collect bank details
+        const bankSelect = document.getElementById('balanceBankSelectCorrected');
+        let selectedBank = null;
+        
+        if (bankSelect.selectedIndex > 0) {
+            try {
+                const bankValue = bankSelect.options[bankSelect.selectedIndex].value;
+                const decodedValue = bankValue
+                    .replace(/&apos;/g, "'")
+                    .replace(/&quot;/g, '"')
+                    .replace(/&lt;/g, '<')
+                    .replace(/&gt;/g, '>')
+                    .replace(/&amp;/g, '&');
+                
+                selectedBank = JSON.parse(decodedValue);
+            } catch (e) {
+                console.error("Error parsing bank details:", e);
+            }
+        }
+        
+        if (!selectedBank) {
+            showErrorToast("Please select a bank account.");
+            resetBalanceCorrectedSaveButton(saveButton, spinner, onlySave);
+            return;
+        }
+        
+        const totalPrice = sourceInvoice.totalPrice || 0;
+        const totalPaidBefore = sourceInvoice.totalPaid || 0;
+        const remainingBalanceBefore = sourceInvoice.remainingBalance || 0;
+        const newTotalPaid = totalPaidBefore + paymentDue;
+        const remainingAfter = remainingBalanceBefore - paymentDue;
+        
+        // Generate invoice number
+        const carMakeModel = sourceInvoice.carDetails?.make && sourceInvoice.carDetails?.model 
+            ? `${sourceInvoice.carDetails.make} ${sourceInvoice.carDetails.model}` 
+            : sourceInvoice.vehicleDetails?.makeModel || 'Unknown';
+        
+        const invoiceId = await generateBalanceInvoiceNumber(sourceInvoice.clientName, carMakeModel, sourceInvoice.invoiceId);
+        
+        // Prepare balance invoice data
+        const balanceData = {
+            docType: 'Balance Invoice',
+            invoiceId,
+            sourceInvoiceId: sourceInvoice.invoiceId,
+            sourceInvoiceFirestoreId: sourceInvoice.firestoreId,
+            sourceType: sourceInvoice.sourceType || 'regular',
+            clientName: sourceInvoice.clientName,
+            clientPhone: sourceInvoice.clientPhone || '',
+            issueDate: getCurrentDateForDocument(),
+            dueDate: dueDate || null,
+            exchangeRate,
+            carDetails: sourceInvoice.carDetails || sourceInvoice.vehicleDetails || {
+                make: '',
+                model: '',
+                year: '',
+                vin: '',
+                color: ''
+            },
+            pricing: {
+                totalUSD: totalPrice,
+                totalPaidBefore: totalPaidBefore,
+                currentPaymentDue: paymentDue,
+                newTotalPaid: newTotalPaid,
+                remainingBalance: remainingAfter,
+                paymentPercentage: (paymentDue / totalPrice * 100),
+                totalPaidPercentage: (newTotalPaid / totalPrice * 100),
+                remainingBalanceBefore: remainingBalanceBefore
+            },
+            paymentReference: paymentReference,
+            bankDetails: selectedBank,
+            createdBy: currentUser.email,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+            revoked: false
+        };
+        
+        // Save to Firestore
+        const docRef = await db.collection("balance_invoices").add(balanceData);
+        
+        // Update the source invoice's balance if it's a top-up invoice
+        if (sourceInvoice.sourceType === 'topup' && sourceInvoice.firestoreId) {
+            // Get current top-up data
+            const topUpDoc = await db.collection("top_up_invoices").doc(sourceInvoice.firestoreId).get();
+            if (topUpDoc.exists) {
+                const topUpData = topUpDoc.data();
+                const newRemaining = (topUpData.pricing?.remainingBalance || 0) - paymentDue;
+                
+                await db.collection("top_up_invoices").doc(sourceInvoice.firestoreId).update({
+                    "pricing.remainingBalance": Math.max(0, newRemaining),
+                    "pricing.totalPaid": (topUpData.pricing?.totalPaid || 0) + paymentDue,
+                    "pricing.totalPaidPercentage": ((topUpData.pricing?.totalPaid || 0) + paymentDue) / (topUpData.pricing?.totalUSD || 1) * 100
+                });
+            }
+        }
+        
+        resetBalanceCorrectedSaveButton(saveButton, spinner, onlySave);
+        showSuccessToast(`Balance Invoice ${invoiceId} saved successfully!`);
+        
+        if (!onlySave) {
+            balanceData.firestoreId = docRef.id;
+            generateBalancePDF(balanceData);
+        }
+        
+        // Clear global data and refresh
+        window.currentBalanceSourceInvoiceCorrected = null;
+        renderInvoiceHistory();
+        
+    } catch (error) {
+        console.error("Error saving balance invoice:", error);
+        resetBalanceCorrectedSaveButton(saveButton, spinner, onlySave);
+        showErrorToast("Failed to save invoice: " + error.message);
+    }
+}
+
+/**
+ * Resets balance corrected save button
+ */
+function resetBalanceCorrectedSaveButton(saveButton, spinner, onlySave) {
+    if (saveButton && spinner) {
+        saveButton.disabled = false;
+        spinner.classList.add('hidden');
+        const buttonText = onlySave ? 'Save Only (No PDF)' : 'Generate & Save Balance Invoice';
+        saveButton.innerHTML = `<span>${buttonText}</span>${spinner.outerHTML}`;
+    }
+}
+
+//HELPER FUNCTIONS
+
+
+/**
+ * Resets top-up auction corrected save button
+ */
+function resetTopUpAuctionCorrectedSaveButton(saveButton, spinner, onlySave) {
+    if (saveButton && spinner) {
+        saveButton.disabled = false;
+        spinner.classList.add('hidden');
+        const buttonText = onlySave ? 'Save Only (No PDF)' : 'Generate & Save Top-Up Invoice';
+        saveButton.innerHTML = `<span>${buttonText}</span>${spinner.outerHTML}`;
+    }
+}
+
+/**
+ * Resets balance corrected save button
+ */
+function resetBalanceCorrectedSaveButton(saveButton, spinner, onlySave) {
+    if (saveButton && spinner) {
+        saveButton.disabled = false;
+        spinner.classList.add('hidden');
+        const buttonText = onlySave ? 'Save Only (No PDF)' : 'Generate & Save Balance Invoice';
+        saveButton.innerHTML = `<span>${buttonText}</span>${spinner.outerHTML}`;
+    }
+}
+
+
+/**
+ * Creates a receipt from invoice data in trail view
+ */
+function createReceiptFromInvoiceTrail(invoiceData) {
+    // Check if invoice is revoked
+    if (invoiceData.revoked) {
+        showErrorToast("Cannot create receipt from a revoked invoice.");
+        return;
+    }
+    
+    // Navigate to receipt form with invoice reference
+    renderReceiptForm(invoiceData.invoiceId);
+    
+    // Show loading indicator
+    const loadingOverlay = showLoadingOverlay("Loading invoice data...");
+    
+    // Auto-populate fields from invoice data
+    setTimeout(() => {
+        const receivedFromField = document.getElementById('receivedFrom');
+        const beingPaidForField = document.getElementById('beingPaidFor');
+        const invoiceRefField = document.getElementById('invoiceReference');
+        const exchangeRateField = document.getElementById('exchangeRate');
+        
+        if (receivedFromField) receivedFromField.value = invoiceData.clientName;
+        if (beingPaidForField) beingPaidForField.value = `${invoiceData.carDetails?.make || ''} ${invoiceData.carDetails?.model || ''} ${invoiceData.carDetails?.year || ''}`;
+        if (invoiceRefField) {
+            invoiceRefField.value = invoiceData.invoiceId;
+            // Store exchange rate for calculations
+            invoiceRefField.dataset.exchangeRate = invoiceData.exchangeRate;
+            invoiceRefField.dataset.totalUSD = invoiceData.pricing?.totalUSD || 0;
+            invoiceRefField.dataset.balanceUSD = invoiceData.pricing?.remainingBalance || 0;
+        }
+        if (exchangeRateField) exchangeRateField.value = invoiceData.exchangeRate || 130;
+        
+        // Hide loading overlay
+        hideLoadingOverlay();
+        
+        // Trigger fetch invoice details
+        setTimeout(() => {
+            fetchInvoiceDetails();
+            showSuccessToast("Invoice data loaded successfully");
+        }, 300);
+        
+    }, 500);
+}
+
+/**
+ * Renders the auction invoice history page (shows auction invoices and their related invoices)
+ */
+function renderAuctionInvoiceHistory() {
+    const formArea = document.getElementById('document-form-area');
+    formArea.innerHTML = `
+        <div class="p-6 border border-gray-300 rounded-xl bg-white shadow-lg animate-fade-in">
+            <h3 class="text-xl font-semibold mb-6 text-primary-blue">Auction Invoice History</h3>
+            <div id="auction-history-list">
+                ${createShimmerLoader(3)}
+            </div>
+        </div>
+    `;
+    
+    // Load auction-related invoices
+    (async () => {
+        const listElement = document.getElementById('auction-history-list');
+        if (!listElement) return;
+        
+        try {
+            // Get auction invoices
+            const auctionSnapshot = await db.collection("invoices")
+                .where("docType", "==", "Auction Invoice")
+                .orderBy("createdAt", "desc")
+                .get();
+            
+            if (auctionSnapshot.empty) {
+                listElement.innerHTML = `
+                    <div class="text-center p-8 border border-dashed border-gray-300 rounded-lg">
+                        <svg class="w-12 h-12 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                        </svg>
+                        <p class="text-gray-500">No auction invoices found.</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            let html = `<div class="space-y-6">`;
+            
+            for (const auctionDoc of auctionSnapshot.docs) {
+                const auctionData = auctionDoc.data();
+                auctionData.firestoreId = auctionDoc.id;
+                
+                // Get related top-up invoices
+                const topUpSnapshot = await db.collection("top_up_invoices")
+                    .where("sourceInvoiceId", "==", auctionData.invoiceId)
+                    .orderBy("createdAt", "asc")
+                    .get();
+                
+                // Get related balance invoices from top-ups
+                const allRelated = [];
+                
+                // Add auction invoice
+                allRelated.push({ ...auctionData, type: 'auction', docType: 'Auction Invoice', relation: 'Auction' });
+                
+                // Add top-up invoices
+                for (const topUpDoc of topUpSnapshot.docs) {
+                    const topUpData = topUpDoc.data();
+                    topUpData.firestoreId = topUpDoc.id;
+                    allRelated.push({ ...topUpData, type: 'topup', docType: 'Top-Up Invoice', relation: 'Top-Up' });
+                    
+                    // Get balance invoices for this top-up
+                    const balanceSnapshot = await db.collection("balance_invoices")
+                        .where("sourceInvoiceId", "==", topUpData.invoiceId)
+                        .orderBy("createdAt", "asc")
+                        .get();
+                    
+                    balanceSnapshot.forEach(balanceDoc => {
+                        const balanceData = balanceDoc.data();
+                        balanceData.firestoreId = balanceDoc.id;
+                        allRelated.push({ ...balanceData, type: 'balance', docType: 'Balance Invoice', relation: 'Balance' });
+                    });
+                }
+                
+                // Sort by date
+                allRelated.sort((a, b) => {
+                    const dateA = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(a.issueDate || 0);
+                    const dateB = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(b.issueDate || 0);
+                    return dateA - dateB;
+                });
+                
+                html += `
+                    <div class="border rounded-lg overflow-hidden shadow-md">
+                        <div class="bg-yellow-100 p-3 font-bold text-primary-blue border-b">
+                            Auction Group: ${auctionData.invoiceId} - ${auctionData.clientName}
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="min-w-full divide-y divide-gray-200">
+                                <thead class="bg-gray-50">
+                                    <tr>
+                                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Date</th>
+                                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Invoice No</th>
+                                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Type</th>
+                                        <th class="px-4 py-2 text-right text-xs font-medium text-gray-500">Total</th>
+                                        <th class="px-4 py-2 text-right text-xs font-medium text-gray-500">Paid</th>
+                                        <th class="px-4 py-2 text-right text-xs font-medium text-gray-500">Remaining</th>
+                                        <th class="px-4 py-2 text-center text-xs font-medium text-gray-500">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="bg-white divide-y divide-gray-200">
+                `;
+                
+                for (const invoice of allRelated) {
+                    const issueDate = invoice.issueDate || (invoice.createdAt?.toDate ? invoice.createdAt.toDate().toLocaleDateString() : 'N/A');
+                    const totalPrice = invoice.pricing?.totalUSD || invoice.pricing?.totalPrice || 0;
+                    const totalPaid = invoice.pricing?.newTotalPaid || invoice.pricing?.totalPaid || 0;
+                    const remaining = invoice.pricing?.remainingBalance || (totalPrice - totalPaid);
+                    
+                    const typeColors = {
+                        'Auction Invoice': 'bg-yellow-100 text-yellow-800',
+                        'Top-Up Invoice': 'bg-teal-100 text-teal-800',
+                        'Balance Invoice': 'bg-purple-100 text-purple-800'
+                    };
+                    const typeColor = typeColors[invoice.docType] || 'bg-gray-100 text-gray-800';
+                    
+                    const invoiceDataJson = JSON.stringify({
+                        ...invoice,
+                        firestoreId: invoice.firestoreId
+                    });
+                    
+                    html += `
+                        <tr class="hover:bg-gray-50">
+                            <td class="px-4 py-2 text-sm">${issueDate}</td>
+                            <td class="px-4 py-2 text-sm font-medium text-primary-blue">${invoice.invoiceId}</td>
+                            <td class="px-4 py-2"><span class="px-2 py-1 text-xs rounded-full ${typeColor}">${invoice.docType}</span></td>
+                            <td class="px-4 py-2 text-sm text-right font-semibold">USD ${totalPrice.toFixed(2)}</td>
+                            <td class="px-4 py-2 text-sm text-right text-green-600 font-semibold">USD ${totalPaid.toFixed(2)}</td>
+                            <td class="px-4 py-2 text-sm text-right ${remaining > 0 ? 'text-red-600' : 'text-green-600'} font-semibold">USD ${remaining.toFixed(2)}</td>
+                            <td class="px-4 py-2 text-center">
+                                <div class="flex justify-center gap-2">
+                                    <button onclick='reDownloadInvoiceForTrail(${invoiceDataJson})' class="text-primary-blue hover:text-blue-700" title="Download PDF">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                                    </button>
+                                    <button onclick='createReceiptFromInvoiceTrail(${invoiceDataJson})' class="text-green-600 hover:text-green-800" title="Create Receipt">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                                    </button>
+                                    ${remaining > 0 && invoice.type !== 'auction' ? `
+                                    <button onclick='createBalanceInvoice(${invoiceDataJson})' class="text-purple-600 hover:text-purple-800" title="Create Balance Invoice">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+                                    </button>
+                                    ` : ''}
+                                </div>
+                            </td>
+                        </tr>
+                    `;
+                }
+                
+                html += `
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            html += `</div>`;
+            listElement.innerHTML = html;
+            
+        } catch (error) {
+            console.error("Error fetching auction invoices:", error);
+            listElement.innerHTML = `
+                <div class="text-center p-4 bg-red-50 border border-red-200 rounded-lg">
+                    <p class="text-red-600 font-semibold">Error loading auction invoices</p>
+                    <p class="text-xs text-gray-600 mt-1">${error.message}</p>
+                </div>
+            `;
+        }
+    })();
+}
+
+// =================================================================
 //                 MAKE FUNCTIONS GLOBALLY AVAILABLE
 // =================================================================
 
@@ -7622,3 +11527,32 @@ window.updatePortChargesCalculation = updatePortChargesCalculation;
 window.addPortChargeLine = addPortChargeLine;
 window.removePortChargeLine = removePortChargeLine;
 window.savePortChargesInvoice = savePortChargesInvoice;
+
+// Top-up invoice functions
+window.renderTopUpInvoiceForm = renderTopUpInvoiceForm;
+window.renderTopUpHistory = renderTopUpHistory;
+window.loadSourceInvoiceForTopUp = loadSourceInvoiceForTopUp;
+window.loadTopUpForm = loadTopUpForm;
+window.createTopUpFromInvoice = createTopUpFromInvoice;
+window.reDownloadTopUpInvoice = reDownloadTopUpInvoice;
+window.revokeTopUpInvoice = revokeTopUpInvoice;
+window.unrevokeTopUpInvoice = unrevokeTopUpInvoice;
+window.updateTopUpCalculations = updateTopUpCalculations;
+window.saveTopUpInvoice = saveTopUpInvoice;
+
+// Add these to the existing global functions section
+window.createTopUpFromAuctionInvoice = createTopUpFromAuctionInvoice;
+window.createBalanceInvoice = createBalanceInvoice;
+window.viewClientInvoiceTrail = viewClientInvoiceTrail;
+window.downloadFullTrailPDF = downloadFullTrailPDF;
+window.reDownloadInvoiceForTrail = reDownloadInvoiceForTrail;
+window.updateTopUpFromAuctionCalculations = updateTopUpFromAuctionCalculations;
+window.saveTopUpFromAuction = saveTopUpFromAuction;
+window.updateBalanceCalculations = updateBalanceCalculations;
+window.saveBalanceInvoice = saveBalanceInvoice;
+window.updateTopUpFromAuctionCalculationsCorrected = updateTopUpFromAuctionCalculationsCorrected;
+window.saveTopUpFromAuctionCorrected = saveTopUpFromAuctionCorrected;
+window.updateBalanceCalculationsCorrected = updateBalanceCalculationsCorrected;
+window.saveBalanceInvoiceCorrected = saveBalanceInvoiceCorrected;
+window.createReceiptFromInvoiceTrail = createReceiptFromInvoiceTrail;
+window.renderAuctionInvoiceHistory = renderAuctionInvoiceHistory;
