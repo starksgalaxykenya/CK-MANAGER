@@ -3391,18 +3391,19 @@ async function fetchInvoices() {
             return;
         }
         
-// In fetchInvoices, add this filter when processing each invoice:
-const isAuctionInvoice = data.docType === 'Auction Invoice';
-const isTopUpOrBalanceFromAuction = data.sourceType === 'auction' || data.auctionOriginalInvoiceId;
-
-// Skip if it's an auction invoice or related to auction
-if (isAuctionInvoice || isTopUpOrBalanceFromAuction) {
-    return; // Skip this invoice
-}
-
         html = `<ul class="space-y-3 divide-y divide-gray-200">`;
         snapshot.forEach((doc, index) => {
             const data = doc.data();
+            
+            // Check if this is an auction invoice - FIXED: check inside the loop
+            const isAuctionInvoice = data.docType === 'Auction Invoice';
+            const isTopUpOrBalanceFromAuction = data.sourceType === 'auction' || data.auctionOriginalInvoiceId;
+            
+            // Skip if it's an auction invoice or related to auction
+            if (isAuctionInvoice || isTopUpOrBalanceFromAuction) {
+                return; // Skip this invoice
+            }
+            
             // Safely access nested properties
             const carMake = data.carDetails?.make || 'N/A';
             const carModel = data.carDetails?.model || '';
