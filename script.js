@@ -9012,232 +9012,6 @@ y += 25;
     doc.save(`TopUp_${data.invoiceId}.pdf`);
 }
 
-// =================================================================
-//                 INVOICE TRAIL SYSTEM (NEW)
-// =================================================================
-
-/**
- * Creates a top-up invoice from an auction invoice
- */
-async function createTopUpFromAuctionInvoice(auctionInvoiceData) {
-    // Check if invoice is revoked
-    if (auctionInvoiceData.revoked) {
-        showErrorToast("Cannot create top-up from a revoked invoice.");
-        return;
-    }
-    
-    // Check if this is actually an auction invoice
-    if (auctionInvoiceData.docType !== 'Auction Invoice') {
-        showErrorToast("Top-up invoices can only be created from Auction Invoices.");
-        return;
-    }
-    
-    // Calculate total paid from receipts
-    const totalPaid = await calculateTotalPaidForInvoice(auctionInvoiceData.invoiceId);
-    const remainingBalance = auctionInvoiceData.pricing.totalUSD - totalPaid;
-    
-    if (remainingBalance <= 0) {
-        showErrorToast("This invoice is already fully paid. No top-up needed.");
-        return;
-    }
-    
-    // Render top-up form with auction invoice data
-    renderTopUpFormFromAuction({
-        ...auctionInvoiceData,
-        totalPrice: auctionInvoiceData.pricing.totalUSD,
-        totalPaid: totalPaid,
-        remainingBalance: remainingBalance,
-        sourceInvoiceId: auctionInvoiceData.invoiceId,
-        sourceType: 'auction',
-        firestoreId: auctionInvoiceData.firestoreId,
-        auctionPrice: auctionInvoiceData.auctionPriceUSD,
-        auctionPriceCurrency: auctionInvoiceData.auctionPriceCurrency
-    });
-}
-
-/**
- * Creates a balance invoice from any invoice (top-up or regular)
- */
-async function createBalanceInvoice(sourceInvoiceData) {
-    // Check if invoice is revoked
-    if (sourceInvoiceData.revoked) {
-        showErrorToast("Cannot create balance invoice from a revoked invoice.");
-        return;
-    }
-    
-    // Calculate remaining balance
-    let remainingBalance = sourceInvoiceData.pricing?.remainingBalance || 0;
-    let totalPaid = sourceInvoiceData.pricing?.totalPaid || 0;
-    let totalPrice = sourceInvoiceData.pricing?.totalUSD || 0;
-    
-    // If this is a top-up invoice, we need to get the latest balance
-    if (sourceInvoiceData.docType === 'Top-Up Invoice') {
-        // Get all balance invoices linked to this top-up
-        const balanceSnapshot = await db.collection("balance_invoices")
-            .where("sourceInvoiceId", "==", sourceInvoiceData.invoiceId)
-            .get();
-        
-        let totalBalancePaid = 0;
-        balanceSnapshot.forEach(doc => {
-            const balanceData = doc.data();
-            totalBalancePaid += balanceData.pricing?.currentPaymentDue || 0;
-        });
-        
-        remainingBalance = sourceInvoiceData.pricing?.remainingBalance - totalBalancePaid;
-        totalPaid = sourceInvoiceData.pricing?.totalPaid + totalBalancePaid;
-    }
-    
-    if (remainingBalance <= 0) {
-        showErrorToast("This invoice is already fully paid. No balance invoice needed.");
-        return;
-    }
-    
-    // Render balance form
-    renderBalanceForm({
-        ...sourceInvoiceData,
-        totalPrice: totalPrice,
-        totalPaid: totalPaid,
-        remainingBalance: remainingBalance,
-        sourceInvoiceId: sourceInvoiceData.invoiceId,
-        sourceType: sourceInvoiceData.docType === 'Top-Up Invoice' ? 'topup' : 'regular',
-        firestoreId: sourceInvoiceData.firestoreId
-    });
-}
-
-/**
- * Renders the balance invoice form
- */
-function renderBalanceForm(sourceInvoice) {
-    const formArea = document.getElementById('document-form-area');
-    const remainingBalance = sourceInvoice.remainingBalance || 0;
-    const totalPrice = sourceInvoice.totalPrice || 0;
-    const totalPaid = sourceInvoice.totalPaid || 0;
-    
-    formArea.innerHTML = `
-        <div class="p-6 border border-gray-300 rounded-xl bg-white shadow-lg animate-fade-in">
-            <div class="flex justify-between items-center mb-4">
-                <h3 class="text-xl font-semibold text-primary-blue">Balance Invoice</h3>
-                <button onclick="window.location.reload()" class="text-secondary-red hover:text-red-700 text-sm underline">← Back</button>
-            </div>
-            
-            <div class="mb-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
-                <h4 class="font-bold text-primary-blue mb-2">Source Invoice Details</h4>
-                <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-                    <div><strong>Invoice No:</strong> ${sourceInvoice.invoiceId}</div>
-                    <div><strong>Client:</strong> ${sourceInvoice.clientName}</div>
-                    <div><strong>Total Price:</strong> USD ${totalPrice.toFixed(2)}</div>
-                    <div><strong>Total Paid:</strong> USD ${totalPaid.toFixed(2)}</div>
-                    <div><strong>Remaining:</strong> USD ${remainingBalance.toFixed(2)}</div>
-                </div>
-            </div>
-            
-            <form id="balance-form" onsubmit="event.preventDefault(); saveBalanceInvoice();">
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 p-4 bg-gray-50 rounded-lg">
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700">Document Type</label>
-                        <input type="text" value="Balance Invoice" readonly class="mt-1 block w-full p-2 border bg-gray-100 rounded-md">
-                    </div>
-                    <div>
-                        <label for="balanceExchangeRate" class="block text-sm font-medium text-gray-700">USD 1 = KES</label>
-                        <input type="number" id="balanceExchangeRate" step="1" required value="${sourceInvoice.exchangeRate || 130}" class="mt-1 block w-full p-2 border rounded-md transition duration-200">
-                    </div>
-                    <div>
-                        <label for="balanceDueDate" class="block text-sm font-medium text-gray-700">Due Date (Optional)</label>
-                        <input type="date" id="balanceDueDate" class="mt-1 block w-full p-2 border rounded-md transition duration-200">
-                    </div>
-                </div>
-                
-                <div class="mb-4 p-4 bg-yellow-50 rounded-lg border border-yellow-300">
-                    <h4 class="font-bold text-secondary-red mb-3">Balance Payment Details</h4>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                            <label for="balancePaymentDue" class="block text-sm font-medium text-gray-700">Amount to Pay Now (USD)</label>
-                            <input type="number" id="balancePaymentDue" step="0.01" required value="${remainingBalance.toFixed(2)}" min="0" max="${remainingBalance.toFixed(2)}" class="mt-1 block w-full p-2 border rounded-md transition duration-200" oninput="updateBalanceCalculations()">
-                            <p class="text-xs text-gray-500 mt-1">Enter the amount the client is paying now</p>
-                        </div>
-                        <div>
-                            <label for="balancePercentage" class="block text-sm font-medium text-gray-700">Percentage of Total Price</label>
-                            <input type="text" id="balancePercentage" readonly class="mt-1 block w-full p-2 border bg-gray-100 rounded-md">
-                        </div>
-                    </div>
-                    
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
-                        <div class="p-2 bg-white rounded border">
-                            <p class="text-xs text-gray-600">Total Paid (Including This Payment)</p>
-                            <p id="balanceTotalPaidAfter" class="text-lg font-bold text-green-600">USD ${(totalPaid + remainingBalance).toFixed(2)}</p>
-                        </div>
-                        <div class="p-2 bg-white rounded border">
-                            <p class="text-xs text-gray-600">Remaining Balance After Payment</p>
-                            <p id="balanceRemainingAfter" class="text-lg font-bold text-secondary-red">USD 0.00</p>
-                        </div>
-                        <div class="p-2 bg-white rounded border">
-                            <p class="text-xs text-gray-600">Percentage Paid After Payment</p>
-                            <p id="balancePercentagePaidAfter" class="text-lg font-bold text-primary-blue">100%</p>
-                        </div>
-                    </div>
-                </div>
-                
-                <fieldset class="border p-4 rounded-lg mb-6">
-                    <legend class="text-base font-semibold text-primary-blue px-2">Vehicle Details (from source invoice)</legend>
-                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-                        <input type="text" id="balanceCarMakeModel" value="${sourceInvoice.carDetails?.make || ''} ${sourceInvoice.carDetails?.model || ''}" readonly class="p-2 border bg-gray-100 rounded-md">
-                        <input type="text" id="balanceCarYear" value="${sourceInvoice.carDetails?.year || ''}" readonly class="p-2 border bg-gray-100 rounded-md">
-                        <input type="text" id="balanceVinNumber" value="${sourceInvoice.carDetails?.vin || ''}" readonly class="p-2 border bg-gray-100 rounded-md">
-                        <input type="text" id="balanceColor" value="${sourceInvoice.carDetails?.color || ''}" readonly class="p-2 border bg-gray-100 rounded-md">
-                    </div>
-                </fieldset>
-                
-                <fieldset class="border p-4 rounded-lg mb-6">
-                    <legend class="text-base font-semibold text-secondary-red px-2">Bank Account for Payment</legend>
-                    <select id="balanceBankDetailsSelect" required class="mt-1 block w-full p-2 border rounded-md transition duration-200"></select>
-                    <p class="text-xs text-gray-500 mt-1">Select the bank account for this payment</p>
-                </fieldset>
-                
-                <fieldset class="border p-4 rounded-lg mb-6">
-                    <legend class="text-base font-semibold text-secondary-red px-2">Payment Reference</legend>
-                    <input type="text" id="balancePaymentReference" placeholder="Enter payment reference (e.g., Cheque No, RTGS Ref)" class="w-full p-2 border rounded-md transition duration-200">
-                </fieldset>
-                
-                <div class="flex space-x-4">
-                    <button type="submit" id="save-balance-btn" class="flex-1 bg-primary-blue hover:bg-blue-700 text-white font-bold py-3 rounded-lg transition duration-150 flex items-center justify-center gap-2">
-                        <span>Generate & Save Balance Invoice</span>
-                        <svg id="balance-spinner" class="hidden w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
-                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                        </svg>
-                    </button>
-                    <button type="button" onclick="saveBalanceInvoice(true)" id="save-balance-only-btn" class="flex-1 bg-gray-500 hover:bg-gray-700 text-white font-bold py-3 rounded-lg transition duration-150 flex items-center justify-center gap-2">
-                        <span>Save Only (No PDF)</span>
-                        <svg id="balance-only-spinner" class="hidden w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
-                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                        </svg>
-                    </button>
-                </div>
-            </form>
-        </div>
-    `;
-    
-    // Populate bank dropdown
-    populateBankDropdown('balanceBankDetailsSelect', false);
-    
-    // Store source invoice in global variable
-    window.currentBalanceSourceInvoice = sourceInvoice;
-    
-    // Initialize calculations
-    setTimeout(() => {
-        updateBalanceCalculations();
-        
-        // Set default due date to 30 days from now
-        const dueDateInput = document.getElementById('balanceDueDate');
-        if (dueDateInput && !dueDateInput.value) {
-            const defaultDate = new Date();
-            defaultDate.setDate(defaultDate.getDate() + 30);
-            dueDateInput.value = defaultDate.toISOString().slice(0, 10);
-        }
-    }, 100);
-}
-
 /**
  * Renders top-up form from auction invoice
  */
@@ -9673,8 +9447,16 @@ async function saveBalanceInvoice(onlySave = false) {
         const invoiceId = await generateBalanceInvoiceNumber(sourceInvoice.clientName, carMakeModel, sourceInvoice.invoiceId);
         
         // Prepare invoice data
+      const parentVehicleId = sourceInvoice.parentVehicleId 
+            || sourceInvoice.carDetails?.vin 
+            || sourceInvoice.firestoreId 
+            || 'UNKNOWN';
+
         const balanceData = {
             docType: 'Balance Invoice',
+            invoiceStage: 'Balance',                          // ← NEW
+            parentVehicleId,                                  // ← NEW
+            linkedTransactionId: sourceInvoice.sourceInvoiceId || sourceInvoice.invoiceId, // ← NEW
             invoiceId,
             sourceInvoiceId: sourceInvoice.invoiceId,
             sourceInvoiceFirestoreId: sourceInvoice.firestoreId,
@@ -9684,21 +9466,16 @@ async function saveBalanceInvoice(onlySave = false) {
             issueDate: getCurrentDateForDocument(),
             dueDate: dueDate || null,
             exchangeRate,
-            carDetails: sourceInvoice.carDetails || sourceInvoice.vehicleDetails || {
-                make: '',
-                model: '',
-                year: '',
-                vin: '',
-                color: ''
-            },
+            carDetails: sourceInvoice.carDetails || sourceInvoice.vehicleDetails || { make: '', model: '', year: '', vin: '', color: '' },
             pricing: {
                 totalUSD: totalPrice,
-                totalPaid: totalPaidSoFar,
+                totalPaidBefore: totalPaidBefore,
                 currentPaymentDue: paymentDue,
                 newTotalPaid: newTotalPaid,
                 remainingBalance: remainingAfter,
                 paymentPercentage: (paymentDue / totalPrice * 100),
-                totalPaidPercentage: (newTotalPaid / totalPrice * 100)
+                totalPaidPercentage: (newTotalPaid / totalPrice * 100),
+                remainingBalanceBefore: remainingBalanceBefore
             },
             paymentReference: paymentReference,
             bankDetails: selectedBank,
@@ -9934,7 +9711,7 @@ drawText(`USD ${formatAmount(data.pricing.currentPaymentDue)}`, margin + 70, sum
     // Terms & Conditions
     drawText('TERMS & CONDITIONS', margin, y, 12, 'bold', primaryColor);
     doc.setDrawColor(primaryColor);
-    doc.setLineWidth(0.5);s
+    doc.setLineWidth(0.5);
     const termsWidth = doc.getStringUnitWidth('TERMS & CONDITIONS') * 12 / doc.internal.scaleFactor;
     doc.line(margin, y + 1, margin + termsWidth, y + 1);
     y += lineHeight + 2;
@@ -10067,48 +9844,52 @@ async function calculateTotalPaidForInvoice(invoiceId) {
  */
 async function viewClientInvoiceTrail(clientName) {
     const loadingOverlay = showLoadingOverlay("Loading invoice trail...");
-    
+
     try {
-        // Get all invoices for this client
-        const regularInvoices = await db.collection("invoices")
-            .where("clientName", "==", clientName)
-            .get();
-        
-        const topUpInvoices = await db.collection("top_up_invoices")
-            .where("clientName", "==", clientName)
-            .get();
-        
-        const balanceInvoices = await db.collection("balance_invoices")
-            .where("clientName", "==", clientName)
-            .get();
-        
-        // Combine all invoices
+        const [regularSnap, topUpSnap, balanceSnap] = await Promise.all([
+            db.collection("invoices").where("clientName", "==", clientName).get(),
+            db.collection("top_up_invoices").where("clientName", "==", clientName).get(),
+            db.collection("balance_invoices").where("clientName", "==", clientName).get()
+        ]);
+
         const allInvoices = [];
-        
-        regularInvoices.forEach(doc => {
-            allInvoices.push({ ...doc.data(), firestoreId: doc.id, type: 'regular', docType: doc.data().docType });
+
+        regularSnap.forEach(doc => allInvoices.push({
+            ...doc.data(), firestoreId: doc.id, type: 'regular',
+            docType: doc.data().docType,
+            parentVehicleId: doc.data().parentVehicleId || doc.data().carDetails?.vin || 'UNKNOWN'
+        }));
+        topUpSnap.forEach(doc => allInvoices.push({
+            ...doc.data(), firestoreId: doc.id, type: 'topup',
+            docType: 'Top-Up Invoice',
+            parentVehicleId: doc.data().parentVehicleId || doc.data().carDetails?.vin || 'UNKNOWN'
+        }));
+        balanceSnap.forEach(doc => allInvoices.push({
+            ...doc.data(), firestoreId: doc.id, type: 'balance',
+            docType: 'Balance Invoice',
+            parentVehicleId: doc.data().parentVehicleId || doc.data().carDetails?.vin || 'UNKNOWN'
+        }));
+
+        // Group by vehicle (parentVehicleId / VIN)
+        const vehicleGroups = {};
+        allInvoices.forEach(inv => {
+            const key = inv.parentVehicleId;
+            if (!vehicleGroups[key]) vehicleGroups[key] = [];
+            vehicleGroups[key].push(inv);
         });
-        
-        topUpInvoices.forEach(doc => {
-            allInvoices.push({ ...doc.data(), firestoreId: doc.id, type: 'topup', docType: 'Top-Up Invoice' });
+
+        // Sort each group chronologically
+        Object.values(vehicleGroups).forEach(group => {
+            group.sort((a, b) => {
+                const dA = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(a.issueDate || 0);
+                const dB = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(b.issueDate || 0);
+                return dA - dB;
+            });
         });
-        
-        balanceInvoices.forEach(doc => {
-            allInvoices.push({ ...doc.data(), firestoreId: doc.id, type: 'balance', docType: 'Balance Invoice' });
-        });
-        
-        // Sort by date
-        allInvoices.sort((a, b) => {
-            const dateA = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(a.issueDate || 0);
-            const dateB = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(b.issueDate || 0);
-            return dateA - dateB;
-        });
-        
+
         hideLoadingOverlay();
-        
-        // Render trail view
-        renderInvoiceTrailView(clientName, allInvoices);
-        
+        renderInvoiceTrailView(clientName, allInvoices, vehicleGroups);
+
     } catch (error) {
         console.error("Error loading invoice trail:", error);
         hideLoadingOverlay();
@@ -10119,7 +9900,7 @@ async function viewClientInvoiceTrail(clientName) {
 /**
  * Renders the invoice trail view
  */
-function renderInvoiceTrailView(clientName, invoices) {
+function renderInvoiceTrailView(clientName, invoices, vehicleGroups = {}) {
     const formArea = document.getElementById('document-form-area');
     
     let html = `
@@ -10158,56 +9939,71 @@ function renderInvoiceTrailView(clientName, invoices) {
     let totalPriceSum = 0;
     let totalPaidSum = 0;
     
-    invoices.forEach((invoice, index) => {
+ invoices.forEach((invoice, index) => {
         const issueDate = invoice.issueDate || (invoice.createdAt?.toDate ? invoice.createdAt.toDate().toLocaleDateString() : 'N/A');
         const totalPrice = invoice.pricing?.totalUSD || invoice.pricing?.totalPrice || 0;
         const totalPaid = invoice.pricing?.newTotalPaid || invoice.pricing?.totalPaid || 0;
-        const remaining = invoice.pricing?.remainingBalance || (totalPrice - totalPaid);
-        
+        const remaining = Math.max(0, invoice.pricing?.remainingBalance ?? (totalPrice - totalPaid));
+
         totalPriceSum += totalPrice;
         totalPaidSum += totalPaid;
-        
+
         const typeColors = {
-            'Auction Invoice': 'bg-yellow-100 text-yellow-800',
-            'Invoice': 'bg-blue-100 text-blue-800',
+            'Auction Invoice':  'bg-yellow-100 text-yellow-800',
+            'Invoice':          'bg-blue-100 text-blue-800',
             'Proforma Invoice': 'bg-blue-100 text-blue-800',
-            'Top-Up Invoice': 'bg-teal-100 text-teal-800',
-            'Balance Invoice': 'bg-purple-100 text-purple-800'
+            'Top-Up Invoice':   'bg-teal-100 text-teal-800',
+            'Balance Invoice':  'bg-purple-100 text-purple-800'
         };
-        
         const typeColor = typeColors[invoice.docType] || 'bg-gray-100 text-gray-800';
-        
-        const invoiceDataJson = JSON.stringify({
-            ...invoice,
-            firestoreId: invoice.firestoreId
-        });
-        
-       html += `
-    <td class="px-4 py-3 text-center">
-        <div class="flex justify-center gap-2">
-            <button onclick='reDownloadInvoiceForTrail(${invoiceDataJson})' 
-                    class="text-primary-blue hover:text-blue-700" title="Download PDF">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
-                </svg>
-            </button>
-            <button onclick='createReceiptFromInvoiceTrail(${invoiceDataJson})' 
-                    class="text-green-600 hover:text-green-800" title="Create Receipt">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
-                </svg>
-            </button>
-            ${invoice.pricing?.remainingBalance > 0 ? `
-            <button onclick='createBalanceInvoice(${invoiceDataJson})' 
-                    class="text-purple-600 hover:text-purple-800" title="Create Balance Invoice">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
-                </svg>
-            </button>
-            ` : ''}
-        </div>
-    </td>
-`;
+
+        // Stage badge
+        const stageBadges = {
+            'Auction Invoice': '① Auction',
+            'Top-Up Invoice':  '② Top-Up',
+            'Balance Invoice': `③ Balance`
+        };
+        const stageBadge = stageBadges[invoice.docType] || invoice.docType;
+
+        // Contextual "Next Stage" button
+        let nextStageBtn = '';
+        if (invoice.type === 'auction' && remaining > 0 && !invoice.topUpCreated) {
+            nextStageBtn = `<button onclick='createTopUpFromAuctionInvoice(${JSON.stringify({...invoice, firestoreId: invoice.firestoreId})})' class="text-teal-600 hover:text-teal-800" title="Create Top-Up Invoice">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+            </button>`;
+        } else if ((invoice.type === 'topup' || invoice.type === 'balance') && remaining > 0) {
+            nextStageBtn = `<button onclick='createBalanceInvoice(${JSON.stringify({...invoice, firestoreId: invoice.firestoreId})})' class="text-purple-600 hover:text-purple-800" title="Create Balance Chunk Invoice">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+            </button>`;
+        }
+
+        const invoiceDataJson = JSON.stringify({...invoice, firestoreId: invoice.firestoreId});
+
+        html += `
+            <tr class="hover:bg-gray-50 ${index % 2 === 0 ? '' : 'bg-gray-50/40'}">
+                <td class="px-4 py-3 text-sm text-gray-600">${issueDate}</td>
+                <td class="px-4 py-3 text-sm font-medium text-primary-blue">${invoice.invoiceId}</td>
+                <td class="px-4 py-3">
+                    <span class="px-2 py-1 text-xs rounded-full font-medium ${typeColor}">${stageBadge}</span>
+                </td>
+                <td class="px-4 py-3 text-sm text-right font-semibold">USD ${totalPrice.toFixed(2)}</td>
+                <td class="px-4 py-3 text-sm text-right text-green-600 font-semibold">USD ${totalPaid.toFixed(2)}</td>
+                <td class="px-4 py-3 text-sm text-right ${remaining > 0 ? 'text-red-600' : 'text-green-600'} font-semibold">
+                    USD ${remaining.toFixed(2)}
+                </td>
+                <td class="px-4 py-3 text-center">
+                    <div class="flex justify-center gap-2 flex-wrap">
+                        <button onclick='reDownloadInvoiceForTrail(${invoiceDataJson})' class="text-primary-blue hover:text-blue-700" title="Download PDF">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                        </button>
+                        <button onclick='createReceiptFromInvoiceTrail(${invoiceDataJson})' class="text-green-600 hover:text-green-800" title="Create Receipt">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                        </button>
+                        ${nextStageBtn}
+                    </div>
+                </td>
+            </tr>
+        `;
     });
     
     html += `
@@ -10388,6 +10184,39 @@ function reDownloadInvoiceForTrail(invoiceData) {
 }
 
 // =================================================================
+//           STAGE CALCULATION UTILITIES
+// =================================================================
+
+/**
+ * Calculates the Top-Up amount needed to reach a target percentage.
+ * @param {number} totalPrice  - Full vehicle price (e.g. 8000)
+ * @param {number} auctionPaid - Amount already paid at auction (e.g. 2000)
+ * @param {number} targetPercent - Target % to reach after top-up (e.g. 50)
+ * @returns {{ targetAmount, suggestedTopUp, remainingAfterTopUp }}
+ */
+function calculateTopUp(totalPrice, auctionPaid, targetPercent = 50) {
+    const targetAmount = (targetPercent / 100) * totalPrice;
+    const suggestedTopUp = Math.max(0, targetAmount - auctionPaid);
+    const remainingAfterTopUp = totalPrice - auctionPaid - suggestedTopUp;
+    return { targetAmount, suggestedTopUp, remainingAfterTopUp };
+}
+
+/**
+ * Calculates the running balance across all stage invoices for a vehicle.
+ * @param {number} totalPrice
+ * @param {number} auctionPaid
+ * @param {number} topUpPaid
+ * @param {number[]} balancePayments - array of individual balance invoice amounts
+ * @returns {{ totalPaid, runningBalance, isSettled }}
+ */
+function calculateRunningBalance(totalPrice, auctionPaid, topUpPaid, balancePayments = []) {
+    const totalBalancePaid = balancePayments.reduce((sum, p) => sum + p, 0);
+    const totalPaid = auctionPaid + topUpPaid + totalBalancePaid;
+    const runningBalance = Math.max(0, totalPrice - totalPaid);
+    return { totalPaid, runningBalance, isSettled: runningBalance === 0 };
+}
+
+// =================================================================
 //                 CORRECTED TOP-UP AND BALANCE FUNCTIONS
 // =================================================================
 
@@ -10475,6 +10304,10 @@ function renderTopUpFormFromAuctionCorrected(auctionData) {
     // Default total price - user can change this
     const defaultTotalPrice = depositPaid * 4; // Assuming deposit is 25% as a default
     
+    // FIX: Auto-calculate the gap to reach 50% target
+    const defaultTargetAmount = 0.50 * defaultTotalPrice;
+    const defaultAmountToPay = Math.max(0, defaultTargetAmount - depositPaid);
+    
     formArea.innerHTML = `
         <div class="p-6 border border-gray-300 rounded-xl bg-white shadow-lg animate-fade-in">
             <div class="flex justify-between items-center mb-4">
@@ -10520,8 +10353,8 @@ function renderTopUpFormFromAuctionCorrected(auctionData) {
                         </div>
                         <div>
                             <label for="topupAmountToPayCorrected" class="block text-sm font-medium text-gray-700">Amount to Pay Now (USD)</label>
-                            <input type="number" id="topupAmountToPayCorrected" step="0.01" required value="0" min="0" class="mt-1 block w-full p-2 border rounded-md transition duration-200" oninput="updateTopUpFromAuctionCalculationsCorrected()">
-                            <p class="text-xs text-gray-500 mt-1">Enter the amount the client is paying now (e.g., 2000 USD)</p>
+                            <input type="number" id="topupAmountToPayCorrected" step="0.01" required value="${defaultAmountToPay.toFixed(2)}" min="0" class="mt-1 block w-full p-2 border rounded-md transition duration-200" oninput="updateTopUpFromAuctionCalculationsCorrected()">
+                            <p class="text-xs text-gray-500 mt-1">Enter the amount the client is paying now</p>
                         </div>
                         <div>
                             <label class="block text-sm font-medium text-gray-700">Exchange Rate (USD 1 = KES)</label>
@@ -10536,15 +10369,15 @@ function renderTopUpFormFromAuctionCorrected(auctionData) {
                         </div>
                         <div class="p-2 bg-white rounded border">
                             <p class="text-xs text-gray-600">Amount to Pay Now</p>
-                            <p id="topupAmountNowDisplay" class="text-lg font-bold text-primary-blue">USD 0.00</p>
+                            <p id="topupAmountNowDisplay" class="text-lg font-bold text-primary-blue">USD ${defaultAmountToPay.toFixed(2)}</p>
                         </div>
                         <div class="p-2 bg-white rounded border">
                             <p class="text-xs text-gray-600">Total Paid After Payment</p>
-                            <p id="topupTotalPaidAfterCorrected" class="text-lg font-bold text-green-600">USD ${depositPaid.toFixed(2)}</p>
+                            <p id="topupTotalPaidAfterCorrected" class="text-lg font-bold text-green-600">USD ${(depositPaid + defaultAmountToPay).toFixed(2)}</p>
                         </div>
                         <div class="p-2 bg-white rounded border">
                             <p class="text-xs text-gray-600">Remaining Balance</p>
-                            <p id="topupRemainingAfterCorrected" class="text-lg font-bold text-secondary-red">USD 0.00</p>
+                            <p id="topupRemainingAfterCorrected" class="text-lg font-bold text-secondary-red">USD ${(defaultTotalPrice - (depositPaid + defaultAmountToPay)).toFixed(2)}</p>
                         </div>
                     </div>
                 </div>
@@ -10589,20 +10422,11 @@ function renderTopUpFormFromAuctionCorrected(auctionData) {
         </div>
     `;
     
-    // Populate bank dropdown
     populateBankDropdown('topupAuctionBankSelectCorrected', false);
+    window.currentTopUpAuctionDataCorrected = { ...auctionData, depositPaid: depositPaid };
     
-    // Store auction data in global variable
-    window.currentTopUpAuctionDataCorrected = {
-        ...auctionData,
-        depositPaid: depositPaid
-    };
-    
-    // Initialize calculations
     setTimeout(() => {
         updateTopUpFromAuctionCalculationsCorrected();
-        
-        // Set default due date to 30 days from now
         const dueDateInput = document.getElementById('topupDueDateCorrected');
         if (dueDateInput && !dueDateInput.value) {
             const defaultDate = new Date();
@@ -10611,7 +10435,6 @@ function renderTopUpFormFromAuctionCorrected(auctionData) {
         }
     }, 100);
 }
-
 /**
  * Updates calculations for top-up from auction form (corrected)
  * Based on the analogy: Deposit = 2000, Total Price = 8000, Target = 50%
@@ -10744,8 +10567,14 @@ async function saveTopUpFromAuctionCorrected(onlySave = false) {
         const targetAmount = (percentageTarget / 100) * newTotalPrice;
         
         // Prepare top-up invoice data
+       const parentVehicleId = auctionData.carDetails?.vin || auctionData.parentVehicleId || auctionData.firestoreId || 'UNKNOWN';
+        const { suggestedTopUp } = calculateTopUp(newTotalPrice, depositPaid, percentageTarget);
+
         const topUpData = {
             docType: 'Top-Up Invoice',
+            invoiceStage: 'TopUp',                       // ← NEW
+            parentVehicleId,                             // ← NEW
+            linkedTransactionId: auctionData.invoiceId,  // ← NEW (links back to Auction)
             invoiceId,
             sourceInvoiceId: auctionData.invoiceId,
             sourceInvoiceFirestoreId: auctionData.firestoreId,
@@ -10755,13 +10584,7 @@ async function saveTopUpFromAuctionCorrected(onlySave = false) {
             issueDate: getCurrentDateForDocument(),
             dueDate: dueDate || null,
             exchangeRate,
-            carDetails: auctionData.carDetails || {
-                make: '',
-                model: '',
-                year: '',
-                vin: '',
-                color: ''
-            },
+            carDetails: auctionData.carDetails || { make: '', model: '', year: '', vin: '', color: '' },
             pricing: {
                 totalUSD: newTotalPrice,
                 depositPaid: depositPaid,
@@ -10771,7 +10594,8 @@ async function saveTopUpFromAuctionCorrected(onlySave = false) {
                 paymentPercentage: (amountToPay / newTotalPrice * 100),
                 totalPaidPercentage: (newTotalPaid / newTotalPrice * 100),
                 targetPercentage: percentageTarget,
-                targetAmount: targetAmount
+                targetAmount: targetAmount,
+                suggestedTopUp                           // ← NEW (auto-calculated suggestion stored)
             },
             paymentReference: paymentReference,
             bankDetails: selectedBank,
@@ -10786,11 +10610,14 @@ async function saveTopUpFromAuctionCorrected(onlySave = false) {
         const docRef = await db.collection("top_up_invoices").add(topUpData);
         
         // Mark the auction invoice as having a top-up created
+      // Update running balance on the auction (vehicle anchor) document
         await db.collection("invoices").doc(auctionData.firestoreId).update({
             topUpCreated: true,
             topUpInvoiceId: invoiceId,
             topUpCreatedAt: firebase.firestore.FieldValue.serverTimestamp(),
-            totalVehiclePrice: newTotalPrice
+            totalVehiclePrice: newTotalPrice,
+            runningBalance: remainingAfter,              // ← NEW
+            lastStageInvoiceId: invoiceId                // ← NEW
         });
         
         resetTopUpAuctionCorrectedSaveButton(saveButton, spinner, onlySave);
@@ -10827,31 +10654,24 @@ async function createBalanceInvoice(sourceInvoiceData) {
     let remainingBalance = 0;
     let totalPrice = 0;
     let totalPaid = 0;
+    let sourceType = sourceInvoiceData.docType === 'Top-Up Invoice' ? 'topup' : 'regular';
     
     if (sourceInvoiceData.docType === 'Top-Up Invoice') {
-        // For top-up invoices, use the remaining balance from the top-up
+        // For top-up invoices, use the remaining balance directly from the DB record
         totalPrice = sourceInvoiceData.pricing?.totalUSD || 0;
         totalPaid = sourceInvoiceData.pricing?.totalPaid || 0;
         remainingBalance = sourceInvoiceData.pricing?.remainingBalance || (totalPrice - totalPaid);
-        
-        // Check if there are existing balance invoices for this top-up
-        const existingBalanceInvoices = await db.collection("balance_invoices")
-            .where("sourceInvoiceId", "==", sourceInvoiceData.invoiceId)
-            .get();
-        
-        let totalBalancePaid = 0;
-        existingBalanceInvoices.forEach(doc => {
-            const balanceData = doc.data();
-            totalBalancePaid += balanceData.pricing?.currentPaymentDue || 0;
-        });
-        
-        remainingBalance = remainingBalance - totalBalancePaid;
-        totalPaid = totalPaid + totalBalancePaid;
-    } else if (sourceInvoiceData.docType === 'Invoice' || sourceInvoiceData.docType === 'Proforma Invoice') {
-        // For regular invoices, calculate remaining balance
+        // FIX: Removed the double-counting query here. The Top-Up record is already accurate.
+
+    } else if (sourceInvoiceData.docType === 'Balance Invoice') {
+        // FIX: Support chaining "chunks" of Balance Invoices
         totalPrice = sourceInvoiceData.pricing?.totalUSD || 0;
-        
-        // Get receipts for this invoice
+        totalPaid = sourceInvoiceData.pricing?.newTotalPaid || 0;
+        remainingBalance = sourceInvoiceData.pricing?.remainingBalance || 0;
+        sourceType = 'balance';
+
+    } else if (sourceInvoiceData.docType === 'Invoice' || sourceInvoiceData.docType === 'Proforma Invoice') {
+        totalPrice = sourceInvoiceData.pricing?.totalUSD || 0;
         const receiptsSnapshot = await db.collection("receipts")
             .where("invoiceReference", "==", sourceInvoiceData.invoiceId)
             .get();
@@ -10865,7 +10685,6 @@ async function createBalanceInvoice(sourceInvoiceData) {
                 totalPaid += receipt.amountReceived / receipt.exchangeRate;
             }
         }
-        
         remainingBalance = totalPrice - totalPaid;
     } else {
         showErrorToast("Cannot create balance invoice from this document type.");
@@ -10884,7 +10703,7 @@ async function createBalanceInvoice(sourceInvoiceData) {
         totalPaid: totalPaid,
         remainingBalance: remainingBalance,
         sourceInvoiceId: sourceInvoiceData.invoiceId,
-        sourceType: sourceInvoiceData.docType === 'Top-Up Invoice' ? 'topup' : 'regular',
+        sourceType: sourceType,
         firestoreId: sourceInvoiceData.firestoreId
     });
 }
@@ -11179,25 +10998,35 @@ async function saveBalanceInvoiceCorrected(onlySave = false) {
             revoked: false
         };
         
-        // Save to Firestore
+       // Save to Firestore
         const docRef = await db.collection("balance_invoices").add(balanceData);
         
-        // Update the source invoice's balance if it's a top-up invoice
+        // FIX: Update the source invoice's balance (Supports both Top-Up and previous Balance chunks)
+     // Update running balance cascade — walk back to anchor (Auction Invoice)
         if (sourceInvoice.sourceType === 'topup' && sourceInvoice.firestoreId) {
-            // Get current top-up data
             const topUpDoc = await db.collection("top_up_invoices").doc(sourceInvoice.firestoreId).get();
             if (topUpDoc.exists) {
                 const topUpData = topUpDoc.data();
-                const newRemaining = (topUpData.pricing?.remainingBalance || 0) - paymentDue;
-                
+                const newRemaining = Math.max(0, (topUpData.pricing?.remainingBalance || 0) - paymentDue);
+                const newTopUpTotalPaid = (topUpData.pricing?.totalPaid || 0) + paymentDue;
+
                 await db.collection("top_up_invoices").doc(sourceInvoice.firestoreId).update({
-                    "pricing.remainingBalance": Math.max(0, newRemaining),
-                    "pricing.totalPaid": (topUpData.pricing?.totalPaid || 0) + paymentDue,
-                    "pricing.totalPaidPercentage": ((topUpData.pricing?.totalPaid || 0) + paymentDue) / (topUpData.pricing?.totalUSD || 1) * 100
+                    "pricing.remainingBalance": newRemaining,
+                    "pricing.totalPaid": newTopUpTotalPaid,
+                    "pricing.totalPaidPercentage": (newTopUpTotalPaid / (topUpData.pricing?.totalUSD || 1)) * 100,
+                    runningBalance: newRemaining,            // ← NEW
+                    lastStageInvoiceId: invoiceId            // ← NEW
                 });
+
+                // Also update the anchor Auction Invoice document
+                if (topUpData.sourceInvoiceFirestoreId) {
+                    await db.collection("invoices").doc(topUpData.sourceInvoiceFirestoreId).update({
+                        runningBalance: newRemaining,        // ← NEW
+                        lastStageInvoiceId: invoiceId        // ← NEW
+                    });
+                }
             }
         }
-        
         resetBalanceCorrectedSaveButton(saveButton, spinner, onlySave);
         showSuccessToast(`Balance Invoice ${invoiceId} saved successfully!`);
         
@@ -11432,6 +11261,7 @@ function renderAuctionInvoiceHistory() {
                             <td class="px-4 py-2 text-sm text-right font-semibold">USD ${totalPrice.toFixed(2)}</td>
                             <td class="px-4 py-2 text-sm text-right text-green-600 font-semibold">USD ${totalPaid.toFixed(2)}</td>
                             <td class="px-4 py-2 text-sm text-right ${remaining > 0 ? 'text-red-600' : 'text-green-600'} font-semibold">USD ${remaining.toFixed(2)}</td>
+                            <td class="px-4 py-2 text-sm text-right ${remaining > 0 ? 'text-red-600' : 'text-green-600'} font-semibold">USD ${remaining.toFixed(2)}</td>
                             <td class="px-4 py-2 text-center">
                                 <div class="flex justify-center gap-2">
                                     <button onclick='reDownloadInvoiceForTrail(${invoiceDataJson})' class="text-primary-blue hover:text-blue-700" title="Download PDF">
@@ -11440,13 +11270,18 @@ function renderAuctionInvoiceHistory() {
                                     <button onclick='createReceiptFromInvoiceTrail(${invoiceDataJson})' class="text-green-600 hover:text-green-800" title="Create Receipt">
                                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
                                     </button>
-                                    ${remaining > 0 && invoice.type !== 'auction' ? `
-                                    <button onclick='createBalanceInvoice(${invoiceDataJson})' class="text-purple-600 hover:text-purple-800" title="Create Balance Invoice">
-                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+                                    ${remaining > 0 && invoice.type === 'auction' && !invoice.topUpCreated ? `
+                                    <button onclick='createTopUpFromAuctionInvoice(${invoiceDataJson})' class="text-teal-600 hover:text-teal-800 text-xs px-2 py-1 bg-teal-50 rounded" title="Create Top-Up Invoice (Stage 2)">
+                                        ② Top-Up
+                                    </button>
+                                    ` : remaining > 0 && (invoice.type === 'topup' || invoice.type === 'balance') ? `
+                                    <button onclick='createBalanceInvoice(${invoiceDataJson})' class="text-purple-600 hover:text-purple-800 text-xs px-2 py-1 bg-purple-50 rounded" title="Create Balance Chunk Invoice (Stage 3)">
+                                        ③ Balance
                                     </button>
                                     ` : ''}
                                 </div>
                             </td>
+                        </tr>
                         </tr>
                     `;
                 }
@@ -11540,6 +11375,8 @@ window.revokeTopUpInvoice = revokeTopUpInvoice;
 window.unrevokeTopUpInvoice = unrevokeTopUpInvoice;
 window.updateTopUpCalculations = updateTopUpCalculations;
 window.saveTopUpInvoice = saveTopUpInvoice;
+window.calculateTopUp = calculateTopUp;
+window.calculateRunningBalance = calculateRunningBalance;
 
 // Add these to the existing global functions section
 window.createTopUpFromAuctionInvoice = createTopUpFromAuctionInvoice;
