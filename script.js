@@ -5167,47 +5167,33 @@ function generateAgreementPDF(data) {
         doc.text(text, x, y, { align: align });
     };
 
-    // Function to add stamp image with date OVERLAY - UPDATED WITH RED TEXT AND SIZE 14
-    // Function to add stamp image with date OVERLAY - MODIFIED to accept yOffset
-const addStampWithDate = (x, y, dateText, yOffset = 0) => {
-    try {
-        // Calculate position for 500x500 image to fit properly
-        const stampWidth = 30;
-        const stampHeight = 30;
-        
-        // Apply yOffset to move the entire stamp group up or down
-        const adjustedY = y + yOffset;
-        
-        // Add stamp image first
-        doc.addImage('STAMP.png', 'JPEG', x - (stampWidth/2), adjustedY, stampWidth, stampHeight);
-        
-        // Add date text OVER the stamp image (centered) - RED with size 14
-        doc.setFontSize(14);
-        doc.setTextColor(255, 0, 0);
-        doc.setFont("helvetica", "bold");
-        
-        // Calculate text position to be centered over the stamp
-        const textX = x;
-        const textY = adjustedY + (stampHeight/2) + 2;
-        
-        doc.text(dateText, textX, textY, null, null, "center");
-        
-        // Add company text below stamp - MOVED LOWER with extra spacing
-        doc.setFontSize(10);
-        doc.setTextColor(primaryColor);
-        doc.text('For WanBite Investment Co. LTD', x, adjustedY + stampHeight + 12, null, null, "center");
-        
-    } catch (error) {
-        console.error("Error adding stamp:", error);
-        // Fallback to text only
-        doc.setFontSize(14);
-        doc.setTextColor(255, 0, 0);
-        doc.text(dateText, x, adjustedY - 2, null, null, "center");
-        doc.setFontSize(10);
-        doc.setTextColor(primaryColor);
-        doc.text('For WanBite Investment Co. LTD', x, adjustedY + 5, null, null, "center");
-    }
-};
+    // Function to add stamp image with date OVERLAY
+    const addStampWithDate = (x, y, dateText, yOffset = 0) => {
+        try {
+            const stampWidth = 30;
+            const stampHeight = 30;
+            const adjustedY = y + yOffset;
+            
+            doc.addImage('STAMP.png', 'JPEG', x - (stampWidth/2), adjustedY, stampWidth, stampHeight);
+            doc.setFontSize(14);
+            doc.setTextColor(255, 0, 0);
+            doc.setFont("helvetica", "bold");
+            const textX = x;
+            const textY = adjustedY + (stampHeight/2) + 2;
+            doc.text(dateText, textX, textY, null, null, "center");
+            doc.setFontSize(10);
+            doc.setTextColor(primaryColor);
+            doc.text('For WanBite Investment Co. LTD', x, adjustedY + stampHeight + 12, null, null, "center");
+        } catch (error) {
+            console.error("Error adding stamp:", error);
+            doc.setFontSize(14);
+            doc.setTextColor(255, 0, 0);
+            doc.text(dateText, x, adjustedY - 2, null, null, "center");
+            doc.setFontSize(10);
+            doc.setTextColor(primaryColor);
+            doc.text('For WanBite Investment Co. LTD', x, adjustedY + 5, null, null, "center");
+        }
+    };
 
     // =================================================================
     // HEADER SECTION
@@ -5233,7 +5219,6 @@ const addStampWithDate = (x, y, dateText, yOffset = 0) => {
     doc.setFontSize(10);
     doc.setFont("helvetica", "normal");
     doc.setTextColor(primaryColor);
-    // Use the collected date
     doc.text(`This Car Sales Agreement is made on the ${data.agreementDate}, between;`, margin, y);
     y += lineSpacing;
 
@@ -5261,7 +5246,6 @@ const addStampWithDate = (x, y, dateText, yOffset = 0) => {
     // VEHICLE DETAILS
     // =================================================================
     drawText('VEHICLE DETAILS', margin, y, 12, 'bold', primaryColor);
-    // Add underline
     doc.setDrawColor(primaryColor);
     doc.setLineWidth(0.5);
     const vehicleTitleWidth = doc.getStringUnitWidth('VEHICLE DETAILS') * 12 / doc.internal.scaleFactor;
@@ -5278,18 +5262,15 @@ const addStampWithDate = (x, y, dateText, yOffset = 0) => {
     y += lineSpacing;
     doc.text(`Fuel Type: ${data.vehicle.fuelType}`, margin + textIndent, y);
     
-    // ADD THESE LINES FOR INVOICE REFERENCE
     if (data.invoiceReference) {
         y += lineSpacing;
         doc.text(`Invoice Reference: ${data.invoiceReference}`, margin + textIndent, y);
     }
     
-    // ADD THESE LINES FOR RECEIPT REFERENCE
     if (data.receiptReference) {
         y += lineSpacing;
         doc.text(`Receipt Reference: ${data.receiptReference}`, margin + textIndent, y);
     }
-    // END OF ADDED LINES
     
     y += lineSpacing + 4;
 
@@ -5297,7 +5278,6 @@ const addStampWithDate = (x, y, dateText, yOffset = 0) => {
     // PAYMENT DETAILS & SCHEDULE
     // =================================================================
     drawText('SALES AGREEMENT & PAYMENT TERMS', margin, y, 12, 'bold', primaryColor);
-    // Add underline
     const paymentTitleWidth = doc.getStringUnitWidth('SALES AGREEMENT & PAYMENT TERMS') * 12 / doc.internal.scaleFactor;
     doc.line(margin, y + 1, margin + paymentTitleWidth, y + 1);
     y += lineSpacing;
@@ -5324,7 +5304,6 @@ const addStampWithDate = (x, y, dateText, yOffset = 0) => {
     doc.setFontSize(9);
     doc.setTextColor(primaryColor);
     
-    // Safely access bank details (will show 'N/A' if object is missing or empty)
     const bank = data.bankDetails || {};
     const branchText = bank.branch ? `(Branch: ${bank.branch})` : '';
 
@@ -5340,7 +5319,6 @@ const addStampWithDate = (x, y, dateText, yOffset = 0) => {
 
     // Additional Terms
     drawText('GENERAL TERMS', margin, y, 12, 'bold', primaryColor);
-    // Add underline
     const generalTermsWidth = doc.getStringUnitWidth('GENERAL TERMS') * 12 / doc.internal.scaleFactor;
     doc.line(margin, y + 1, margin + generalTermsWidth, y + 1);
     y += lineSpacing;
@@ -5353,65 +5331,63 @@ const addStampWithDate = (x, y, dateText, yOffset = 0) => {
     y += lineSpacing + 6;
 
     // =================================================================
-    // SIGNATURES WITH STAMP
+    // SIGNATURES WITH STAMP - FIXED
     // =================================================================
     drawText('AGREED AND ACCEPTED', margin, y, 12, 'bold', primaryColor);
-    // Add underline
     const agreedWidth = doc.getStringUnitWidth('AGREED AND ACCEPTED') * 12 / doc.internal.scaleFactor;
     doc.line(margin, y + 1, margin + agreedWidth, y + 1);
     y += lineSpacing;
 
     const sigY = y + 10;
-const sigNameY = sigY + 10;
+    const sigNameY = sigY + 10;
 
-// Buyer - UPDATED LAYOUT (REMOVED DATE)
-// Buyer Name above the line (in bold)
-doc.setFontSize(10);
-doc.setTextColor(primaryColor);
-doc.setFont("helvetica", "bold");
-doc.text(`${data.buyer.name}`, margin + 35, sigY - 5, null, null, "center");
+    // Buyer - UPDATED LAYOUT
+    doc.setFontSize(10);
+    doc.setTextColor(primaryColor);
+    doc.setFont("helvetica", "bold");
+    doc.text(`${data.buyer.name}`, margin + 35, sigY - 5, null, null, "center");
 
-// Line for signature
-doc.line(margin, sigY, margin + 70, sigY);
-drawText('Buyer Signature', margin + 35, sigY + 2, 8, 'normal', 0, "center");
+    // Line for signature
+    doc.line(margin, sigY, margin + 70, sigY);
+    drawText('Buyer Signature', margin + 35, sigY + 2, 8, 'normal', 0, "center");
 
-// REMOVED DATE LINE AND DATE TEXT
+    drawText(`Witness: ${data.signatures.buyerWitness}`, margin, sigNameY + 3, 10, 'normal', 0);
 
-drawText(`Witness: ${data.signatures.buyerWitness}`, margin, sigNameY + 3, 10, 'normal', 0);
+    // Seller with stamp - FIXED: Define sellerX here
+    const sellerX = pageW - margin - 70;
 
-// Seller with stamp
-const sellerX = pageW - margin - 70;
+    // Use agreement creation date instead of current date
+    let stampDate = data.agreementDate;
 
-// Use agreement creation date instead of current date
-let stampDate = data.agreementDate;
-
-// If backdate is active, use backdated date
-if (backdateMode && backdateDate) {
-    stampDate = backdateDate.toLocaleDateString('en-US');
-}
-
-// If agreementDate is in YYYY-MM-DD format, convert it
-if (stampDate && stampDate.includes('-')) {
-    try {
-        const [year, month, day] = stampDate.split('-');
-        const dateObj = new Date(year, month - 1, day);
-        stampDate = dateObj.toLocaleDateString('en-US');
-    } catch (e) {
-        // Keep original format
+    // If backdate is active, use backdated date
+    if (backdateMode && backdateDate) {
+        stampDate = backdateDate.toLocaleDateString('en-US');
     }
-}
 
-// Adjust stamp position to be just below payment terms section - MOVED LOWER
-const stampYPosition = sigY + 15; // Added 15 to move stamp down
-addStampWithDate(sellerSigX + 35, stampYPosition, stampDate, 0);
+    // If agreementDate is in YYYY-MM-DD format, convert it
+    if (stampDate && stampDate.includes('-')) {
+        try {
+            const [year, month, day] = stampDate.split('-');
+            const dateObj = new Date(year, month - 1, day);
+            stampDate = dateObj.toLocaleDateString('en-US');
+        } catch (e) {
+            // Keep original format
+        }
+    }
 
-doc.setFontSize(8);
-doc.setTextColor(0);
-doc.text(`Witness: ${data.signatures.sellerWitness}`, sellerX + 35, sigY + 25, null, null, "center"); // Increased from +15 to +25
+    // Adjust stamp position - MOVED LOWER
+    const stampYPosition = sigY + 15;
+    addStampWithDate(sellerX + 35, stampYPosition, stampDate, 0);
 
-y += 35; // Adjusted from 28 to 35 for better spacing
-    
-    // --- Global Footer ---
+    doc.setFontSize(8);
+    doc.setTextColor(0);
+    doc.text(`Witness: ${data.signatures.sellerWitness}`, sellerX + 35, sigY + 28, null, null, "center");
+
+    y += 38;
+
+    // =================================================================
+    // FOOTER
+    // =================================================================
     doc.setFillColor(primaryColor);
     doc.rect(0, doc.internal.pageSize.getHeight() - 10, pageW, 10, 'F');
     
