@@ -5377,11 +5377,11 @@ const sellerSigX = pageW - margin - 70;
 
     // Adjust stamp position - MOVED LOWER
     const stampYPosition = sigY + 15;
-    addStampWithDate(sellerX + 35, stampYPosition, stampDate, 0);
+    addStampWithDate(sellerSigX + 35, stampYPosition, stampDate, 0);
 
     doc.setFontSize(8);
     doc.setTextColor(0);
-    doc.text(`Witness: ${data.signatures.sellerWitness}`, sellerX + 35, sigY + 28, null, null, "center");
+    doc.text(`Witness: ${data.signatures.sellerWitness}`, sellerSigX + 35, sigY + 28, null, null, "center");
 
     y += 38;
 
