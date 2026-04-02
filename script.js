@@ -5141,25 +5141,23 @@ function generateInvoicePDF(data) {
  */
 function generateAgreementPDF(data) {
     const { jsPDF } = window.jspdf;
-    const doc = new jsPDF('p', 'mm', 'a4'); 
+    const doc = new jsPDF('p', 'mm', 'a4');
 
-    const primaryColor = '#183263'; // WanBite Blue
-    const secondaryColor = '#D96359'; // Red
-    
+    const primaryColor = '#183263';
+    const secondaryColor = '#D96359';
+
     const pageW = doc.internal.pageSize.getWidth();
-    let y = 10; 
+    const pageH = doc.internal.pageSize.getHeight();
+    let y = 10;
     const margin = 10;
-    const lineSpacing = 6;
-    const textIndent = 5;
+    const lineHeight = 5;
 
-    // Helper to format amounts without decimals (with .00)
     const formatAmount = (amount) => {
         if (amount === null || amount === undefined) return '0.00';
         const rounded = Math.round(amount);
         return rounded.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     };
 
-    // --- HELPER FUNCTION ---
     const drawText = (text, x, y, size, style = 'normal', color = primaryColor, align = 'left') => {
         doc.setFontSize(size);
         doc.setFont("helvetica", style);
@@ -5167,236 +5165,314 @@ function generateAgreementPDF(data) {
         doc.text(text, x, y, { align: align });
     };
 
-    // Function to add stamp image with date OVERLAY
-    const addStampWithDate = (x, y, dateText, yOffset = 0) => {
+    const addStampWithDate = (x, y, dateText) => {
         try {
             const stampWidth = 30;
             const stampHeight = 30;
-            const adjustedY = y + yOffset;
-            
-            doc.addImage('STAMP.png', 'JPEG', x - (stampWidth/2), adjustedY, stampWidth, stampHeight);
+            doc.addImage('STAMP.png', 'JPEG', x - (stampWidth / 2), y, stampWidth, stampHeight);
             doc.setFontSize(14);
             doc.setTextColor(255, 0, 0);
             doc.setFont("helvetica", "bold");
-            const textX = x;
-            const textY = adjustedY + (stampHeight/2) + 2;
-            doc.text(dateText, textX, textY, null, null, "center");
-            doc.setFontSize(10);
+            doc.text(dateText, x, y + (stampHeight / 2) + 2, null, null, "center");
+            doc.setFontSize(9);
             doc.setTextColor(primaryColor);
-            doc.text('For WanBite Investment Co. LTD', x, adjustedY + stampHeight + 12, null, null, "center");
+            doc.setFont("helvetica", "normal");
+            doc.text('For WanBite Investment Co. LTD', x, y + stampHeight + 6, null, null, "center");
         } catch (error) {
-            console.error("Error adding stamp:", error);
             doc.setFontSize(14);
             doc.setTextColor(255, 0, 0);
-            doc.text(dateText, x, adjustedY - 2, null, null, "center");
-            doc.setFontSize(10);
+            doc.text(dateText, x, y + 5, null, null, "center");
+            doc.setFontSize(9);
             doc.setTextColor(primaryColor);
-            doc.text('For WanBite Investment Co. LTD', x, adjustedY + 5, null, null, "center");
+            doc.text('For WanBite Investment Co. LTD', x, y + 12, null, null, "center");
         }
     };
 
     // =================================================================
-    // HEADER SECTION
+    // HEADER
     // =================================================================
     doc.setFillColor(primaryColor);
     doc.rect(0, 0, pageW, 15, 'F');
-    
     drawText('WanBite Investments Co. Ltd.', pageW / 2, 8, 18, 'bold', '#FFFFFF', 'center');
     drawText('carskenya.co.ke', pageW / 2, 13, 10, 'normal', '#FFFFFF', 'center');
-    
-    y = 25;
+    y = 20;
 
-    // TITLE
-    doc.setTextColor(primaryColor);
-    doc.setFontSize(18);
+    // Title
+    doc.setFontSize(16);
     doc.setFont("helvetica", "bold");
+    doc.setTextColor(primaryColor);
     doc.text("CAR SALES AGREEMENT", pageW / 2, y, null, null, "center");
-    y += 10;
-
-    // =================================================================
-    // PARTIES DETAILS
-    // =================================================================
-    doc.setFontSize(10);
-    doc.setFont("helvetica", "normal");
-    doc.setTextColor(primaryColor);
-    doc.text(`This Car Sales Agreement is made on the ${data.agreementDate}, between;`, margin, y);
-    y += lineSpacing;
-
-    // Seller Info
-    doc.setFont("helvetica", "bold");
-    doc.text("THE SELLER:", margin, y);
-    doc.setFont("helvetica", "normal");
-    doc.text("WANBITE INVESTMENTS COMPANY LIMITED", margin + 25, y);
-    y += lineSpacing;
-    doc.text(`Address: ${data.seller.address}`, margin + 5, y);
-    doc.text(`Phone: ${data.seller.phone}`, margin + 100, y);
-    y += lineSpacing + 2;
-
-    // Buyer Info
-    doc.setFont("helvetica", "bold");
-    doc.text("THE BUYER:", margin, y);
-    doc.setFont("helvetica", "normal");
-    doc.text(data.buyer.name, margin + 25, y);
-    y += lineSpacing;
-    doc.text(`Address: ${data.buyer.address}`, margin + 5, y);
-    doc.text(`Phone: ${data.buyer.phone}`, margin + 100, y);
-    y += lineSpacing + 4;
-
-    // =================================================================
-    // VEHICLE DETAILS
-    // =================================================================
-    drawText('VEHICLE DETAILS', margin, y, 12, 'bold', primaryColor);
-    doc.setDrawColor(primaryColor);
-    doc.setLineWidth(0.5);
-    const vehicleTitleWidth = doc.getStringUnitWidth('VEHICLE DETAILS') * 12 / doc.internal.scaleFactor;
-    doc.line(margin, y + 1, margin + vehicleTitleWidth, y + 1);
-    y += lineSpacing;
-    doc.setFontSize(10);
-    doc.setTextColor(0);
-
-    doc.text(`Make & Model: ${data.vehicle.makeModel}`, margin + textIndent, y);
-    doc.text(`Year of Manufacture: ${data.vehicle.year}`, margin + 90, y);
-    y += lineSpacing;
-    doc.text(`VIN/Chassis No: ${data.vehicle.vin}`, margin + textIndent, y);
-    doc.text(`Color: ${data.vehicle.color}`, margin + 90, y);
-    y += lineSpacing;
-    doc.text(`Fuel Type: ${data.vehicle.fuelType}`, margin + textIndent, y);
-    
-    if (data.invoiceReference) {
-        y += lineSpacing;
-        doc.text(`Invoice Reference: ${data.invoiceReference}`, margin + textIndent, y);
-    }
-    
-    if (data.receiptReference) {
-        y += lineSpacing;
-        doc.text(`Receipt Reference: ${data.receiptReference}`, margin + textIndent, y);
-    }
-    
-    y += lineSpacing + 4;
-
-    // =================================================================
-    // PAYMENT DETAILS & SCHEDULE
-    // =================================================================
-    drawText('SALES AGREEMENT & PAYMENT TERMS', margin, y, 12, 'bold', primaryColor);
-    const paymentTitleWidth = doc.getStringUnitWidth('SALES AGREEMENT & PAYMENT TERMS') * 12 / doc.internal.scaleFactor;
-    doc.line(margin, y + 1, margin + paymentTitleWidth, y + 1);
-    y += lineSpacing;
-
-    // Purchase Price
-    doc.setFontSize(10);
-    doc.setTextColor(0);
-    doc.text("The Purchase Price of ", margin, y);
-    doc.setFont("helvetica", "bold");
-    let totalText = `${data.salesTerms.currency} ${formatAmount(data.salesTerms.price)}`;
-    doc.text(totalText, margin + doc.getStringUnitWidth("The Purchase Price of ") * doc.getFontSize() / doc.internal.scaleFactor, y);
-    doc.setTextColor(0);
-    doc.setFont("helvetica", "normal");
-    const trailingText = ` is to be paid to the bank account below:`;
-    doc.text(trailingText, margin + doc.getStringUnitWidth("The Purchase Price of " + totalText) * doc.getFontSize() / doc.internal.scaleFactor, y);
-    y += lineSpacing;
-
-    // Bank Details Box
-    doc.setFillColor(255, 245, 230);
-    doc.rect(margin, y, pageW - 20, 20, 'F');
+    y += 3;
     doc.setDrawColor(secondaryColor);
     doc.setLineWidth(0.5);
-    doc.rect(margin, y, pageW - 20, 20);
+    const titleW = doc.getStringUnitWidth("CAR SALES AGREEMENT") * 16 / doc.internal.scaleFactor;
+    doc.line(pageW / 2 - titleW / 2, y, pageW / 2 + titleW / 2, y);
+    y += 6;
+
+    // =================================================================
+    // AGREEMENT DATE BOX
+    // =================================================================
+    doc.setDrawColor(primaryColor);
+    doc.setLineWidth(0.5);
+    doc.rect(margin, y, pageW - margin * 2, 10);
+    drawText('AGREEMENT DATE:', margin + 3, y + 6, 10, 'bold', secondaryColor);
+    drawText(data.agreementDate || 'N/A', margin + 45, y + 6, 10, 'bold', primaryColor);
+    drawText('AGREEMENT REF:', pageW - margin - 3, y + 3, 8, 'bold', secondaryColor, 'right');
+    drawText(`AGR-${(data.buyer.name || '').substring(0, 6).toUpperCase().replace(/\s/g, '')}-${Date.now().toString().slice(-4)}`, pageW - margin - 3, y + 8, 7, 'normal', primaryColor, 'right');
+    y += 15;
+
+    // =================================================================
+    // PARTIES - TWO COLUMN BOXES
+    // =================================================================
+    const colW = (pageW - margin * 2 - 5) / 2;
+
+    // Buyer box (left)
+    doc.setFillColor(240, 245, 255);
+    doc.rect(margin, y, colW, 22, 'F');
+    doc.setDrawColor(primaryColor);
+    doc.setLineWidth(0.3);
+    doc.rect(margin, y, colW, 22);
+    drawText('THE BUYER', margin + 3, y + 5, 9, 'bold', secondaryColor);
+    const buyerNameLines = doc.splitTextToSize(data.buyer.name || 'N/A', colW - 6);
+    let bny = y + 10;
+    buyerNameLines.forEach(line => { drawText(line, margin + 3, bny, 9, 'bold', 0); bny += 4; });
+    const buyerAddressLines = doc.splitTextToSize(`Address: ${data.buyer.address || 'N/A'}`, colW - 6);
+    buyerAddressLines.forEach(line => { drawText(line, margin + 3, bny, 8, 'normal', 0); bny += 3.5; });
+    drawText(`Phone: ${data.buyer.phone || 'N/A'}`, margin + 3, y + 20, 8, 'normal', 0);
+
+    // Seller box (right)
+    const sellerBoxX = margin + colW + 5;
+    doc.setFillColor(255, 245, 230);
+    doc.rect(sellerBoxX, y, colW, 22, 'F');
+    doc.setDrawColor(secondaryColor);
+    doc.setLineWidth(0.3);
+    doc.rect(sellerBoxX, y, colW, 22);
+    drawText('THE SELLER', sellerBoxX + 3, y + 5, 9, 'bold', secondaryColor);
+    drawText('WANBITE INVESTMENTS CO. LTD', sellerBoxX + 3, y + 10, 8, 'bold', primaryColor);
+    const sellerAddressLines = doc.splitTextToSize(`Address: ${data.seller.address || 'N/A'}`, colW - 6);
+    let sny = y + 14;
+    sellerAddressLines.forEach(line => { drawText(line, sellerBoxX + 3, sny, 8, 'normal', 0); sny += 3.5; });
+    drawText(`Phone: ${data.seller.phone || 'N/A'}`, sellerBoxX + 3, y + 20, 8, 'normal', 0);
+
+    y += 27;
+
+    // =================================================================
+    // VEHICLE DETAILS TABLE
+    // =================================================================
+    drawText('VEHICLE DETAILS', margin, y, 11, 'bold', primaryColor);
+    doc.setDrawColor(primaryColor);
+    doc.setLineWidth(0.5);
+    const vTitleW = doc.getStringUnitWidth('VEHICLE DETAILS') * 11 / doc.internal.scaleFactor;
+    doc.line(margin, y + 1, margin + vTitleW, y + 1);
+    y += 6;
+
+    // Table header
+    doc.setFillColor(primaryColor);
+    doc.rect(margin, y, pageW - margin * 2, 7, 'F');
+    drawText('MAKE & MODEL', margin + 3, y + 4.5, 8, 'bold', 255);
+    drawText('YEAR', margin + 65, y + 4.5, 8, 'bold', 255, 'center');
+    drawText('VIN / CHASSIS NO', margin + 100, y + 4.5, 8, 'bold', 255);
+    drawText('COLOR', pageW - margin - 3, y + 4.5, 8, 'bold', 255, 'right');
+    y += 7;
+
+    // Table row
+    doc.setFillColor(248, 248, 255);
+    doc.rect(margin, y, pageW - margin * 2, 8, 'F');
+    doc.setDrawColor(200);
+    doc.setLineWidth(0.2);
+    doc.rect(margin, y, pageW - margin * 2, 8);
+    drawText(data.vehicle.makeModel || 'N/A', margin + 3, y + 5, 9, 'bold', 0);
+    drawText(String(data.vehicle.year || 'N/A'), margin + 65, y + 5, 9, 'normal', 0, 'center');
+    drawText(data.vehicle.vin || 'N/A', margin + 100, y + 5, 9, 'normal', 0);
+    drawText(data.vehicle.color || 'N/A', pageW - margin - 3, y + 5, 9, 'normal', 0, 'right');
+    y += 8;
+
+    // Second row: fuel + references
+    doc.setFillColor(255);
+    doc.rect(margin, y, pageW - margin * 2, 7, 'F');
+    doc.setDrawColor(200);
+    doc.rect(margin, y, pageW - margin * 2, 7);
+    drawText(`Fuel Type: ${data.vehicle.fuelType || 'N/A'}`, margin + 3, y + 4.5, 8, 'normal', 0);
+    if (data.invoiceReference) drawText(`Invoice Ref: ${data.invoiceReference}`, margin + 70, y + 4.5, 8, 'normal', 0);
+    if (data.receiptReference) drawText(`Receipt Ref: ${data.receiptReference}`, pageW - margin - 3, y + 4.5, 8, 'normal', 0, 'right');
+    y += 12;
+
+    // =================================================================
+    // SALES TERMS & BANK DETAILS
+    // =================================================================
+    drawText('SALES AGREEMENT & PAYMENT TERMS', margin, y, 11, 'bold', primaryColor);
+    const pTitleW = doc.getStringUnitWidth('SALES AGREEMENT & PAYMENT TERMS') * 11 / doc.internal.scaleFactor;
+    doc.setDrawColor(primaryColor);
+    doc.setLineWidth(0.5);
+    doc.line(margin, y + 1, margin + pTitleW, y + 1);
+    y += 6;
+
+    // Purchase price line
     doc.setFontSize(9);
-    doc.setTextColor(primaryColor);
-    
-    const bank = data.bankDetails || {};
-    const branchText = bank.branch ? `(Branch: ${bank.branch})` : '';
-
-    doc.text(`Bank Name: ${bank.name || 'N/A'} ${branchText}`, margin + 3, y + 4);
-    doc.text(`Account Name: ${bank.accountName || 'N/A'}`, margin + 90, y + 4);
-    doc.text(`Account No: ${bank.accountNumber || 'N/A'}`, margin + 3, y + 9);
-    doc.text(`SWIFT/BIC: ${bank.swiftCode || 'N/A'}`, margin + 90, y + 9);
-    if (bank.paybillNumber) {
-        doc.text(`Paybill No: ${bank.paybillNumber}`, margin + 3, y + 14);
-    }
-    doc.text(`Branch: ${bank.branch || 'N/A'} | Currency: ${data.salesTerms.currency}`, margin + (bank.paybillNumber ? 90 : 3), y + (bank.paybillNumber ? 14 : 14));
-    y += 25;
-
-    // Additional Terms
-    drawText('GENERAL TERMS', margin, y, 12, 'bold', primaryColor);
-    const generalTermsWidth = doc.getStringUnitWidth('GENERAL TERMS') * 12 / doc.internal.scaleFactor;
-    doc.line(margin, y + 1, margin + generalTermsWidth, y + 1);
-    y += lineSpacing;
-
-    doc.setFontSize(10);
     doc.setTextColor(0);
-    doc.text('• The Buyer agrees to purchase the vehicle in its current condition.', margin + textIndent, y);
-    y += lineSpacing;
-    doc.text('• The sale is as-is, and the Seller does not provide any warranty unless otherwise agreed in writing.', margin + textIndent, y);
-    y += lineSpacing + 6;
-
-    // =================================================================
-    // SIGNATURES WITH STAMP - FIXED
-    // =================================================================
-    drawText('AGREED AND ACCEPTED', margin, y, 12, 'bold', primaryColor);
-    const agreedWidth = doc.getStringUnitWidth('AGREED AND ACCEPTED') * 12 / doc.internal.scaleFactor;
-    doc.line(margin, y + 1, margin + agreedWidth, y + 1);
-    y += lineSpacing;
-
-    const sigY = y + 10;
-    const sigNameY = sigY + 10;
-
-    // Buyer - UPDATED LAYOUT
-    doc.setFontSize(10);
-    doc.setTextColor(primaryColor);
+    doc.setFont("helvetica", "normal");
+    const priceLineText = `The Purchase Price of this vehicle is `;
+    const priceAmtText = `${data.salesTerms.currency} ${formatAmount(data.salesTerms.price)}`;
+    const priceTrailingText = ` payable to the bank account below:`;
+    doc.text(priceLineText, margin, y);
     doc.setFont("helvetica", "bold");
-    doc.text(`${data.buyer.name}`, margin + 35, sigY - 5, null, null, "center");
+    doc.setTextColor(secondaryColor);
+    doc.text(priceAmtText, margin + doc.getStringUnitWidth(priceLineText) * 9 / doc.internal.scaleFactor, y);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(0);
+    doc.text(priceTrailingText, margin + doc.getStringUnitWidth(priceLineText + priceAmtText) * 9 / doc.internal.scaleFactor, y);
+    y += 5;
 
-    // Line for signature
-    doc.line(margin, sigY, margin + 70, sigY);
-    drawText('Buyer Signature', margin + 35, sigY + 2, 8, 'normal', 0, "center");
+    // Bank details box
+    const bank = data.bankDetails || {};
+    const branchText = bank.branch ? ` (Branch: ${bank.branch})` : '';
+    const hasBranchRow = !!bank.paybillNumber;
+    const bankBoxH = hasBranchRow ? 24 : 20;
+    doc.setFillColor(255, 245, 230);
+    doc.rect(margin, y, pageW - margin * 2, bankBoxH, 'F');
+    doc.setDrawColor(secondaryColor);
+    doc.setLineWidth(0.5);
+    doc.rect(margin, y, pageW - margin * 2, bankBoxH);
 
-    drawText(`Witness: ${data.signatures.buyerWitness}`, margin, sigNameY + 3, 10, 'normal', 0);
+    drawText('PAYMENT BANK DETAILS', margin + 3, y + 5, 9, 'bold', primaryColor);
+    doc.setFontSize(8);
+    doc.setTextColor(0);
+    doc.setFont("helvetica", "normal");
+    doc.text(`Bank: ${bank.name || 'N/A'}${branchText}`, margin + 3, y + 10);
+    doc.text(`Account Name: ${bank.accountName || 'N/A'}`, margin + 3, y + 14);
+    doc.text(`Account No: ${bank.accountNumber || 'N/A'}`, margin + 3, y + 18);
+    doc.text(`SWIFT/BIC: ${bank.swiftCode || 'N/A'}`, pageW / 2, y + 10);
+    doc.text(`Currency: ${data.salesTerms.currency}`, pageW / 2, y + 14);
+    if (hasBranchRow) doc.text(`Paybill No: ${bank.paybillNumber}`, pageW / 2, y + 18);
+    y += bankBoxH + 6;
 
-    // Seller with stamp
-const sellerSigX = pageW - margin - 70;
+    // =================================================================
+    // GENERAL TERMS
+    // =================================================================
+    drawText('GENERAL TERMS', margin, y, 11, 'bold', primaryColor);
+    const gTitleW = doc.getStringUnitWidth('GENERAL TERMS') * 11 / doc.internal.scaleFactor;
+    doc.setDrawColor(primaryColor);
+    doc.setLineWidth(0.5);
+    doc.line(margin, y + 1, margin + gTitleW, y + 1);
+    y += 6;
 
-    // Use agreement creation date instead of current date
+    const terms = [
+        'The Buyer agrees to purchase the vehicle in its current condition.',
+        'The sale is on an "AS IS" basis. The Seller does not provide any warranty unless otherwise agreed in writing.',
+        'The original Bill of Lading will be released to the Buyer upon confirmation of full receipt of the purchase price.',
+        'If the Buyer cancels the purchase after confirmation, the deposit shall be forfeited.',
+        'All payments shall be made in the agreed currency. Third-party payments must be communicated to the Seller in writing prior to remittance.'
+    ];
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8.5);
+    doc.setTextColor(0);
+    terms.forEach((term, i) => {
+        const lines = doc.splitTextToSize(`${i + 1}.  ${term}`, pageW - margin * 2 - 4);
+        lines.forEach((line, li) => {
+            doc.text(line, margin + (li === 0 ? 0 : 5), y);
+            y += 4;
+        });
+        y += 1;
+    });
+    y += 4;
+
+    // =================================================================
+    // SIGNATURES - PAGE OVERFLOW CHECK
+    // =================================================================
+    const sigBlockHeight = 55; // total space needed for sig block
+    if (y + sigBlockHeight > pageH - 15) {
+        doc.addPage();
+        y = 15;
+    }
+
+    drawText('AGREED AND ACCEPTED', margin, y, 11, 'bold', primaryColor);
+    const aTitleW = doc.getStringUnitWidth('AGREED AND ACCEPTED') * 11 / doc.internal.scaleFactor;
+    doc.setDrawColor(primaryColor);
+    doc.setLineWidth(0.5);
+    doc.line(margin, y + 1, margin + aTitleW, y + 1);
+    y += 8;
+
+    // --- BUYER (Left column) ---
+    const buyerColX = margin;
+    const buyerColCenter = buyerColX + 45;
+
+    // Buyer name (split if long)
+    const bNameLines = doc.splitTextToSize(data.buyer.name || 'N/A', 80);
+    let bNameY = y;
+    bNameLines.forEach(line => {
+        doc.setFontSize(9);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(primaryColor);
+        doc.text(line, buyerColCenter, bNameY, null, null, "center");
+        bNameY += 4;
+    });
+
+    const buyerSigLineY = bNameY + 2;
+    doc.setDrawColor(0);
+    doc.setLineWidth(0.4);
+    doc.line(buyerColX, buyerSigLineY, buyerColX + 85, buyerSigLineY);
+    drawText('Buyer Signature & Date', buyerColCenter, buyerSigLineY + 4, 7, 'normal', 0, 'center');
+
+    // Buyer witness - fixed gap below sig line
+    const buyerWitnessY = buyerSigLineY + 12;
+    drawText('Witness:', buyerColX, buyerWitnessY, 8, 'bold', primaryColor);
+    const bWitnessLines = doc.splitTextToSize(data.signatures.buyerWitness || 'N/A', 75);
+    let bwY = buyerWitnessY;
+    bWitnessLines.forEach(line => {
+        drawText(line, buyerColX + 18, bwY, 8, 'normal', 0);
+        bwY += 4;
+    });
+
+    // --- SELLER / STAMP (Right column) ---
+    const sellerColX = pageW / 2 + 10;
+    const sellerColCenter = sellerColX + 40;
+
+    // Stamp first (at top of right column, aligned with buyer name area)
     let stampDate = data.agreementDate;
-
-    // If backdate is active, use backdated date
     if (backdateMode && backdateDate) {
         stampDate = backdateDate.toLocaleDateString('en-US');
     }
-
-    // If agreementDate is in YYYY-MM-DD format, convert it
     if (stampDate && stampDate.includes('-')) {
         try {
-            const [year, month, day] = stampDate.split('-');
-            const dateObj = new Date(year, month - 1, day);
-            stampDate = dateObj.toLocaleDateString('en-US');
-        } catch (e) {
-            // Keep original format
-        }
+            const [yr, mo, dy] = stampDate.split('-');
+            stampDate = new Date(yr, mo - 1, dy).toLocaleDateString('en-US');
+        } catch (e) { /* keep original */ }
     }
 
-    // Adjust stamp position - MOVED LOWER
-    const stampYPosition = sigY + 15;
-    addStampWithDate(sellerSigX + 35, stampYPosition, stampDate, 0);
+    const stampTopY = y; // stamp starts at same y as buyer name
+    addStampWithDate(sellerColCenter, stampTopY, stampDate);
 
-    doc.setFontSize(8);
-    doc.setTextColor(0);
-    doc.text(`Witness: ${data.signatures.sellerWitness}`, sellerSigX + 35, sigY + 28, null, null, "center");
+    // Seller sig line below the stamp (stamp = 30mm + 6mm label = 36mm total)
+    const sellerSigLineY = stampTopY + 38;
+    doc.setDrawColor(0);
+    doc.setLineWidth(0.4);
+    doc.line(sellerColX, sellerSigLineY, sellerColX + 80, sellerSigLineY);
+    drawText('Authorized Signature & Date', sellerColCenter, sellerSigLineY + 4, 7, 'normal', 0, 'center');
 
-    y += 38;
+    // Seller witness - fixed gap below seller sig line
+    const sellerWitnessY = sellerSigLineY + 12;
+    drawText('Witness:', sellerColX, sellerWitnessY, 8, 'bold', primaryColor);
+    const sWitnessLines = doc.splitTextToSize(data.signatures.sellerWitness || 'N/A', 70);
+    let swY = sellerWitnessY;
+    sWitnessLines.forEach(line => {
+        drawText(line, sellerColX + 18, swY, 8, 'normal', 0);
+        swY += 4;
+    });
 
     // =================================================================
     // FOOTER
     // =================================================================
     doc.setFillColor(primaryColor);
-    doc.rect(0, doc.internal.pageSize.getHeight() - 10, pageW, 10, 'F');
-    
+    doc.rect(0, pageH - 10, pageW, 10, 'F');
     doc.setTextColor(255);
     doc.setFontSize(9);
-    const footerText = `Location: Ngong Road, Kilimani, Nairobi. | Email: sales@carskenya.co.ke | Phone: 0713147136`;
-    doc.text(footerText, pageW / 2, doc.internal.pageSize.getHeight() - 4, null, null, "center");
+    doc.text(
+        'Location: Ngong Road, Kilimani, Nairobi. | Email: sales@carskenya.co.ke | Phone: 0713147136',
+        pageW / 2, pageH - 4, null, null, "center"
+    );
 
-    doc.save(`Car_Sales_Agreement_${data.buyer.name.replace(/\s/g, '_')}.pdf`);
+    doc.save(`Car_Sales_Agreement_${(data.buyer.name || 'Agreement').replace(/\s/g, '_')}.pdf`);
 }
 
 // =================================================================
