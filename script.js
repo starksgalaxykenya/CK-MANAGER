@@ -5353,8 +5353,8 @@ function generateAgreementPDF(data) {
 
     drawText(`Witness: ${data.signatures.buyerWitness}`, margin, sigNameY + 3, 10, 'normal', 0);
 
-    // Seller with stamp - FIXED: Define sellerX here
-    const sellerX = pageW - margin - 70;
+    // Seller with stamp
+const sellerSigX = pageW - margin - 70;
 
     // Use agreement creation date instead of current date
     let stampDate = data.agreementDate;
