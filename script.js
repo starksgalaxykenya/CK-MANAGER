@@ -5307,22 +5307,19 @@ function generateAgreementPDF(data) {
     doc.line(margin, y + 1, margin + pTitleW, y + 1);
     y += 6;
 
-    // Purchase price line
+   // Purchase price line
     doc.setFontSize(9);
-    doc.setTextColor(0);
     doc.setFont("helvetica", "normal");
-    const priceLineText = `The Purchase Price of this vehicle is `;
-    const priceAmtText = `${data.salesTerms.currency} ${formatAmount(data.salesTerms.price)}`;
-    const priceTrailingText = ` payable to the bank account below:`;
-    doc.text(priceLineText, margin, y);
+    doc.setTextColor(0);
+    doc.text('The Purchase Price of this vehicle is:', margin, y);
+    y += 5;
     doc.setFont("helvetica", "bold");
     doc.setTextColor(secondaryColor);
-    doc.text(priceAmtText, margin + doc.getStringUnitWidth(priceLineText) * 9 / doc.internal.scaleFactor, y);
+    doc.text(`${data.salesTerms.currency} ${formatAmount(data.salesTerms.price)}`, margin + 4, y);
     doc.setFont("helvetica", "normal");
     doc.setTextColor(0);
-    doc.text(priceTrailingText, margin + doc.getStringUnitWidth(priceLineText + priceAmtText) * 9 / doc.internal.scaleFactor, y);
+    doc.text('— payable to the bank account below:', margin + 4 + doc.getStringUnitWidth(`${data.salesTerms.currency} ${formatAmount(data.salesTerms.price)}`) * 9 / doc.internal.scaleFactor + 2, y);
     y += 5;
-
     // Bank details box
     const bank = data.bankDetails || {};
     const branchText = bank.branch ? ` (Branch: ${bank.branch})` : '';
