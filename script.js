@@ -2788,6 +2788,11 @@ async function generateSequentialInvoiceNumber(clientName, carModel, carYear) {
  * Populates a bank account dropdown list with data from Firestore.
  * @param {string} dropdownId - The ID of the select element to populate.
  */
+/**
+ * Populates a bank account dropdown list with data from Firestore.
+ * @param {string} dropdownId - The ID of the select element to populate.
+ * @param {boolean} isMultiSelect - Whether the dropdown is multi-select.
+ */
 async function populateBankDropdown(dropdownId, isMultiSelect = false) {
     const bankSelect = document.getElementById(dropdownId);
     if (!bankSelect) return;
@@ -2795,32 +2800,49 @@ async function populateBankDropdown(dropdownId, isMultiSelect = false) {
     bankSelect.innerHTML = '<option value="" disabled selected>Loading banks...</option>';
 
     const banks = await _getBankDetailsData();
-    let options = isMultiSelect ? '' : '<option value="" disabled selected>Select Bank Account</option>';
-
+    
     if (banks.length === 0) {
         bankSelect.innerHTML = '<option value="" disabled>No bank accounts configured.</option>';
         return;
     }
 
-    banks.forEach(data => {
-        // Properly escape JSON for HTML attribute
-        const detailsJson = JSON.stringify(data)
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&apos;')
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;');
+    let options = '';
+    
+    if (!isMultiSelect) {
+        options = '<option value="" disabled selected>Select Bank Account</option>';
+    }
+    
+    banks.forEach(bank => {
+        // Create a safe string representation of the bank object
+        // Use a simple format that won't break JSON parsing
+        const bankData = {
+            id: bank.id,
+            name: bank.name,
+            branch: bank.branch || '',
+            accountName: bank.accountName,
+            accountNumber: bank.accountNumber,
+            paybillNumber: bank.paybillNumber || '',
+            swiftCode: bank.swiftCode,
+            currency: bank.currency
+        };
+        
+        // Use a delimiter-based format instead of JSON to avoid parsing issues
+        const encodedValue = `id:${bank.id}|name:${bank.name}|branch:${bank.branch || ''}|accountName:${bank.accountName}|accountNumber:${bank.accountNumber}|paybillNumber:${bank.paybillNumber || ''}|swiftCode:${bank.swiftCode}|currency:${bank.currency}`;
+        
+        const displayText = `${bank.name} - ${bank.branch || 'No Branch'} (${bank.currency})`;
+        
         if (isMultiSelect) {
-            options += `<option value="${detailsJson}">${data.name} - ${data.branch || 'No Branch'} (${data.currency})</option>`;
+            options += `<option value="${encodedValue.replace(/"/g, '&quot;')}">${displayText}</option>`;
         } else {
-            options += `<option value="${detailsJson}">${data.name} - ${data.branch || 'No Branch'} (${data.currency})</option>`;
+            options += `<option value="${encodedValue.replace(/"/g, '&quot;')}">${displayText}</option>`;
         }
     });
 
     bankSelect.innerHTML = options;
+    
     if (isMultiSelect) {
         bankSelect.setAttribute('multiple', 'multiple');
-        bankSelect.size = 3; // Show 3 options at once
+        bankSelect.size = Math.min(3, banks.length);
     }
 }
 
@@ -3698,6 +3720,9 @@ function renderAgreementForm(receiptReference = '') {
 /**
  * Handles form submission and saves the sales agreement to Firestore.
  */
+/**
+ * Handles form submission and saves the sales agreement to Firestore.
+ */
 async function saveAgreement() {
     const form = document.getElementById('agreement-form');
     if (!form.checkValidity()) {
@@ -3714,8 +3739,7 @@ async function saveAgreement() {
         saveButton.innerHTML = `<span>Saving Agreement...</span>${spinner.outerHTML}`;
     }
 
-    // --- CORRECTION 1: READ THE DATE INPUT VALUE ---
-    const agreementDate = document.getElementById('agreementDateInput').value; // Get YYYY-MM-DD format
+    const agreementDate = document.getElementById('agreementDateInput').value;
 
     // 1. Collect Buyer Details
     const buyerName = document.getElementById('buyerName').value;
@@ -3728,31 +3752,27 @@ async function saveAgreement() {
     const carVIN = document.getElementById('carVIN').value;
     const carFuelType = document.getElementById('carFuelType').value;
 
-    // 3. Collect Payment Details (removed payment schedule)
+    // 3. Collect Payment Details
     const totalPrice = parseFloat(document.getElementById('totalPrice').value);
 
     // 4. Collect other details
-    const selectedBankValue = document.getElementById('agreementBankDetailsSelect').value;
-    const currency = document.getElementById('currencySelect').value;
+   // Replace the bank parsing section in saveAgreement with:
+const selectedBankValue = document.getElementById('agreementBankDetailsSelect').value;
+const currency = document.getElementById('currencySelect').value;
 
-    // --- CORRECTION 2: Parse the full bank details from the dropdown value ---
-    let bankDetails = {};
-    let bankId = '';
+// Parse the bank details from encoded value
+let bankDetails = parseBankFromEncodedValue(selectedBankValue);
+let bankId = bankDetails?.id || '';
 
-    try {
-        bankDetails = JSON.parse(selectedBankValue);
-        bankId = bankDetails.id;
-    } catch (e) {
-        console.error("Error parsing bank details from dropdown:", e);
-        showErrorToast("Please select a valid bank account.");
-        resetAgreementSaveButton(saveButton, spinner);
-        return;
-    }
+if (!bankDetails || !bankDetails.name) {
+    showErrorToast("Please select a valid bank account.");
+    resetAgreementSaveButton(saveButton, spinner);
+    return;
+}
 
-     // 5. Construct Agreement Data Object
+    // 5. Construct Agreement Data Object
     const agreementData = {
-        // --- Use the date from the input ---
-        agreementDate: agreementDate, 
+        agreementDate: agreementDate,
         buyer: {
             name: buyerName,
             phone: buyerPhone,
@@ -3772,20 +3792,16 @@ async function saveAgreement() {
         salesTerms: {
             price: totalPrice,
             currency: currency,
-            bankId: bankId, // <<< Correctly save only the ID
+            bankId: bankId,
         },
         signatures: {
             sellerWitness: document.getElementById('sellerWitness').value,
             buyerWitness: document.getElementById('buyerWitness').value,
-            // Signatures and Dates will be added manually on the printed copy
         },
-        // ADD THESE LINES FOR INVOICE REFERENCE
         invoiceReference: document.getElementById('agreement-form')?.dataset.invoiceReference || '',
         invoiceId: document.getElementById('agreement-form')?.dataset.invoiceId || '',
-        // ADD THESE LINES FOR RECEIPT REFERENCE
         receiptReference: document.getElementById('agreement-form')?.dataset.receiptReference || '',
         receiptId: document.getElementById('agreement-form')?.dataset.receiptId || '',
-        // END OF ADDED LINES
         createdBy: currentUser.email,
         createdAt: firebase.firestore.FieldValue.serverTimestamp()
     };
@@ -3793,18 +3809,15 @@ async function saveAgreement() {
     try {
         const docRef = await db.collection("sales_agreements").add(agreementData);
         
-        // Reset button state
         resetAgreementSaveButton(saveButton, spinner);
-        
         showSuccessToast(`Sales Agreement for ${agreementData.buyer.name} saved successfully!`);
 
-        // Use the parsed bank details object for immediate PDF generation
         agreementData.firestoreId = docRef.id;
-        agreementData.bankDetails = bankDetails; // <<< Attach full details for PDF
+        agreementData.bankDetails = bankDetails;
         generateAgreementPDF(agreementData);
 
         form.reset();
-        fetchAgreements(); // Refresh history
+        fetchAgreements();
     } catch (error) {
         console.error("Error saving sales agreement:", error);
         resetAgreementSaveButton(saveButton, spinner);
