@@ -2793,6 +2793,11 @@ async function generateSequentialInvoiceNumber(clientName, carModel, carYear) {
  * @param {string} dropdownId - The ID of the select element to populate.
  * @param {boolean} isMultiSelect - Whether the dropdown is multi-select.
  */
+/**
+ * Populates a bank account dropdown list with data from Firestore.
+ * @param {string} dropdownId - The ID of the select element to populate.
+ * @param {boolean} isMultiSelect - Whether the dropdown is multi-select.
+ */
 async function populateBankDropdown(dropdownId, isMultiSelect = false) {
     const bankSelect = document.getElementById(dropdownId);
     if (!bankSelect) return;
@@ -2813,28 +2818,18 @@ async function populateBankDropdown(dropdownId, isMultiSelect = false) {
     }
     
     banks.forEach(bank => {
-        // Create a safe string representation of the bank object
-        // Use a simple format that won't break JSON parsing
-        const bankData = {
-            id: bank.id,
-            name: bank.name,
-            branch: bank.branch || '',
-            accountName: bank.accountName,
-            accountNumber: bank.accountNumber,
-            paybillNumber: bank.paybillNumber || '',
-            swiftCode: bank.swiftCode,
-            currency: bank.currency
-        };
-        
-        // Use a delimiter-based format instead of JSON to avoid parsing issues
+        // Use pipe-separated format instead of JSON to avoid parsing issues
         const encodedValue = `id:${bank.id}|name:${bank.name}|branch:${bank.branch || ''}|accountName:${bank.accountName}|accountNumber:${bank.accountNumber}|paybillNumber:${bank.paybillNumber || ''}|swiftCode:${bank.swiftCode}|currency:${bank.currency}`;
         
         const displayText = `${bank.name} - ${bank.branch || 'No Branch'} (${bank.currency})`;
         
+        // Escape any special characters
+        const safeValue = encodedValue.replace(/"/g, '&quot;');
+        
         if (isMultiSelect) {
-            options += `<option value="${encodedValue.replace(/"/g, '&quot;')}">${displayText}</option>`;
+            options += `<option value="${safeValue}">${displayText}</option>`;
         } else {
-            options += `<option value="${encodedValue.replace(/"/g, '&quot;')}">${displayText}</option>`;
+            options += `<option value="${safeValue}">${displayText}</option>`;
         }
     });
 
@@ -3723,6 +3718,9 @@ function renderAgreementForm(receiptReference = '') {
 /**
  * Handles form submission and saves the sales agreement to Firestore.
  */
+/**
+ * Handles form submission and saves the sales agreement to Firestore.
+ */
 async function saveAgreement() {
     const form = document.getElementById('agreement-form');
     if (!form.checkValidity()) {
@@ -3756,19 +3754,69 @@ async function saveAgreement() {
     const totalPrice = parseFloat(document.getElementById('totalPrice').value);
 
     // 4. Collect other details
-   // Replace the bank parsing section in saveAgreement with:
-const selectedBankValue = document.getElementById('agreementBankDetailsSelect').value;
-const currency = document.getElementById('currencySelect').value;
+    const selectedBankValue = document.getElementById('agreementBankDetailsSelect').value;
+    const currency = document.getElementById('currencySelect').value;
 
-// Parse the bank details from encoded value
-let bankDetails = parseBankFromEncodedValue(selectedBankValue);
-let bankId = bankDetails?.id || '';
+    // FIXED: Parse bank details safely without JSON
+    let bankDetails = null;
+    let bankId = '';
 
-if (!bankDetails || !bankDetails.name) {
-    showErrorToast("Please select a valid bank account.");
-    resetAgreementSaveButton(saveButton, spinner);
-    return;
-}
+    try {
+        if (selectedBankValue && selectedBankValue !== '') {
+            // Try to parse as JSON first (for backwards compatibility)
+            if (selectedBankValue.startsWith('{') && selectedBankValue.endsWith('}')) {
+                try {
+                    bankDetails = JSON.parse(selectedBankValue);
+                    bankId = bankDetails.id;
+                } catch (e) {
+                    console.warn("JSON parse failed, trying alternative format");
+                    bankDetails = null;
+                }
+            }
+            
+            // If JSON parsing failed or it's our encoded format
+            if (!bankDetails && selectedBankValue.includes('|')) {
+                // Parse the delimiter-based format: "id:xxx|name:xxx|branch:xxx|..."
+                const parts = selectedBankValue.split('|');
+                const tempBank = {};
+                parts.forEach(part => {
+                    const colonIndex = part.indexOf(':');
+                    if (colonIndex > 0) {
+                        const key = part.substring(0, colonIndex);
+                        const value = part.substring(colonIndex + 1);
+                        tempBank[key] = value;
+                    }
+                });
+                
+                if (tempBank.id) {
+                    bankDetails = tempBank;
+                    bankId = tempBank.id;
+                }
+            }
+            
+            // If still no bank details, try to fetch by value as a last resort
+            if (!bankDetails && selectedBankValue) {
+                const banks = await _getBankDetailsData();
+                const foundBank = banks.find(b => 
+                    b.name === selectedBankValue || 
+                    `${b.name} - ${b.branch || 'No Branch'} (${b.currency})` === selectedBankValue
+                );
+                if (foundBank) {
+                    bankDetails = foundBank;
+                    bankId = foundBank.id;
+                }
+            }
+        }
+        
+        if (!bankDetails) {
+            throw new Error("No valid bank selected");
+        }
+    } catch (e) {
+        console.error("Error parsing bank details:", e);
+        showErrorToast("Please select a valid bank account.");
+        resetAgreementSaveButton(saveButton, spinner);
+        return;
+    }
 
     // 5. Construct Agreement Data Object
     const agreementData = {
