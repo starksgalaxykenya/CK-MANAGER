@@ -3217,7 +3217,7 @@ async function saveInvoice(onlySave) {
     
     for (let i = 0; i < bankSelect.options.length; i++) {
         if (bankSelect.options[i].selected) {
-            try {
+           try {
                 const bankValue = bankSelect.options[i].value;
                 const decodedValue = bankValue
                     .replace(/&apos;/g, "'")
@@ -3225,8 +3225,18 @@ async function saveInvoice(onlySave) {
                     .replace(/&lt;/g, '<')
                     .replace(/&gt;/g, '>')
                     .replace(/&amp;/g, '&');
-                
-                const bankData = JSON.parse(decodedValue);
+
+                let bankData;
+                try {
+                    bankData = JSON.parse(decodedValue);
+                } catch (jsonErr) {
+                    bankData = {};
+                    decodedValue.split(',').forEach(pair => {
+                        const [key, ...rest] = pair.trim().split(':');
+                        if (key && rest.length) bankData[key.trim()] = rest.join(':').trim();
+                    });
+                }
+
                 selectedBanks.push(bankData);
                 bankIds.push(bankData.id);
             } catch (e) {
