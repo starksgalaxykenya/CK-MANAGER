@@ -3231,7 +3231,7 @@ async function saveInvoice(onlySave) {
                     bankData = JSON.parse(decodedValue);
                 } catch (jsonErr) {
                     bankData = {};
-                    decodedValue.split(',').forEach(pair => {
+                    decodedValue.split('|').forEach(pair => {
                         const [key, ...rest] = pair.trim().split(':');
                         if (key && rest.length) bankData[key.trim()] = rest.join(':').trim();
                     });
