@@ -8355,7 +8355,12 @@ async function saveTopUpInvoice(onlySave = false) {
                     .replace(/&gt;/g, '>')
                     .replace(/&amp;/g, '&');
                 
-                selectedBank = JSON.parse(decodedValue);
+                selectedBank = Object.fromEntries(
+                    decodedValue.split('|').map(pair => {
+                        const colonIdx = pair.indexOf(':');
+                        return [pair.substring(0, colonIdx), pair.substring(colonIdx + 1)];
+                    })
+                );
             } catch (e) {
                 console.error("Error parsing bank details:", e);
             }
