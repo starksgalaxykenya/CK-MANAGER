@@ -2841,6 +2841,33 @@ async function populateBankDropdown(dropdownId, isMultiSelect = false) {
     }
 }
 
+// ADD after line 2842 (the closing } of populateBankDropdown)
+
+/**
+ * Parses the selected bank option value from a dropdown populated by populateBankDropdown.
+ * Handles the current pipe-separated format and legacy JSON format.
+ */
+function parseBankSelectValue(selectElement) {
+    if (!selectElement || selectElement.selectedIndex <= 0) return null;
+    try {
+        const raw = selectElement.options[selectElement.selectedIndex].value
+            .replace(/&quot;/g, '"')
+            .replace(/&amp;/g, '&');
+        if (raw.startsWith('{')) return JSON.parse(raw);
+        const bank = {};
+        raw.split('|').forEach(pair => {
+            const colonIndex = pair.indexOf(':');
+            if (colonIndex !== -1) {
+                bank[pair.substring(0, colonIndex).trim()] = pair.substring(colonIndex + 1).trim();
+            }
+        });
+        return bank.id ? bank : null;
+    } catch (e) {
+        console.error("Error parsing bank details:", e);
+        return null;
+    }
+}
+
 /**
  * Auto-fills the buyer confirmation field when client name is entered
  */
@@ -6640,16 +6667,14 @@ function createAdditionalInvoice(invoiceData) {
             if (Array.isArray(invoiceData.bankDetails)) {
                 invoiceData.bankDetails.forEach(bank => {
                     for (let i = 0; i < bankSelect.options.length; i++) {
+                        // AFTER
                         try {
-                            const optionValue = bankSelect.options[i].value;
-                            const decodedValue = optionValue
-                                .replace(/&apos;/g, "'")
-                                .replace(/&quot;/g, '"')
-                                .replace(/&lt;/g, '<')
-                                .replace(/&gt;/g, '>')
-                                .replace(/&amp;/g, '&');
-                            
-                            const bankData = JSON.parse(decodedValue);
+                            const raw = bankSelect.options[i].value.replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+                            const bankData = raw.startsWith('{') ? JSON.parse(raw) : (() => {
+                                const b = {};
+                                raw.split('|').forEach(p => { const ci = p.indexOf(':'); if (ci !== -1) b[p.substring(0, ci).trim()] = p.substring(ci + 1).trim(); });
+                                return b;
+                            })();
                             if (bankData.id === bank.id) {
                                 bankSelect.options[i].selected = true;
                             }
@@ -7147,26 +7172,10 @@ async function savePortChargesInvoice(onlySave = false) {
         const containerNumber = document.getElementById('containerNumber').value;
         
         // Collect bank details
+        // AFTER
         const bankSelect = document.getElementById('portBankDetailsSelect');
-        let selectedBank = null;
-        let bankId = '';
-        
-        if (bankSelect.selectedIndex > 0) {
-            try {
-                const bankValue = bankSelect.options[bankSelect.selectedIndex].value;
-                const decodedValue = bankValue
-                    .replace(/&apos;/g, "'")
-                    .replace(/&quot;/g, '"')
-                    .replace(/&lt;/g, '<')
-                    .replace(/&gt;/g, '>')
-                    .replace(/&amp;/g, '&');
-                
-                selectedBank = JSON.parse(decodedValue);
-                bankId = selectedBank.id;
-            } catch (e) {
-                console.error("Error parsing bank details:", e);
-            }
-        }
+        const selectedBank = parseBankSelectValue(bankSelect);
+        const bankId = selectedBank?.id || '';
         
         if (!selectedBank) {
             showErrorToast("Please select a bank account.");
@@ -9363,24 +9372,10 @@ async function saveTopUpFromAuction(onlySave = false) {
         const paymentReference = document.getElementById('topupPaymentReference').value;
         
         // Collect bank details
+        // AFTER
+        // Collect bank details
         const bankSelect = document.getElementById('topupAuctionBankDetailsSelect');
-        let selectedBank = null;
-        
-        if (bankSelect.selectedIndex > 0) {
-            try {
-                const bankValue = bankSelect.options[bankSelect.selectedIndex].value;
-                const decodedValue = bankValue
-                    .replace(/&apos;/g, "'")
-                    .replace(/&quot;/g, '"')
-                    .replace(/&lt;/g, '<')
-                    .replace(/&gt;/g, '>')
-                    .replace(/&amp;/g, '&');
-                
-                selectedBank = JSON.parse(decodedValue);
-            } catch (e) {
-                console.error("Error parsing bank details:", e);
-            }
-        }
+        const selectedBank = parseBankSelectValue(bankSelect);
         
         if (!selectedBank) {
             showErrorToast("Please select a bank account.");
@@ -9536,24 +9531,10 @@ async function saveBalanceInvoice(onlySave = false) {
         const paymentReference = document.getElementById('balancePaymentReference').value;
         
         // Collect bank details
+        // AFTER
+        // Collect bank details
         const bankSelect = document.getElementById('balanceBankDetailsSelect');
-        let selectedBank = null;
-        
-        if (bankSelect.selectedIndex > 0) {
-            try {
-                const bankValue = bankSelect.options[bankSelect.selectedIndex].value;
-                const decodedValue = bankValue
-                    .replace(/&apos;/g, "'")
-                    .replace(/&quot;/g, '"')
-                    .replace(/&lt;/g, '<')
-                    .replace(/&gt;/g, '>')
-                    .replace(/&amp;/g, '&');
-                
-                selectedBank = JSON.parse(decodedValue);
-            } catch (e) {
-                console.error("Error parsing bank details:", e);
-            }
-        }
+        const selectedBank = parseBankSelectValue(bankSelect);
         
         if (!selectedBank) {
             showErrorToast("Please select a bank account.");
@@ -10659,24 +10640,10 @@ async function saveTopUpFromAuctionCorrected(onlySave = false) {
         const paymentReference = document.getElementById('topupPaymentRefCorrected').value;
         
         // Collect bank details
+        // AFTER
+        // Collect bank details
         const bankSelect = document.getElementById('topupAuctionBankSelectCorrected');
-        let selectedBank = null;
-        
-        if (bankSelect.selectedIndex > 0) {
-            try {
-                const bankValue = bankSelect.options[bankSelect.selectedIndex].value;
-                const decodedValue = bankValue
-                    .replace(/&apos;/g, "'")
-                    .replace(/&quot;/g, '"')
-                    .replace(/&lt;/g, '<')
-                    .replace(/&gt;/g, '>')
-                    .replace(/&amp;/g, '&');
-                
-                selectedBank = JSON.parse(decodedValue);
-            } catch (e) {
-                console.error("Error parsing bank details:", e);
-            }
-        }
+        const selectedBank = parseBankSelectValue(bankSelect);
         
         if (!selectedBank) {
             showErrorToast("Please select a bank account.");
@@ -11053,24 +11020,10 @@ async function saveBalanceInvoiceCorrected(onlySave = false) {
         const paymentReference = document.getElementById('balancePaymentRefCorrected').value;
         
         // Collect bank details
+        // AFTER
+        // Collect bank details
         const bankSelect = document.getElementById('balanceBankSelectCorrected');
-        let selectedBank = null;
-        
-        if (bankSelect.selectedIndex > 0) {
-            try {
-                const bankValue = bankSelect.options[bankSelect.selectedIndex].value;
-                const decodedValue = bankValue
-                    .replace(/&apos;/g, "'")
-                    .replace(/&quot;/g, '"')
-                    .replace(/&lt;/g, '<')
-                    .replace(/&gt;/g, '>')
-                    .replace(/&amp;/g, '&');
-                
-                selectedBank = JSON.parse(decodedValue);
-            } catch (e) {
-                console.error("Error parsing bank details:", e);
-            }
-        }
+        const selectedBank = parseBankSelectValue(bankSelect);
         
         if (!selectedBank) {
             showErrorToast("Please select a bank account.");
