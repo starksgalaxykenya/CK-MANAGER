@@ -3313,7 +3313,11 @@ async function saveInvoice(onlySave) {
     totalPriceUSD = Math.round(totalPriceUSD);
     depositUSD = Math.round(depositUSD);
     balanceUSD = Math.round(balanceUSD);
-    const depositKSH = Math.round(depositUSD * exchangeRate);
+    // For fixed KSH deposits, use the original entered amount to avoid round-trip rounding loss
+    // (e.g. KES 500,000 → ÷130 → ×130 would give KES 499,980 instead of 500,000)
+    const depositKSH = (depositType === 'fixed' && fixedDepositCurrency === 'KSH')
+        ? Math.round(fixedDepositAmount)
+        : Math.round(depositUSD * exchangeRate);
     
     // 3. Generate sequential invoice number
     const generatedInvoiceId = await generateSequentialInvoiceNumber(clientName, carModel, carYear);
@@ -4999,7 +5003,12 @@ function generateInvoicePDF(data) {
         if (data.depositType === 'percentage' && data.depositPercentage) {
             depositText = `A deposit of USD ${formatAmount(data.pricing.depositUSD)} (KES ${formatAmount(data.pricing.depositKSH)} equivalent) is required to secure the vehicle and begin shipping/clearing. The due date of the balance of USD ${formatAmount(data.pricing.balanceUSD)} will be promptly be communicated and notified by the seller for compliance.`;
         } else {
-            depositText = `A deposit of ${data.fixedDepositCurrency} ${formatAmount(data.fixedDepositAmount)} (USD ${formatAmount(data.pricing.depositUSD)} / KES ${formatAmount(data.pricing.depositKSH)} equivalent) is required to secure the vehicle and begin shipping/clearing. The due date of the balance of USD ${formatAmount(data.pricing.balanceUSD)} will be promptly be communicated and notified by the seller for compliance.`;
+            // For KSH fixed deposits, display the original entered amount directly to avoid
+            // showing a round-trip-converted value that may differ by a few shillings.
+            const fixedDepositKESDisplay = data.fixedDepositCurrency === 'KSH'
+                ? formatAmount(data.fixedDepositAmount)
+                : formatAmount(data.pricing.depositKSH);
+            depositText = `A deposit of ${data.fixedDepositCurrency} ${formatAmount(data.fixedDepositAmount)} (USD ${formatAmount(data.pricing.depositUSD)} / KES ${fixedDepositKESDisplay} equivalent) is required to secure the vehicle and begin shipping/clearing. The due date of the balance of USD ${formatAmount(data.pricing.balanceUSD)} will be promptly be communicated and notified by the seller for compliance.`;
         }
         y = drawTerm(doc, y, '2.', depositText);
 
