@@ -1,4 +1,42 @@
 // =================================================================
+//                 CURRENCY ROUNDING UTILITY
+// =================================================================
+
+/**
+ * Rounds a numeric value to exactly 2 decimal places,
+ * eliminating floating‑point drift.
+ * @param {number|string} value - The amount to round.
+ * @returns {number} Rounded value with 2 decimal places.
+ */
+function roundCurrency(value) {
+    const num = parseFloat(value);
+    if (isNaN(num)) return 0;
+    return Math.round(num * 100) / 100;
+}
+
+// =================================================================
+//                 COLLECTION ROUTING HELPER
+// =================================================================
+
+/**
+ * Determines the correct Firestore collection name for an invoice
+ * based on its document type or source type.
+ * @param {Object} invoiceData - The invoice document data.
+ * @returns {string} Collection name ('invoices', 'top_up_invoices', or 'balance_invoices').
+ */
+function getInvoiceCollectionName(invoiceData) {
+    if (!invoiceData) return 'invoices';
+    const docType = invoiceData.docType || '';
+    if (docType === 'Top-Up Invoice' || invoiceData.sourceType === 'topup') {
+        return 'top_up_invoices';
+    }
+    if (docType === 'Balance Invoice' || invoiceData.sourceType === 'balance') {
+        return 'balance_invoices';
+    }
+    // Default to regular invoices
+    return 'invoices';
+}
+// =================================================================
 //                 0. LOADING ANIMATIONS & UI UTILITIES
 // =================================================================
 
@@ -1993,38 +2031,47 @@ function updateManualBalanceCalculation() {
     }
 }
 
+/**
+ * Applies a manual total to balance calculations, but blocks usage
+ * if an invoice reference is present.
+ */
 function applyManualTotalToBalances() {
+    const invoiceRef = document.getElementById('invoiceReference').value;
+    if (invoiceRef && invoiceRef.trim() !== '') {
+        showErrorToast('Cannot use manual total when an invoice reference is set. Please remove the invoice reference first.');
+        return;
+    }
+
     const manualTotal = parseFloat(document.getElementById('manualTotalAmount').value) || 0;
     const manualCurrency = document.getElementById('manualTotalCurrency').value;
     const exchangeRate = parseFloat(document.getElementById('exchangeRate').value) || 130;
-    
+
     if (manualTotal <= 0) {
-        showErrorToast("Please enter a valid total payment amount");
+        showErrorToast('Please enter a valid total payment amount');
         return;
     }
-    
-    // Calculate totals
-    let totalUSD = manualTotal;
-    let totalKSH = manualTotal;
-    
+
+    // Round the manual total
+    const roundedTotal = roundCurrency(manualTotal);
+    let totalUSD, totalKSH;
     if (manualCurrency === 'KSH') {
-        totalUSD = manualTotal / exchangeRate;
-        totalKSH = manualTotal;
+        totalUSD = roundCurrency(roundedTotal / exchangeRate);
+        totalKSH = roundedTotal;
     } else {
-        totalUSD = manualTotal;
-        totalKSH = manualTotal * exchangeRate;
+        totalUSD = roundedTotal;
+        totalKSH = roundCurrency(roundedTotal * exchangeRate);
     }
-    
-    // Store in dataset for calculations
+
+    // Store in dataset for calculations (but only if no invoice reference)
     const invoiceRefElement = document.getElementById('invoiceReference');
     invoiceRefElement.dataset.totalUSD = totalUSD;
     invoiceRefElement.dataset.balanceUSD = totalUSD; // Initial balance equals total
     invoiceRefElement.dataset.exchangeRate = exchangeRate;
-    
+
     // Update calculations
     updateReceiptCalculations();
-    
-    showSuccessToast(`Total payment of ${manualCurrency} ${manualTotal.toFixed(2)} applied. Balance calculations will now use this total.`);
+
+    showSuccessToast(`Total payment of ${manualCurrency} ${roundedTotal.toFixed(2)} applied. Balance calculations will now use this total.`);
 }
 
 /**
@@ -2225,13 +2272,17 @@ function generateReceiptId(type, name) {
 /**
  * Saves the new receipt details to Firestore.
  */
+/**
+ * Saves a new receipt (or adds a payment to an existing receipt) using
+ * a Firestore batch for atomicity and rounding for all monetary values.
+ */
 async function saveReceipt() {
     const form = document.getElementById('receipt-form');
     if (!form.checkValidity()) {
         form.reportValidity();
         return;
     }
-    
+
     // Show loading state
     const saveButton = document.getElementById('save-receipt-btn');
     const spinner = document.getElementById('receipt-spinner');
@@ -2240,7 +2291,8 @@ async function saveReceipt() {
         spinner.classList.remove('hidden');
         saveButton.innerHTML = `<span>Saving Receipt...</span>${spinner.outerHTML}`;
     }
-    
+
+    // --- 1. Gather and validate form data ---
     const receiptType = document.getElementById('receiptType').value;
     const receivedFrom = document.getElementById('receivedFrom').value;
     const currency = document.getElementById('currency').value;
@@ -2255,65 +2307,69 @@ async function saveReceipt() {
     const balanceDueDate = document.getElementById('balanceDueDate').value;
     const invoiceReference = document.getElementById('invoiceReference').value;
     const invoiceRefElement = document.getElementById('invoiceReference');
-    const invoiceExchangeRate = invoiceRefElement && invoiceRefElement.dataset.exchangeRate 
-        ? parseFloat(invoiceRefElement.dataset.exchangeRate) 
+    const invoiceExchangeRate = invoiceRefElement && invoiceRefElement.dataset.exchangeRate
+        ? parseFloat(invoiceRefElement.dataset.exchangeRate)
         : exchangeRate;
 
+    // Validate amount
     if (isNaN(amountReceived) || amountReceived <= 0) {
-        showErrorToast("Please enter a valid amount received.");
+        showErrorToast('Please enter a valid amount received.');
         resetSaveButton();
         return;
     }
 
-    const receiptId = generateReceiptId(receiptType, receivedFrom);
-    // Use backdated date if active
-    const receiptDate = getCurrentDateForDocument();
-
-    // Calculate amounts in both currencies - FIXED: Store both currencies properly
-    let amountReceivedUSD = amountReceived;
-    let amountReceivedKSH = amountReceived;
-    
+    // --- 2. Round all monetary values ---
+    const roundedAmount = roundCurrency(amountReceived);
+    let amountReceivedUSD, amountReceivedKSH;
     if (currency === 'KSH') {
-        amountReceivedUSD = amountReceived / exchangeRate;
-        amountReceivedKSH = amountReceived;
-    } else if (currency === 'USD') {
-        amountReceivedUSD = amountReceived;
-        amountReceivedKSH = amountReceived * exchangeRate;
+        amountReceivedUSD = roundCurrency(roundedAmount / exchangeRate);
+        amountReceivedKSH = roundedAmount;
+    } else { // USD
+        amountReceivedUSD = roundedAmount;
+        amountReceivedKSH = roundCurrency(roundedAmount * exchangeRate);
     }
 
-    // Check if a receipt with the same invoice reference already exists
+    // Round the balance remaining as well
+    const roundedBalanceRemaining = roundCurrency(balanceRemaining);
+
+    // Generate receipt ID
+    const receiptId = generateReceiptId(receiptType, receivedFrom);
+    const receiptDate = getCurrentDateForDocument();
+
+    // --- 3. Check for existing receipt with same invoice reference ---
     let existingReceipt = null;
     let existingReceiptId = null;
-    
     if (invoiceReference) {
         try {
-            const existingReceipts = await db.collection("receipts")
-                .where("invoiceReference", "==", invoiceReference)
+            const existingReceipts = await db.collection('receipts')
+                .where('invoiceReference', '==', invoiceReference)
                 .limit(1)
                 .get();
-            
             if (!existingReceipts.empty) {
                 existingReceipt = existingReceipts.docs[0].data();
                 existingReceiptId = existingReceipts.docs[0].id;
             }
         } catch (error) {
-            console.error("Error checking for existing receipt:", error);
+            console.error('Error checking for existing receipt:', error);
         }
     }
 
-    // If existing receipt found, ask user if they want to add payment to it
+    // If existing receipt found and user chooses to add payment to it,
+    // delegate to the transaction‑based function (already fixed in Step 4)
     if (existingReceipt && existingReceiptId) {
-        const shouldAddToExisting = confirm(`A receipt already exists for invoice reference: ${invoiceReference}\n\nDo you want to add this payment to the existing receipt (${existingReceipt.receiptId}) instead of creating a new one?`);
-        
+        const shouldAddToExisting = confirm(
+            `A receipt already exists for invoice reference: ${invoiceReference}\n\n` +
+            `Do you want to add this payment to the existing receipt (${existingReceipt.receiptId}) instead of creating a new one?`
+        );
         if (shouldAddToExisting) {
-            // Add payment to existing receipt
-            await addPaymentToExistingReceiptFromForm(
+            // Use the transaction‑safe version (already updated)
+            const success = await addPaymentToExistingReceiptFromForm(
                 existingReceiptId,
                 existingReceipt.receiptId,
                 existingReceipt.receivedFrom,
                 existingReceipt.exchangeRate || exchangeRate,
                 {
-                    amount: amountReceived,
+                    amount: roundedAmount,
                     currency: currency,
                     amountUSD: amountReceivedUSD,
                     amountKSH: amountReceivedKSH,
@@ -2321,35 +2377,36 @@ async function saveReceipt() {
                     rtgsTtNo,
                     bankUsed,
                     description: `Additional payment for: ${beingPaidFor}`,
-                    paymentMethod: bankUsed !== 'Cash' ? `Bank: ${bankUsed}` : (chequeNo ? `Cheque: ${chequeNo}` : (rtgsTtNo ? `RTGS/TT: ${rtgsTtNo}` : "Cash"))
+                    paymentMethod: bankUsed !== 'Cash'
+                        ? `Bank: ${bankUsed}`
+                        : (chequeNo ? `Cheque: ${chequeNo}` : (rtgsTtNo ? `RTGS/TT: ${rtgsTtNo}` : 'Cash'))
                 }
             );
-            
-            // Show payment history for the receipt
-            viewReceiptPaymentDetails(existingReceiptId, existingReceipt.receiptId, existingReceipt.receivedFrom);
-            
-            // Reset form
-            document.getElementById('receipt-form').reset();
-            document.getElementById('amountWords').value = '';
-            document.getElementById('invoice-details').classList.add('hidden');
-            const bankSelect = document.getElementById('bankUsed');
-            if (bankSelect) bankSelect.value = "";
-            
-            resetSaveButton();
-            fetchReceipts(); // Refresh history
+            if (success) {
+                viewReceiptPaymentDetails(existingReceiptId, existingReceipt.receiptId, existingReceipt.receivedFrom);
+                // Reset form and UI
+                document.getElementById('receipt-form').reset();
+                document.getElementById('amountWords').value = '';
+                document.getElementById('invoice-details').classList.add('hidden');
+                const bankSelect = document.getElementById('bankUsed');
+                if (bankSelect) bankSelect.value = '';
+                resetSaveButton();
+                fetchReceipts();
+            }
             return;
         }
+        // If user declines, we continue to create a new receipt (below)
     }
 
-    // If no existing receipt or user chose to create new, create new receipt
+    // --- 4. Build receipt data (all amounts rounded) ---
     const receiptData = {
         receiptId,
         receiptType,
         receivedFrom,
         currency,
-        amountReceived,
-        amountReceivedUSD, // FIXED: Store USD amount
-        amountReceivedKSH, // FIXED: Store KSH amount
+        amountReceived: roundedAmount,
+        amountReceivedUSD,
+        amountReceivedKSH,
         amountWords,
         beingPaidFor,
         paymentDetails: {
@@ -2358,82 +2415,127 @@ async function saveReceipt() {
             bankUsed
         },
         balanceDetails: {
-            balanceRemaining,
+            balanceRemaining: roundedBalanceRemaining,
             balanceDueDate,
-            balanceRemainingUSD: balanceRemaining,
-            balanceRemainingKSH: balanceRemaining * exchangeRate
+            balanceRemainingUSD: roundedBalanceRemaining,
+            balanceRemainingKSH: roundCurrency(roundedBalanceRemaining * exchangeRate)
         },
         invoiceReference,
         exchangeRate,
         receiptDate,
         createdBy: currentUser.email,
         createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-        revoked: false // Add revoked flag
+        revoked: false
     };
 
+    // Payment record (first payment)
+    const paymentData = {
+        receiptId: null, // will be set after receipt doc is created
+        receiptNumber: receiptId,
+        paymentNumber: 1,
+        paymentDate: receiptDate,
+        amount: roundedAmount,
+        currency: currency,
+        amountUSD: amountReceivedUSD,
+        amountKSH: amountReceivedKSH,
+        exchangeRate: exchangeRate,
+        description: 'Initial Payment',
+        paymentMethod: bankUsed !== 'Cash'
+            ? `Bank: ${bankUsed}`
+            : (chequeNo ? `Cheque: ${chequeNo}` : (rtgsTtNo ? `RTGS/TT: ${rtgsTtNo}` : 'Cash')),
+        createdBy: currentUser.email,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    };
+
+    // --- 5. Use a batch for atomic writes ---
+    const batch = db.batch();
+
+    // Create receipt document
+    const receiptRef = db.collection('receipts').doc();
+    batch.set(receiptRef, receiptData);
+
+    // Create payment document (link it to the receipt)
+    const paymentRef = db.collection('receipt_payments').doc();
+    paymentData.receiptId = receiptRef.id; // now we have the receipt ID
+    batch.set(paymentRef, paymentData);
+
+    // --- 6. (Optional) Update parent invoice balance if invoice reference exists ---
+    if (invoiceReference) {
+        // Determine which collection the invoice belongs to
+        const possibleCollections = ['invoices', 'top_up_invoices', 'balance_invoices'];
+        let invoiceDocRef = null;
+        for (const coll of possibleCollections) {
+            const snap = await db.collection(coll)
+                .where('invoiceId', '==', invoiceReference)
+                .limit(1)
+                .get();
+            if (!snap.empty) {
+                invoiceDocRef = snap.docs[0].ref;
+                break;
+            }
+        }
+
+        if (invoiceDocRef) {
+            // We need to read the current invoice data to update correctly.
+            // Since we are inside a batch, we must do the read outside the batch.
+            // However, we can read it now (outside the batch) and then update in the batch.
+            const invSnap = await invoiceDocRef.get();
+            if (invSnap.exists) {
+                const invData = invSnap.data();
+                const currentPaid = invData.pricing?.totalPaid || 0;
+                const currentRemaining = invData.pricing?.remainingBalance || 0;
+                const newTotalPaid = roundCurrency(currentPaid + amountReceivedUSD);
+                const newRemaining = roundCurrency(currentRemaining - amountReceivedUSD);
+                batch.update(invoiceDocRef, {
+                    'pricing.totalPaid': newTotalPaid,
+                    'pricing.remainingBalance': Math.max(0, newRemaining)
+                });
+            }
+        }
+    }
+
+    // --- 7. Commit the batch ---
     try {
-        const docRef = await db.collection("receipts").add(receiptData);
-        
-        // Also save as first payment in receipt_payments collection
-        const paymentData = {
-            receiptId: docRef.id,
-            receiptNumber: receiptId,
-            paymentNumber: 1,
-            paymentDate: receiptDate,
-            amount: amountReceived,
-            currency: currency,
-            amountUSD: amountReceivedUSD,
-            amountKSH: amountReceivedKSH,
-            exchangeRate: exchangeRate,
-            description: "Initial Payment",
-            paymentMethod: bankUsed !== 'Cash' ? `Bank: ${bankUsed}` : (chequeNo ? `Cheque: ${chequeNo}` : (rtgsTtNo ? `RTGS/TT: ${rtgsTtNo}` : "Cash")),
-            createdBy: currentUser.email,
-            createdAt: firebase.firestore.FieldValue.serverTimestamp()
-        };
-        
-        await db.collection("receipt_payments").add(paymentData);
-        
+        await batch.commit();
+
+        // Success!
+        resetSaveButton();
         showSuccessToast(`Receipt ${receiptId} saved successfully!`);
-        
-        receiptData.firestoreId = docRef.id;
+
+        // Attach firestoreId and payment history for PDF generation
+        receiptData.firestoreId = receiptRef.id;
         receiptData.totalPaidUSD = amountReceivedUSD;
         receiptData.totalPaidKSH = amountReceivedKSH;
         receiptData.paymentCount = 1;
         receiptData.paymentHistory = [{
             paymentDate: receiptDate,
-            amount: amountReceived,
+            amount: roundedAmount,
             currency: currency,
             amountUSD: amountReceivedUSD,
             amountKSH: amountReceivedKSH,
-            paymentMethod: bankUsed !== 'Cash' ? `Bank: ${bankUsed}` : (chequeNo ? `Cheque: ${chequeNo}` : (rtgsTtNo ? `RTGS/TT: ${rtgsTtNo}` : "Cash")),
-            description: "Initial Payment"
+            paymentMethod: paymentData.paymentMethod,
+            description: 'Initial Payment'
         }];
-        
-        // Reset button
-        resetSaveButton();
-        
+
         // Generate PDF
         generateReceiptPDF(receiptData);
-        
-        // Reset form
+
+        // Reset form and UI
         document.getElementById('receipt-form').reset();
         document.getElementById('amountWords').value = '';
         document.getElementById('invoice-details').classList.add('hidden');
-        
-        // Reset bank dropdown to default
         const bankSelect = document.getElementById('bankUsed');
-        if (bankSelect) {
-            bankSelect.value = "";
-        }
-        
-        fetchReceipts(); // Refresh history
+        if (bankSelect) bankSelect.value = '';
+
+        // Refresh receipt list
+        fetchReceipts();
+
     } catch (error) {
-        console.error("Error saving receipt:", error);
-        showErrorToast("Failed to save receipt: " + error.message);
+        console.error('Error saving receipt:', error);
         resetSaveButton();
+        showErrorToast('Failed to save receipt: ' + error.message);
     }
 }
-
 // Helper function to reset save button state
 function resetSaveButton() {
     const saveButton = document.getElementById('save-receipt-btn');
@@ -2448,63 +2550,117 @@ function resetSaveButton() {
 /**
  * Helper function to add payment to existing receipt from receipt form
  */
+/**
+ * Adds a payment to an existing receipt using a Firestore transaction
+ * to prevent race conditions, and a batch for atomicity across collections.
+ * @param {string} receiptDocId - Firestore ID of the receipt.
+ * @param {string} receiptNumber - Receipt number.
+ * @param {string} clientName - Client name (for logging).
+ * @param {number} exchangeRate - Exchange rate for this payment.
+ * @param {Object} paymentDetails - Contains amount, currency, etc.
+ */
 async function addPaymentToExistingReceiptFromForm(receiptDocId, receiptNumber, clientName, exchangeRate, paymentDetails) {
     const { amount, currency, amountUSD, amountKSH, chequeNo, rtgsTtNo, bankUsed, description, paymentMethod } = paymentDetails;
-    
-    // Get next payment number
-    const paymentsSnapshot = await db.collection("receipt_payments")
-        .where("receiptId", "==", receiptDocId)
-        .get();
-    
-    const nextPaymentNumber = paymentsSnapshot.size + 1;
-    
-    // Save payment record
-    const paymentData = {
-        receiptId: receiptDocId,
-        receiptNumber: receiptNumber,
-        paymentNumber: nextPaymentNumber,
-        paymentDate: new Date().toLocaleDateString('en-US'),
-        amount: amount,
-        currency: currency,
-        amountUSD: amountUSD,
-        amountKSH: amountKSH,
-        exchangeRate: exchangeRate,
-        description: description,
-        paymentMethod: paymentMethod,
-        createdBy: currentUser.email,
-        createdAt: firebase.firestore.FieldValue.serverTimestamp()
-    };
-    
+
+    // Round all amounts
+    const roundedAmountUSD = roundCurrency(amountUSD);
+    const roundedAmountKSH = roundCurrency(amountKSH);
+    const roundedAmount = roundCurrency(amount);
+
+    // Use a Firestore transaction to read the receipt and update balances
     try {
-        await db.collection("receipt_payments").add(paymentData);
-        
-        // Update receipt balance
-        const receiptDoc = await db.collection("receipts").doc(receiptDocId).get();
-        const receiptData = receiptDoc.data();
-        
-        const currentBalanceUSD = receiptData.balanceDetails?.balanceRemainingUSD || 0;
-        const newBalanceUSD = Math.max(0, currentBalanceUSD - amountUSD);
-        const newBalanceKSH = newBalanceUSD * exchangeRate;
-        
-        await db.collection("receipts").doc(receiptDocId).update({
-            "balanceDetails.balanceRemaining": newBalanceUSD,
-            "balanceDetails.balanceRemainingUSD": newBalanceUSD,
-            "balanceDetails.balanceRemainingKSH": newBalanceKSH,
-            "amountReceived": (receiptData.amountReceived || 0) + amount,
-            "amountReceivedUSD": (receiptData.amountReceivedUSD || 0) + amountUSD,
-            "amountReceivedKSH": (receiptData.amountReceivedKSH || 0) + amountKSH
+        await db.runTransaction(async (transaction) => {
+            // 1. Read the receipt document
+            const receiptRef = db.collection('receipts').doc(receiptDocId);
+            const receiptSnap = await transaction.get(receiptRef);
+            if (!receiptSnap.exists) {
+                throw new Error('Receipt not found');
+            }
+            const receiptData = receiptSnap.data();
+
+            // 2. Calculate new balances
+            const currentBalanceUSD = receiptData.balanceDetails?.balanceRemainingUSD || 0;
+            const currentPaidUSD = receiptData.amountReceivedUSD || 0;
+            const newBalanceUSD = Math.max(0, roundCurrency(currentBalanceUSD - roundedAmountUSD));
+            const newPaidUSD = roundCurrency(currentPaidUSD + roundedAmountUSD);
+            const newBalanceKSH = roundCurrency(newBalanceUSD * exchangeRate);
+            const newPaidKSH = roundCurrency((receiptData.amountReceivedKSH || 0) + roundedAmountKSH);
+
+            // 3. Get next payment number (count existing payments)
+            const paymentsSnapshot = await transaction.get(
+                db.collection('receipt_payments')
+                    .where('receiptId', '==', receiptDocId)
+            );
+            const nextPaymentNumber = paymentsSnapshot.size + 1;
+
+            // 4. Prepare the new payment document
+            const paymentData = {
+                receiptId: receiptDocId,
+                receiptNumber: receiptNumber,
+                paymentNumber: nextPaymentNumber,
+                paymentDate: new Date().toLocaleDateString('en-US'),
+                amount: roundedAmount,
+                currency: currency,
+                amountUSD: roundedAmountUSD,
+                amountKSH: roundedAmountKSH,
+                exchangeRate: exchangeRate,
+                description: description,
+                paymentMethod: paymentMethod,
+                createdBy: currentUser.email,
+                createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            };
+            const paymentRef = db.collection('receipt_payments').doc();
+            transaction.set(paymentRef, paymentData);
+
+            // 5. Update receipt fields
+            transaction.update(receiptRef, {
+                'balanceDetails.balanceRemaining': newBalanceUSD,
+                'balanceDetails.balanceRemainingUSD': newBalanceUSD,
+                'balanceDetails.balanceRemainingKSH': newBalanceKSH,
+                'amountReceived': roundCurrency((receiptData.amountReceived || 0) + roundedAmount),
+                'amountReceivedUSD': newPaidUSD,
+                'amountReceivedKSH': newPaidKSH
+            });
+
+            // 6. Optionally update parent invoice if this receipt is linked to one
+            if (receiptData.invoiceReference) {
+                const invoiceId = receiptData.invoiceReference;
+                // Determine the correct collection
+                const parentColl = getInvoiceCollectionName({ invoiceId }); // simplistic, but we can try to find
+                // Actually, we should try to find the invoice document
+                const possibleCollections = ['invoices', 'top_up_invoices', 'balance_invoices'];
+                let foundInvoiceRef = null;
+                for (const coll of possibleCollections) {
+                    const snap = await transaction.get(
+                        db.collection(coll).where('invoiceId', '==', invoiceId).limit(1)
+                    );
+                    if (!snap.empty) {
+                        foundInvoiceRef = snap.docs[0].ref;
+                        break;
+                    }
+                }
+                if (foundInvoiceRef) {
+                    // Update parent invoice's paid amount and remaining balance
+                    const invSnap = await transaction.get(foundInvoiceRef);
+                    const invData = invSnap.data();
+                    const newTotalPaid = roundCurrency((invData.pricing?.totalPaid || 0) + roundedAmountUSD);
+                    const newRemaining = roundCurrency((invData.pricing?.remainingBalance || 0) - roundedAmountUSD);
+                    transaction.update(foundInvoiceRef, {
+                        'pricing.totalPaid': newTotalPaid,
+                        'pricing.remainingBalance': Math.max(0, newRemaining)
+                    });
+                }
+            }
         });
-        
-        showSuccessToast(`Additional payment of ${currency} ${amount.toFixed(2)} added to receipt ${receiptNumber} successfully!`);
-        
+
+        showSuccessToast(`Additional payment of ${currency} ${roundedAmount.toFixed(2)} added to receipt ${receiptNumber} successfully!`);
         return true;
     } catch (error) {
-        console.error("Error saving additional payment:", error);
-        showErrorToast("Failed to save payment: " + error.message);
+        console.error('Error adding payment to receipt:', error);
+        showErrorToast('Failed to add payment: ' + error.message);
         return false;
     }
 }
-
 /**
  * Fetches and displays recent receipts with payment history button
  */
@@ -5919,13 +6075,20 @@ function markInvoiceDepositPaid(invoiceData) {
 /**
  * Saves deposit payment and creates receipt
  */
+/**
+ * Saves a deposit payment and creates a receipt, using a Firestore transaction
+ * to update invoice and receipt balances atomically.
+ * @param {string} invoiceDocId - Firestore ID of the invoice.
+ * @param {number} depositAmountUSD - Deposit amount in USD.
+ * @param {number} exchangeRate - Exchange rate.
+ */
 async function saveDepositPayment(invoiceDocId, depositAmountUSD, exchangeRate) {
     const form = document.getElementById('deposit-paid-form');
     if (!form.checkValidity()) {
         form.reportValidity();
         return;
     }
-    
+
     // Show loading state
     const saveButton = document.getElementById('save-deposit-btn');
     const spinner = document.getElementById('deposit-spinner');
@@ -5934,123 +6097,128 @@ async function saveDepositPayment(invoiceDocId, depositAmountUSD, exchangeRate) 
         spinner.classList.remove('hidden');
         saveButton.innerHTML = `<span>Saving...</span>${spinner.outerHTML}`;
     }
-    
-    const depositDate = document.getElementById('depositDate').value;
-    const depositCurrency = document.getElementById('depositCurrency').value;
-    const depositAmount = parseFloat(document.getElementById('depositAmount').value);
-    const depositExchangeRate = parseFloat(document.getElementById('depositExchangeRate').value);
-    const depositBankUsed = document.getElementById('depositBankUsed').value;
-    const depositDescription = document.getElementById('depositDescription').value;
-    
-    if (isNaN(depositAmount) || depositAmount <= 0) {
-        showErrorToast("Please enter a valid deposit amount.");
-        resetDepositSaveButton(saveButton, spinner);
-        return;
-    }
-    
-    // Get invoice data
-    const invoiceDoc = await db.collection("invoices").doc(invoiceDocId).get();
-    if (!invoiceDoc.exists) {
-        showErrorToast("Invoice not found!");
-        resetDepositSaveButton(saveButton, spinner);
-        return;
-    }
-    
-    const invoiceData = invoiceDoc.data();
-    
-    // Calculate amounts in both currencies
-    let amountUSD = depositAmount;
-    let amountKSH = depositAmount;
-    
-    if (depositCurrency === 'KSH') {
-        amountUSD = depositAmount / depositExchangeRate;
-        amountKSH = depositAmount;
-    } else if (depositCurrency === 'USD') {
-        amountUSD = depositAmount;
-        amountKSH = depositAmount * depositExchangeRate;
-    }
-    
-    // Generate receipt ID
-    const receiptId = generateReceiptId("Deposit", invoiceData.clientName);
-    const receiptDate = depositDate || new Date().toLocaleDateString('en-US');
-    
-    // Create receipt data
-    const receiptData = {
-        receiptId,
-        receiptType: "Invoice Deposit",
-        receivedFrom: invoiceData.clientName,
-        currency: depositCurrency,
-        amountReceived: depositAmount,
-        amountReceivedUSD: amountUSD,
-        amountReceivedKSH: amountKSH,
-        amountWords: numberToWords(depositAmount).replace('only', depositCurrency === 'USD' ? 'US Dollars only.' : 'Kenya Shillings only.'),
-        beingPaidFor: `${invoiceData.carDetails.make} ${invoiceData.carDetails.model} ${invoiceData.carDetails.year} Deposit`,
-        paymentDetails: {
-            chequeNo: "",
-            rtgsTtNo: "",
-            bankUsed: depositBankUsed
-        },
-        balanceDetails: {
-            balanceRemaining: invoiceData.pricing.balanceUSD,
-            balanceDueDate: invoiceData.dueDate,
-            balanceRemainingUSD: invoiceData.pricing.balanceUSD,
-            balanceRemainingKSH: invoiceData.pricing.balanceUSD * depositExchangeRate
-        },
-        invoiceReference: invoiceData.invoiceId,
-        exchangeRate: depositExchangeRate,
-        receiptDate,
-        createdBy: currentUser.email,
-        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-        revoked: false // Add revoked flag
-    };
-    
+
     try {
-        // Save receipt
-        const receiptRef = await db.collection("receipts").add(receiptData);
-        
-        // Save payment record
-        const paymentData = {
-            receiptId: receiptRef.id,
-            receiptNumber: receiptId,
-            paymentNumber: 1,
-            paymentDate: receiptDate,
-            amount: depositAmount,
-            currency: depositCurrency,
-            amountUSD: amountUSD,
-            amountKSH: amountKSH,
-            exchangeRate: depositExchangeRate,
-            description: depositDescription,
-            paymentMethod: depositBankUsed !== 'Cash' ? `Bank: ${depositBankUsed}` : "Cash",
-            createdBy: currentUser.email,
-            createdAt: firebase.firestore.FieldValue.serverTimestamp()
-        };
-        
-        await db.collection("receipt_payments").add(paymentData);
-        
-        // Update invoice to mark deposit as paid
-        await db.collection("invoices").doc(invoiceDocId).update({
-            "pricing.depositPaid": true,
-            "pricing.depositPaidDate": receiptDate,
-            "pricing.depositPaidAmount": depositAmount,
-            "pricing.depositPaidCurrency": depositCurrency,
-            "pricing.remainingBalance": invoiceData.pricing.balanceUSD
-        });
-        
-        const modal = document.getElementById('deposit-paid-modal');
-        if (modal) {
-            modal.remove();
+        const depositDate = document.getElementById('depositDate').value;
+        const depositCurrency = document.getElementById('depositCurrency').value;
+        const depositAmount = parseFloat(document.getElementById('depositAmount').value);
+        const depositExchangeRate = parseFloat(document.getElementById('depositExchangeRate').value);
+        const depositBankUsed = document.getElementById('depositBankUsed').value;
+        const depositDescription = document.getElementById('depositDescription').value;
+
+        // Round amounts
+        const roundedDeposit = roundCurrency(depositAmount);
+        if (roundedDeposit <= 0) {
+            showErrorToast('Please enter a valid deposit amount.');
+            resetDepositSaveButton(saveButton, spinner);
+            return;
         }
-        
+
+        // Determine amounts in both currencies
+        let amountUSD, amountKSH;
+        if (depositCurrency === 'KSH') {
+            amountUSD = roundCurrency(roundedDeposit / depositExchangeRate);
+            amountKSH = roundedDeposit;
+        } else {
+            amountUSD = roundedDeposit;
+            amountKSH = roundCurrency(roundedDeposit * depositExchangeRate);
+        }
+
+        // Use a transaction to update invoice and create receipt/payment
+        await db.runTransaction(async (transaction) => {
+            // Get the invoice document
+            const invoiceRef = db.collection('invoices').doc(invoiceDocId);
+            const invoiceSnap = await transaction.get(invoiceRef);
+            if (!invoiceSnap.exists) {
+                throw new Error('Invoice not found');
+            }
+            const invoiceData = invoiceSnap.data();
+
+            // Validate that deposit is not already paid
+            if (invoiceData.pricing?.depositPaid) {
+                throw new Error('Deposit already paid for this invoice.');
+            }
+
+            // Generate receipt ID
+            const receiptId = generateReceiptId('Deposit', invoiceData.clientName);
+            const receiptDate = depositDate || new Date().toLocaleDateString('en-US');
+
+            // Prepare receipt data
+            const receiptData = {
+                receiptId,
+                receiptType: 'Invoice Deposit',
+                receivedFrom: invoiceData.clientName,
+                currency: depositCurrency,
+                amountReceived: roundedDeposit,
+                amountReceivedUSD: amountUSD,
+                amountReceivedKSH: amountKSH,
+                amountWords: numberToWords(roundedDeposit).replace('only', depositCurrency === 'USD' ? 'US Dollars only.' : 'Kenya Shillings only.'),
+                beingPaidFor: `${invoiceData.carDetails.make} ${invoiceData.carDetails.model} ${invoiceData.carDetails.year} Deposit`,
+                paymentDetails: {
+                    chequeNo: '',
+                    rtgsTtNo: '',
+                    bankUsed: depositBankUsed
+                },
+                balanceDetails: {
+                    balanceRemaining: invoiceData.pricing.balanceUSD,
+                    balanceDueDate: invoiceData.dueDate,
+                    balanceRemainingUSD: invoiceData.pricing.balanceUSD,
+                    balanceRemainingKSH: roundCurrency(invoiceData.pricing.balanceUSD * depositExchangeRate)
+                },
+                invoiceReference: invoiceData.invoiceId,
+                exchangeRate: depositExchangeRate,
+                receiptDate,
+                createdBy: currentUser.email,
+                createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                revoked: false
+            };
+
+            // Create receipt document
+            const receiptRef = db.collection('receipts').doc();
+            transaction.set(receiptRef, receiptData);
+
+            // Create payment record
+            const paymentData = {
+                receiptId: receiptRef.id,
+                receiptNumber: receiptId,
+                paymentNumber: 1,
+                paymentDate: receiptDate,
+                amount: roundedDeposit,
+                currency: depositCurrency,
+                amountUSD: amountUSD,
+                amountKSH: amountKSH,
+                exchangeRate: depositExchangeRate,
+                description: depositDescription,
+                paymentMethod: depositBankUsed !== 'Cash' ? `Bank: ${depositBankUsed}` : 'Cash',
+                createdBy: currentUser.email,
+                createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            };
+            const paymentRef = db.collection('receipt_payments').doc();
+            transaction.set(paymentRef, paymentData);
+
+            // Update invoice: mark deposit as paid, update remaining balance
+            const newBalance = roundCurrency(invoiceData.pricing.balanceUSD - amountUSD);
+            transaction.update(invoiceRef, {
+                'pricing.depositPaid': true,
+                'pricing.depositPaidDate': receiptDate,
+                'pricing.depositPaidAmount': roundedDeposit,
+                'pricing.depositPaidCurrency': depositCurrency,
+                'pricing.remainingBalance': Math.max(0, newBalance),
+                'pricing.totalPaid': roundCurrency((invoiceData.pricing.totalPaid || 0) + amountUSD)
+            });
+        });
+
+        // Transaction committed
         resetDepositSaveButton(saveButton, spinner);
-        showSuccessToast(`Deposit payment of ${depositCurrency} ${depositAmount.toFixed(2)} saved successfully! Receipt ${receiptId} created.`);
-        
-        // Navigate to receipt form with the invoice reference
+        showSuccessToast(`Deposit payment of ${depositCurrency} ${roundedDeposit.toFixed(2)} saved successfully!`);
+
+        // Navigate to receipt form with the invoice reference for easy PDF generation
         renderReceiptForm(invoiceData.invoiceId);
-        
+
     } catch (error) {
-        console.error("Error saving deposit payment:", error);
+        console.error('Error saving deposit payment:', error);
         resetDepositSaveButton(saveButton, spinner);
-        showErrorToast("Failed to save deposit payment: " + error.message);
+        showErrorToast('Failed to save deposit payment: ' + error.message);
     }
 }
 
@@ -6563,45 +6731,100 @@ function resetPaymentSaveButton(saveButton, spinner) {
 /**
  * Revokes a receipt and deletes it from Firestore
  */
+/**
+ * Revokes a receipt, restores the payment amount to the parent invoice's
+ * remaining balance, and deletes associated payment records atomically.
+ * @param {Object} receiptData - The receipt data object.
+ */
 async function revokeReceipt(receiptData) {
-    if (!confirm(`Are you sure you want to REVOKE receipt ${receiptData.receiptId}?\n\nThis will mark it as invalid and delete it from the system.`)) {
+    if (!confirm(`Are you sure you want to REVOKE receipt ${receiptData.receiptId}?\n\nThis will mark it as invalid, restore the balance to the parent invoice, and delete associated payments.`)) {
         return;
     }
-    
+
     const loadingOverlay = showLoadingOverlay("Revoking receipt...");
-    
+
     try {
-        // Mark as revoked
-        await db.collection("receipts").doc(receiptData.firestoreId).update({
+        // 1. Fetch the parent invoice (if any)
+        const invoiceRef = receiptData.invoiceReference;
+        const sourceType = receiptData.sourceType || 'regular'; // e.g., 'regular', 'topup', 'balance'
+        let parentInvoiceDoc = null;
+        let parentCollection = 'invoices';
+
+        if (invoiceRef) {
+            // Try to find the parent invoice in the appropriate collection
+            const collectionsToTry = ['invoices', 'top_up_invoices', 'balance_invoices'];
+            for (const coll of collectionsToTry) {
+                const snap = await db.collection(coll)
+                    .where('invoiceId', '==', invoiceRef)
+                    .limit(1)
+                    .get();
+                if (!snap.empty) {
+                    parentInvoiceDoc = snap.docs[0];
+                    parentCollection = coll;
+                    break;
+                }
+            }
+        }
+
+        // 2. Use a Firestore batch for atomic writes
+        const batch = db.batch();
+
+        // Mark receipt as revoked
+        const receiptRef = db.collection('receipts').doc(receiptData.firestoreId);
+        batch.update(receiptRef, {
             revoked: true,
             revokedAt: firebase.firestore.FieldValue.serverTimestamp(),
             revokedBy: currentUser.email
         });
-        
-        // Also delete associated payments
-        const paymentsSnapshot = await db.collection("receipt_payments")
-            .where("receiptId", "==", receiptData.firestoreId)
+
+        // Delete associated receipt_payments
+        const paymentsSnapshot = await db.collection('receipt_payments')
+            .where('receiptId', '==', receiptData.firestoreId)
             .get();
-        
-        const deletePromises = [];
+
         paymentsSnapshot.forEach(doc => {
-            deletePromises.push(db.collection("receipt_payments").doc(doc.id).delete());
+            batch.delete(doc.ref);
         });
-        
-        await Promise.all(deletePromises);
-        
+
+        // 3. If parent invoice exists, restore the payment amount to its balance
+        if (parentInvoiceDoc) {
+            const parentData = parentInvoiceDoc.data();
+            const totalPaidBefore = parentData.pricing?.totalPaid || 0;
+            const remainingBefore = parentData.pricing?.remainingBalance || 0;
+            const revokedAmountUSD = receiptData.amountReceivedUSD || 0; // store USD equivalent in receipt
+
+            // Revert the paid amount and remaining balance
+            const newTotalPaid = Math.max(0, roundCurrency(totalPaidBefore - revokedAmountUSD));
+            const newRemaining = roundCurrency(remainingBefore + revokedAmountUSD);
+
+            const parentRef = db.collection(parentCollection).doc(parentInvoiceDoc.id);
+            batch.update(parentRef, {
+                'pricing.totalPaid': newTotalPaid,
+                'pricing.remainingBalance': newRemaining,
+                'pricing.revokedAmount': firebase.firestore.FieldValue.increment(revokedAmountUSD)
+            });
+
+            // If the parent is an auction invoice and we had a top-up flag, clear it if needed
+            if (parentCollection === 'invoices' && parentData.docType === 'Auction Invoice') {
+                // Optionally, you might want to unset topUpCreated if all payments are revoked
+                // For simplicity, we keep the flag but the balance is restored.
+            }
+        }
+
+        // 4. Commit the batch
+        await batch.commit();
+
         hideLoadingOverlay();
-        showSuccessToast(`Receipt ${receiptData.receiptId} has been revoked and associated payments deleted.`);
+        showSuccessToast(`Receipt ${receiptData.receiptId} has been revoked and balances restored.`);
         
         // Refresh the view
         if (document.getElementById('recent-receipts')) {
             fetchReceipts();
         }
-        
     } catch (error) {
-        console.error("Error revoking receipt:", error);
+        console.error('Error revoking receipt:', error);
         hideLoadingOverlay();
-        showErrorToast("Failed to revoke receipt: " + error.message);
+        showErrorToast('Failed to revoke receipt: ' + error.message);
     }
 }
 
@@ -10998,142 +11221,157 @@ function updateBalanceCalculationsCorrected() {
 /**
  * Saves balance invoice (corrected)
  */
+/**
+ * Saves a balance invoice using a Firestore transaction and batch
+ * to ensure atomicity and prevent race conditions.
+ * @param {boolean} onlySave - If true, save without generating PDF.
+ */
 async function saveBalanceInvoiceCorrected(onlySave = false) {
     const form = document.getElementById('balance-form-corrected');
     if (!form.checkValidity()) {
         form.reportValidity();
         return;
     }
-    
+
     const sourceInvoice = window.currentBalanceSourceInvoiceCorrected;
     if (!sourceInvoice) {
-        showErrorToast("Source invoice data not found");
+        showErrorToast('Source invoice data not found');
         return;
     }
-    
+
     // Show loading state
     const saveButton = onlySave ? document.getElementById('save-balance-corrected-only-btn') : document.getElementById('save-balance-corrected-btn');
     const spinner = onlySave ? document.getElementById('balance-corrected-only-spinner') : document.getElementById('balance-corrected-spinner');
-    
     if (saveButton && spinner) {
         saveButton.disabled = true;
         spinner.classList.remove('hidden');
         const buttonText = onlySave ? 'Saving...' : 'Generating & Saving...';
         saveButton.innerHTML = `<span>${buttonText}</span>${spinner.outerHTML}`;
     }
-    
+
     try {
+        // Gather form data
         const paymentDue = parseFloat(document.getElementById('balancePaymentDueCorrected').value) || 0;
         const exchangeRate = parseFloat(document.getElementById('balanceExchangeRateCorrected').value) || 130;
         const dueDate = document.getElementById('balanceDueDateCorrected').value;
-        const paymentReference = document.getElementById('balancePaymentRefCorrected').value;
-        
-        // Collect bank details
-        // AFTER
-        // Collect bank details
-        const bankSelect = document.getElementById('balanceBankSelectCorrected');
-        const selectedBank = parseBankSelectValue(bankSelect);
-        
-        if (!selectedBank) {
-            showErrorToast("Please select a bank account.");
+        const paymentReference = sanitizeString(document.getElementById('balancePaymentRefCorrected').value);
+
+        // Validate and round amount
+        const roundedPayment = roundCurrency(paymentDue);
+        if (roundedPayment <= 0) {
+            showErrorToast('Please enter a valid payment amount.');
             resetBalanceCorrectedSaveButton(saveButton, spinner, onlySave);
             return;
         }
-        
-        const totalPrice = sourceInvoice.totalPrice || 0;
-        const totalPaidBefore = sourceInvoice.totalPaid || 0;
-        const remainingBalanceBefore = sourceInvoice.remainingBalance || 0;
-        const newTotalPaid = totalPaidBefore + paymentDue;
-        const remainingAfter = remainingBalanceBefore - paymentDue;
-        
-        // Generate invoice number
-        const carMakeModel = sourceInvoice.carDetails?.make && sourceInvoice.carDetails?.model 
-            ? `${sourceInvoice.carDetails.make} ${sourceInvoice.carDetails.model}` 
-            : sourceInvoice.vehicleDetails?.makeModel || 'Unknown';
-        
-        const invoiceId = await generateBalanceInvoiceNumber(sourceInvoice.clientName, carMakeModel, sourceInvoice.invoiceId);
-        
-        // Prepare balance invoice data
-        const balanceData = {
-            docType: 'Balance Invoice',
-            invoiceId,
-            sourceInvoiceId: sourceInvoice.invoiceId,
-            sourceInvoiceFirestoreId: sourceInvoice.firestoreId,
-            sourceType: sourceInvoice.sourceType || 'regular',
-            clientName: sourceInvoice.clientName,
-            clientPhone: sourceInvoice.clientPhone || '',
-            issueDate: getCurrentDateForDocument(),
-            dueDate: dueDate || null,
-            exchangeRate,
-            carDetails: sourceInvoice.carDetails || sourceInvoice.vehicleDetails || {
-                make: '',
-                model: '',
-                year: '',
-                vin: '',
-                color: ''
-            },
-            pricing: {
-                totalUSD: totalPrice,
-                totalPaidBefore: totalPaidBefore,
-                currentPaymentDue: paymentDue,
-                newTotalPaid: newTotalPaid,
-                remainingBalance: remainingAfter,
-                paymentPercentage: (paymentDue / totalPrice * 100),
-                totalPaidPercentage: (newTotalPaid / totalPrice * 100),
-                remainingBalanceBefore: remainingBalanceBefore
-            },
-            paymentReference: paymentReference,
-            bankDetails: selectedBank,
-            createdBy: currentUser.email,
-            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-            revoked: false
-        };
-        
-       // Save to Firestore
-        const docRef = await db.collection("balance_invoices").add(balanceData);
-        
-        // FIX: Update the source invoice's balance (Supports both Top-Up and previous Balance chunks)
-     // Update running balance cascade — walk back to anchor (Auction Invoice)
-        if (sourceInvoice.sourceType === 'topup' && sourceInvoice.firestoreId) {
-            const topUpDoc = await db.collection("top_up_invoices").doc(sourceInvoice.firestoreId).get();
-            if (topUpDoc.exists) {
-                const topUpData = topUpDoc.data();
-                const newRemaining = Math.max(0, (topUpData.pricing?.remainingBalance || 0) - paymentDue);
-                const newTopUpTotalPaid = (topUpData.pricing?.totalPaid || 0) + paymentDue;
 
-                await db.collection("top_up_invoices").doc(sourceInvoice.firestoreId).update({
-                    "pricing.remainingBalance": newRemaining,
-                    "pricing.totalPaid": newTopUpTotalPaid,
-                    "pricing.totalPaidPercentage": (newTopUpTotalPaid / (topUpData.pricing?.totalUSD || 1)) * 100,
-                    runningBalance: newRemaining,            // ← NEW
-                    lastStageInvoiceId: invoiceId            // ← NEW
-                });
-
-                // Also update the anchor Auction Invoice document
-                if (topUpData.sourceInvoiceFirestoreId) {
-                    await db.collection("invoices").doc(topUpData.sourceInvoiceFirestoreId).update({
-                        runningBalance: newRemaining,        // ← NEW
-                        lastStageInvoiceId: invoiceId        // ← NEW
-                    });
-                }
-            }
+        // Collect bank details
+        const bankSelect = document.getElementById('balanceBankSelectCorrected');
+        const selectedBank = parseBankSelectValue(bankSelect);
+        if (!selectedBank) {
+            showErrorToast('Please select a bank account.');
+            resetBalanceCorrectedSaveButton(saveButton, spinner, onlySave);
+            return;
         }
+
+        // Use a Firestore transaction to read the source invoice and update balances atomically
+        const result = await db.runTransaction(async (transaction) => {
+            // Determine the source invoice's collection
+            const sourceColl = getInvoiceCollectionName(sourceInvoice);
+            const sourceRef = db.collection(sourceColl).doc(sourceInvoice.firestoreId);
+            const sourceSnap = await transaction.get(sourceRef);
+            if (!sourceSnap.exists) {
+                throw new Error('Source invoice not found in Firestore');
+            }
+            const sourceData = sourceSnap.data();
+            const totalPrice = sourceData.pricing?.totalUSD || 0;
+            const totalPaidBefore = sourceData.pricing?.totalPaid || 0;
+            const remainingBefore = sourceData.pricing?.remainingBalance || 0;
+
+            // Validate that payment does not exceed remaining
+            if (roundedPayment > remainingBefore) {
+                throw new Error(`Payment amount (${roundedPayment}) exceeds remaining balance (${remainingBefore})`);
+            }
+
+            // Calculate new balances
+            const newTotalPaid = roundCurrency(totalPaidBefore + roundedPayment);
+            const newRemaining = roundCurrency(remainingBefore - roundedPayment);
+
+            // Generate invoice number
+            const carMakeModel = sourceData.carDetails?.make && sourceData.carDetails?.model 
+                ? `${sourceData.carDetails.make} ${sourceData.carDetails.model}` 
+                : sourceData.vehicleDetails?.makeModel || 'Unknown';
+            const invoiceId = await generateBalanceInvoiceNumber(sourceData.clientName, carMakeModel, sourceData.invoiceId);
+
+            // Prepare balance invoice data
+            const balanceData = {
+                docType: 'Balance Invoice',
+                invoiceId,
+                sourceInvoiceId: sourceData.invoiceId,
+                sourceInvoiceFirestoreId: sourceRef.id,
+                sourceType: sourceData.sourceType || 'regular',
+                clientName: sourceData.clientName,
+                clientPhone: sourceData.clientPhone || '',
+                issueDate: getCurrentDateForDocument(),
+                dueDate: dueDate || null,
+                exchangeRate: exchangeRate,
+                carDetails: sourceData.carDetails || sourceData.vehicleDetails || {},
+                pricing: {
+                    totalUSD: totalPrice,
+                    totalPaidBefore: totalPaidBefore,
+                    currentPaymentDue: roundedPayment,
+                    newTotalPaid: newTotalPaid,
+                    remainingBalance: newRemaining,
+                    paymentPercentage: roundCurrency((roundedPayment / totalPrice) * 100),
+                    totalPaidPercentage: roundCurrency((newTotalPaid / totalPrice) * 100),
+                    remainingBalanceBefore: remainingBefore
+                },
+                paymentReference: paymentReference,
+                bankDetails: selectedBank,
+                createdBy: currentUser.email,
+                createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                revoked: false
+            };
+
+            // Create the new balance invoice document
+            const newBalanceRef = db.collection('balance_invoices').doc();
+            transaction.set(newBalanceRef, balanceData);
+
+            // Update the source invoice's balances
+            transaction.update(sourceRef, {
+                'pricing.totalPaid': newTotalPaid,
+                'pricing.remainingBalance': newRemaining
+            });
+
+            // Also update runningBalance and lastStageInvoiceId on the source if it has those fields
+            transaction.update(sourceRef, {
+                runningBalance: newRemaining,
+                lastStageInvoiceId: invoiceId
+            });
+
+            // Return the new invoice data for PDF generation
+            return { balanceData, newBalanceRef };
+        });
+
+        // Commit the transaction succeeded
+        const { balanceData, newBalanceRef } = result;
+
+        // Reset button state
         resetBalanceCorrectedSaveButton(saveButton, spinner, onlySave);
-        showSuccessToast(`Balance Invoice ${invoiceId} saved successfully!`);
-        
+        showSuccessToast(`Balance Invoice ${balanceData.invoiceId} saved successfully!`);
+
         if (!onlySave) {
-            balanceData.firestoreId = docRef.id;
+            balanceData.firestoreId = newBalanceRef.id;
             generateBalancePDF(balanceData);
         }
-        
+
         // Clear global data and refresh
         window.currentBalanceSourceInvoiceCorrected = null;
         renderInvoiceHistory();
-        
+
     } catch (error) {
-        console.error("Error saving balance invoice:", error);
+        console.error('Error saving balance invoice:', error);
         resetBalanceCorrectedSaveButton(saveButton, spinner, onlySave);
-        showErrorToast("Failed to save invoice: " + error.message);
+        showErrorToast('Failed to save invoice: ' + error.message);
     }
 }
 
