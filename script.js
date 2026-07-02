@@ -2567,6 +2567,34 @@ async function addPaymentToExistingReceiptFromForm(receiptDocId, receiptNumber, 
     const roundedAmountKSH = roundCurrency(amountKSH);
     const roundedAmount = roundCurrency(amount);
 
+    // Note: Transaction.get() in this Firebase SDK version only accepts a
+    // DocumentReference, not a Query, so any .where()/query-based reads must
+    // happen outside the transaction, before it starts.
+
+    // Get next payment number (count existing payments) - done outside the
+    // transaction since it requires a query, not a direct document read.
+    const paymentsSnapshot = await db.collection('receipt_payments')
+        .where('receiptId', '==', receiptDocId)
+        .get();
+    const nextPaymentNumber = paymentsSnapshot.size + 1;
+
+    // Look up the linked parent invoice's document reference (if any) -
+    // also done outside the transaction since finding it requires a query.
+    let foundInvoiceRef = null;
+    const preReceiptSnap = await db.collection('receipts').doc(receiptDocId).get();
+    const preReceiptData = preReceiptSnap.exists ? preReceiptSnap.data() : null;
+    if (preReceiptData && preReceiptData.invoiceReference) {
+        const invoiceId = preReceiptData.invoiceReference;
+        const possibleCollections = ['invoices', 'top_up_invoices', 'balance_invoices'];
+        for (const coll of possibleCollections) {
+            const snap = await db.collection(coll).where('invoiceId', '==', invoiceId).limit(1).get();
+            if (!snap.empty) {
+                foundInvoiceRef = snap.docs[0].ref;
+                break;
+            }
+        }
+    }
+
     // Use a Firestore transaction to read the receipt and update balances
     try {
         await db.runTransaction(async (transaction) => {
@@ -2586,14 +2614,7 @@ async function addPaymentToExistingReceiptFromForm(receiptDocId, receiptNumber, 
             const newBalanceKSH = roundCurrency(newBalanceUSD * exchangeRate);
             const newPaidKSH = roundCurrency((receiptData.amountReceivedKSH || 0) + roundedAmountKSH);
 
-            // 3. Get next payment number (count existing payments)
-            const paymentsSnapshot = await transaction.get(
-                db.collection('receipt_payments')
-                    .where('receiptId', '==', receiptDocId)
-            );
-            const nextPaymentNumber = paymentsSnapshot.size + 1;
-
-            // 4. Prepare the new payment document
+            // 3. Prepare the new payment document
             const paymentData = {
                 receiptId: receiptDocId,
                 receiptNumber: receiptNumber,
@@ -2623,22 +2644,10 @@ async function addPaymentToExistingReceiptFromForm(receiptDocId, receiptNumber, 
             });
 
             // 6. Optionally update parent invoice if this receipt is linked to one
+            //    (foundInvoiceRef was already resolved via query before the
+            //    transaction started, since transaction.get() only accepts
+            //    a DocumentReference, not a Query, in this SDK version)
             if (receiptData.invoiceReference) {
-                const invoiceId = receiptData.invoiceReference;
-                // Determine the correct collection
-                const parentColl = getInvoiceCollectionName({ invoiceId }); // simplistic, but we can try to find
-                // Actually, we should try to find the invoice document
-                const possibleCollections = ['invoices', 'top_up_invoices', 'balance_invoices'];
-                let foundInvoiceRef = null;
-                for (const coll of possibleCollections) {
-                    const snap = await transaction.get(
-                        db.collection(coll).where('invoiceId', '==', invoiceId).limit(1)
-                    );
-                    if (!snap.empty) {
-                        foundInvoiceRef = snap.docs[0].ref;
-                        break;
-                    }
-                }
                 if (foundInvoiceRef) {
                     // Update parent invoice's paid amount and remaining balance
                     const invSnap = await transaction.get(foundInvoiceRef);
@@ -11254,7 +11263,7 @@ async function saveBalanceInvoiceCorrected(onlySave = false) {
         const paymentDue = parseFloat(document.getElementById('balancePaymentDueCorrected').value) || 0;
         const exchangeRate = parseFloat(document.getElementById('balanceExchangeRateCorrected').value) || 130;
         const dueDate = document.getElementById('balanceDueDateCorrected').value;
-        const paymentReference = sanitizeString(document.getElementById('balancePaymentRefCorrected').value);
+        const paymentReference = document.getElementById('balancePaymentRefCorrected').value;
 
         // Validate and round amount
         const roundedPayment = roundCurrency(paymentDue);
