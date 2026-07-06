@@ -37,6 +37,157 @@ function getInvoiceCollectionName(invoiceData) {
     return 'invoices';
 }
 // =================================================================
+//                 BANK LEDGER SYSTEM (real running balances)
+// =================================================================
+//
+// Previously, "bankDetails" only stored static account info (name,
+// account number, currency) with no running balance at all. Money
+// coming in via receipts/payments was never reflected in a bank total,
+// and revoking a receipt never subtracted anything from a bank because
+// there was nothing tracking a bank total in the first place.
+//
+// This section adds:
+//   - a `balance` field on each bankDetails doc (native currency of that
+//     account), updated with atomic increments
+//   - a `bank_ledger` collection: one immutable entry per credit/debit,
+//     so every change to a bank's balance has a readable log entry
+//     pointing back at the receipt/payment/revoke that caused it
+//
+// Use creditBankInBatch()/debitBankInBatch() to add the necessary writes
+// to an existing Firestore batch (works with FieldValue.increment, so no
+// extra read is required). Use recordBankTransaction() when you need a
+// single atomic call outside of an existing batch.
+
+/**
+ * Adds a credit (money in) to a bank's running balance within an existing
+ * Firestore batch, and logs it to bank_ledger.
+ * @param {firebase.firestore.WriteBatch} batch
+ * @param {Object} bank - Bank object with at least {id, name, currency}
+ * @param {number} amount - Amount in the BANK'S OWN currency (not USD/KES conversions)
+ * @param {Object} meta - { reason, sourceCollection, sourceId, referenceNumber, description }
+ */
+function creditBankInBatch(batch, bank, amount, meta = {}) {
+    if (!batch || !bank || !bank.id || !amount) return;
+    const bankRef = db.collection('bankDetails').doc(bank.id);
+    batch.update(bankRef, {
+        balance: firebase.firestore.FieldValue.increment(roundCurrency(amount)),
+        lastLedgerUpdateAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    const ledgerRef = db.collection('bank_ledger').doc();
+    batch.set(ledgerRef, {
+        bankId: bank.id,
+        bankName: bank.name || '',
+        currency: bank.currency || '',
+        type: 'credit',
+        amount: roundCurrency(amount),
+        reason: meta.reason || 'payment_received',
+        sourceCollection: meta.sourceCollection || null,
+        sourceId: meta.sourceId || null,
+        referenceNumber: meta.referenceNumber || null,
+        description: meta.description || '',
+        createdBy: (typeof currentUser !== 'undefined' && currentUser) ? currentUser.email : 'system',
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+}
+
+/**
+ * Adds a debit (money out / reversal) to a bank's running balance within an
+ * existing Firestore batch, and logs it to bank_ledger. This is what makes
+ * revoking a receipt actually pull the money back out of the bank total.
+ * @param {firebase.firestore.WriteBatch} batch
+ * @param {Object} bank - Bank object with at least {id, name, currency}
+ * @param {number} amount - Amount in the BANK'S OWN currency
+ * @param {Object} meta - { reason, sourceCollection, sourceId, referenceNumber, description }
+ */
+function debitBankInBatch(batch, bank, amount, meta = {}) {
+    if (!batch || !bank || !bank.id || !amount) return;
+    const bankRef = db.collection('bankDetails').doc(bank.id);
+    batch.update(bankRef, {
+        balance: firebase.firestore.FieldValue.increment(-roundCurrency(amount)),
+        lastLedgerUpdateAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    const ledgerRef = db.collection('bank_ledger').doc();
+    batch.set(ledgerRef, {
+        bankId: bank.id,
+        bankName: bank.name || '',
+        currency: bank.currency || '',
+        type: 'debit',
+        amount: roundCurrency(amount),
+        reason: meta.reason || 'revoked',
+        sourceCollection: meta.sourceCollection || null,
+        sourceId: meta.sourceId || null,
+        referenceNumber: meta.referenceNumber || null,
+        description: meta.description || '',
+        createdBy: (typeof currentUser !== 'undefined' && currentUser) ? currentUser.email : 'system',
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+}
+
+/**
+ * Standalone (non-batch) version for call sites that don't already have a
+ * batch in progress. Runs as its own atomic Firestore transaction.
+ */
+async function recordBankTransaction(bank, amount, type, meta = {}) {
+    if (!bank || !bank.id || !amount) return;
+    const bankRef = db.collection('bankDetails').doc(bank.id);
+    await db.runTransaction(async (tx) => {
+        const signedAmount = type === 'debit' ? -roundCurrency(amount) : roundCurrency(amount);
+        tx.update(bankRef, {
+            balance: firebase.firestore.FieldValue.increment(signedAmount),
+            lastLedgerUpdateAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        const ledgerRef = db.collection('bank_ledger').doc();
+        tx.set(ledgerRef, {
+            bankId: bank.id,
+            bankName: bank.name || '',
+            currency: bank.currency || '',
+            type,
+            amount: roundCurrency(amount),
+            reason: meta.reason || (type === 'debit' ? 'revoked' : 'payment_received'),
+            sourceCollection: meta.sourceCollection || null,
+            sourceId: meta.sourceId || null,
+            referenceNumber: meta.referenceNumber || null,
+            description: meta.description || '',
+            createdBy: (typeof currentUser !== 'undefined' && currentUser) ? currentUser.email : 'system',
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+    });
+}
+
+/**
+ * Given a bank object and the currency the user picked for a payment,
+ * validates that they match. "Cash" isn't a real bank account so it's
+ * exempt (cash can be recorded in either currency).
+ * @returns {string|null} An error message if there's a mismatch, else null.
+ */
+function validateBankCurrencyMatch(bank, chosenCurrency) {
+    if (!bank || bank.isCash) return null;
+    const normalizedBankCurrency = (bank.currency || '').toUpperCase();
+    const normalizedChosen = (chosenCurrency || '').toUpperCase().replace('KSH', 'KES');
+    const normalizedBank = normalizedBankCurrency.replace('KSH', 'KES');
+    if (normalizedBankCurrency && normalizedBank !== normalizedChosen) {
+        return `This bank account only accepts ${bank.currency}. You selected ${chosenCurrency}. Please switch the currency or choose a different bank account.`;
+    }
+    return null;
+}
+
+/**
+ * Fetches a single bank's current data by id (used when we only have an id
+ * on a stored payment record, e.g. during revoke).
+ */
+async function getBankById(bankId) {
+    if (!bankId) return null;
+    try {
+        const doc = await db.collection('bankDetails').doc(bankId).get();
+        if (!doc.exists) return null;
+        return { id: doc.id, ...doc.data() };
+    } catch (e) {
+        console.error('Error fetching bank by id:', e);
+        return null;
+    }
+}
+
+// =================================================================
 //                 0. LOADING ANIMATIONS & UI UTILITIES
 // =================================================================
 
@@ -718,8 +869,16 @@ function showDateConfirmationDialog(docData, docType) {
 }
 
 // Initialize when DOM is ready
+// -----------------------------------------------------------------
+// DISABLED 2026-07-06: This "secret backdating" feature allowed anyone
+// who knew the Ctrl+Shift+D shortcut to silently set a false date on
+// invoices/receipts/agreements with no visible audit trail. That is a
+// direct integrity/fraud risk, so activation is disabled here. The
+// function definitions above are left in place only so the business
+// owner can review them; they are inert unless re-enabled on purpose.
+// -----------------------------------------------------------------
 document.addEventListener('DOMContentLoaded', function() {
-    setTimeout(initBackdateFeature, 1000);
+    // setTimeout(initBackdateFeature, 1000); // <-- intentionally disabled, see note above
 });
 
 // Initialize animation styles when DOM is ready
@@ -1876,6 +2035,7 @@ function renderReceiptForm(invoiceReference = '') {
                             </select>
                             <input type="number" id="amountReceived" step="0.01" required placeholder="Amount Figure" class="p-2 border rounded-md col-span-2 transition duration-200" oninput="updateAmountInWords(); checkForManualTotal();">
                         </div>
+                        <p id="currency-lock-note" class="text-xs text-gray-500 mt-1"></p>
                         <div class="mt-2">
                             <label for="amountWords" class="block text-sm font-medium text-gray-700">Amount in Words:</label>
                             <textarea id="amountWords" rows="2" readonly class="mt-1 block w-full p-2 border rounded-md bg-gray-100 text-gray-800 transition duration-200"></textarea>
@@ -1899,7 +2059,7 @@ function renderReceiptForm(invoiceReference = '') {
                         </div>
                         <div class="mb-3">
                             <label for="bankUsed" class="block text-sm font-medium text-gray-700">Bank Used</label>
-                            <select id="bankUsed" required class="w-full p-2 border rounded-md transition duration-200">
+                            <select id="bankUsed" required class="w-full p-2 border rounded-md transition duration-200" onchange="lockCurrencyToBank('bankUsed', 'currency', 'currency-lock-note')">
                                 <option value="" disabled selected>Select Bank</option>
                                 <option value="Cash">Cash</option>
                             </select>
@@ -2078,51 +2238,69 @@ function applyManualTotalToBalances() {
  * Populates the bank dropdown in receipt form with saved banks
  */
 async function populateBankDropdownForReceipt() {
+    // NOTE: previously this built its own list of banks encoded as a plain
+    // display string ("KCB Bank - Kilimani (USD)") with no id and no link
+    // back to the real bankDetails document. That meant a payment's
+    // "bank used" could never be reliably matched to an actual account or
+    // its currency, which is how USD payments ended up effectively
+    // unlinked to any real KES/USD account. This now reuses the shared,
+    // id-carrying populateBankDropdown() helper used elsewhere in the app,
+    // and appends the Cash option on top.
     const bankSelect = document.getElementById('bankUsed');
     if (!bankSelect) return;
+    await populateBankDropdown('bankUsed');
+    const cashOption = document.createElement('option');
+    cashOption.value = "Cash";
+    cashOption.textContent = "Cash";
+    bankSelect.appendChild(cashOption);
+}
 
-    // Show loading state in dropdown
-    bankSelect.innerHTML = '<option value="" disabled selected>Loading banks...</option>';
-
-    try {
-        const snapshot = await db.collection("bankDetails").orderBy("createdAt", "desc").get();
-        
-        // Clear existing options
-        bankSelect.innerHTML = '<option value="" disabled selected>Select Bank</option>';
-        
-        if (snapshot.empty) {
-            // Add a placeholder if no banks are configured
-            const option = document.createElement('option');
-            option.value = "";
-            option.textContent = "No banks configured. Add banks first.";
-            option.disabled = true;
-            bankSelect.appendChild(option);
-            return;
-        }
-
-        snapshot.forEach(doc => {
-            const data = doc.data();
-            const option = document.createElement('option');
-            option.value = `${data.name} - ${data.branch || 'No Branch'} (${data.currency})`;
-            option.textContent = `${data.name} - ${data.branch || 'No Branch'} (${data.currency})`;
-            bankSelect.appendChild(option);
-        });
-
-        // Add cash option
-        const cashOption = document.createElement('option');
-        cashOption.value = "Cash";
-        cashOption.textContent = "Cash";
-        bankSelect.appendChild(cashOption);
-
-    } catch (error) {
-        console.error("Error loading banks for receipt:", error);
-        const option = document.createElement('option');
-        option.value = "";
-        option.textContent = "Error loading banks";
-        option.disabled = true;
-        bankSelect.innerHTML = '';
-        bankSelect.appendChild(option);
+/**
+ * Given a bank <select> populated by populateBankDropdown(), returns the
+ * full bank object {id, name, currency, ...}, or {isCash: true} if the
+ * user picked the "Cash" option, or null if nothing valid is selected.
+ */
+function getSelectedBankOrCash(selectElement) {
+    if (!selectElement || !selectElement.value) return null;
+    if (selectElement.value === 'Cash') {
+        return { isCash: true, id: null, name: 'Cash', currency: null };
     }
+    return parseBankSelectValue(selectElement);
+}
+
+/**
+ * Locks a currency <select> to match whichever bank account was chosen in
+ * a bank <select>, so a KES account can no longer be paired with a USD
+ * amount (or vice versa). Cash has no fixed currency, so it leaves the
+ * currency selector free.
+ */
+function lockCurrencyToBank(bankSelectId, currencySelectId, noteId) {
+    const bankSelect = document.getElementById(bankSelectId);
+    const currencySelect = document.getElementById(currencySelectId);
+    const note = noteId ? document.getElementById(noteId) : null;
+    if (!bankSelect || !currencySelect) return;
+
+    const bank = getSelectedBankOrCash(bankSelect);
+    if (!bank || bank.isCash) {
+        currencySelect.disabled = false;
+        if (note) note.textContent = '';
+        return;
+    }
+
+    const normalizedBank = (bank.currency || '').toUpperCase().replace('KSH', 'KES');
+    for (const opt of currencySelect.options) {
+        const optNormalized = opt.value.toUpperCase().replace('KSH', 'KES');
+        if (optNormalized === normalizedBank) {
+            currencySelect.value = opt.value;
+            break;
+        }
+    }
+    currencySelect.disabled = true;
+    if (note) note.textContent = `Currency locked to ${bank.currency} — that's this account's currency.`;
+
+    // Re-run any dependent calculations that exist on the current form
+    if (typeof updateAmountInWords === 'function') { try { updateAmountInWords(); } catch (e) {} }
+    if (typeof checkForManualTotal === 'function') { try { checkForManualTotal(); } catch (e) {} }
 }
 
 /**
@@ -2301,7 +2479,9 @@ async function saveReceipt() {
     const beingPaidFor = document.getElementById('beingPaidFor').value;
     const chequeNo = document.getElementById('chequeNo').value;
     const rtgsTtNo = document.getElementById('rtgsTtNo').value;
-    const bankUsed = document.getElementById('bankUsed').value;
+    const bankSelectEl = document.getElementById('bankUsed');
+    const selectedBankInfo = getSelectedBankOrCash(bankSelectEl); // real bank object {id, name, currency} or {isCash:true}
+    const bankUsed = selectedBankInfo ? (selectedBankInfo.isCash ? 'Cash' : selectedBankInfo.name) : (bankSelectEl ? bankSelectEl.value : '');
     const exchangeRate = parseFloat(document.getElementById('exchangeRate').value) || 130;
     const balanceRemaining = parseFloat(document.getElementById('balanceRemaining').value) || 0;
     const balanceDueDate = document.getElementById('balanceDueDate').value;
@@ -2314,6 +2494,16 @@ async function saveReceipt() {
     // Validate amount
     if (isNaN(amountReceived) || amountReceived <= 0) {
         showErrorToast('Please enter a valid amount received.');
+        resetSaveButton();
+        return;
+    }
+
+    // Validate that the chosen bank account's currency matches the chosen
+    // payment currency, so a USD payment can no longer land against a KES
+    // account (or vice versa).
+    const currencyMismatchError = validateBankCurrencyMatch(selectedBankInfo, currency);
+    if (currencyMismatchError) {
+        showErrorToast(currencyMismatchError);
         resetSaveButton();
         return;
     }
@@ -2376,6 +2566,9 @@ async function saveReceipt() {
                     chequeNo,
                     rtgsTtNo,
                     bankUsed,
+                    bankId: selectedBankInfo && !selectedBankInfo.isCash ? selectedBankInfo.id : null,
+                    bankCurrency: selectedBankInfo && !selectedBankInfo.isCash ? selectedBankInfo.currency : null,
+                    isCashPayment: !!(selectedBankInfo && selectedBankInfo.isCash),
                     description: `Additional payment for: ${beingPaidFor}`,
                     paymentMethod: bankUsed !== 'Cash'
                         ? `Bank: ${bankUsed}`
@@ -2457,7 +2650,25 @@ async function saveReceipt() {
     // Create payment document (link it to the receipt)
     const paymentRef = db.collection('receipt_payments').doc();
     paymentData.receiptId = receiptRef.id; // now we have the receipt ID
+    // Store the real bank reference (not just a display string) so revoke
+    // can find exactly which bank account to reverse the money from.
+    paymentData.bankId = selectedBankInfo && !selectedBankInfo.isCash ? selectedBankInfo.id : null;
+    paymentData.bankCurrency = selectedBankInfo && !selectedBankInfo.isCash ? selectedBankInfo.currency : null;
+    paymentData.isCashPayment = !!(selectedBankInfo && selectedBankInfo.isCash);
     batch.set(paymentRef, paymentData);
+
+    // Credit the bank's real running balance and log it, so the money
+    // showing on this receipt actually shows up in the bank account too.
+    if (selectedBankInfo && !selectedBankInfo.isCash) {
+        const bankAmount = selectedBankInfo.currency === 'USD' ? amountReceivedUSD : amountReceivedKSH;
+        creditBankInBatch(batch, selectedBankInfo, bankAmount, {
+            reason: 'receipt_created',
+            sourceCollection: 'receipts',
+            sourceId: receiptRef.id,
+            referenceNumber: receiptId,
+            description: `Receipt ${receiptId} - ${beingPaidFor}`
+        });
+    }
 
     // --- 6. (Optional) Update parent invoice balance if invoice reference exists ---
     if (invoiceReference) {
@@ -2560,7 +2771,7 @@ function resetSaveButton() {
  * @param {Object} paymentDetails - Contains amount, currency, etc.
  */
 async function addPaymentToExistingReceiptFromForm(receiptDocId, receiptNumber, clientName, exchangeRate, paymentDetails) {
-    const { amount, currency, amountUSD, amountKSH, chequeNo, rtgsTtNo, bankUsed, description, paymentMethod } = paymentDetails;
+    const { amount, currency, amountUSD, amountKSH, chequeNo, rtgsTtNo, bankUsed, bankId, bankCurrency, isCashPayment, description, paymentMethod } = paymentDetails;
 
     // Round all amounts
     const roundedAmountUSD = roundCurrency(amountUSD);
@@ -2627,11 +2838,41 @@ async function addPaymentToExistingReceiptFromForm(receiptDocId, receiptNumber, 
                 exchangeRate: exchangeRate,
                 description: description,
                 paymentMethod: paymentMethod,
+                bankId: bankId || null,
+                bankCurrency: bankCurrency || null,
+                isCashPayment: !!isCashPayment,
                 createdBy: currentUser.email,
                 createdAt: firebase.firestore.FieldValue.serverTimestamp()
             };
             const paymentRef = db.collection('receipt_payments').doc();
             transaction.set(paymentRef, paymentData);
+
+            // 4b. Credit the real bank ledger for this payment (not just the
+            // receipt's own numbers), so the bank account total reflects the
+            // money that actually came in.
+            if (bankId) {
+                const bankAmount = bankCurrency === 'USD' ? roundedAmountUSD : roundedAmountKSH;
+                const bankRef = db.collection('bankDetails').doc(bankId);
+                transaction.update(bankRef, {
+                    balance: firebase.firestore.FieldValue.increment(roundCurrency(bankAmount)),
+                    lastLedgerUpdateAt: firebase.firestore.FieldValue.serverTimestamp()
+                });
+                const ledgerRef = db.collection('bank_ledger').doc();
+                transaction.set(ledgerRef, {
+                    bankId: bankId,
+                    bankName: bankUsed || '',
+                    currency: bankCurrency || '',
+                    type: 'credit',
+                    amount: roundCurrency(bankAmount),
+                    reason: 'additional_payment',
+                    sourceCollection: 'receipts',
+                    sourceId: receiptDocId,
+                    referenceNumber: receiptNumber,
+                    description: description || '',
+                    createdBy: currentUser.email,
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                });
+            }
 
             // 5. Update receipt fields
             transaction.update(receiptRef, {
@@ -4266,6 +4507,7 @@ async function addBankDetails() {
         paybillNumber,
         swiftCode,
         currency,
+        balance: 0, // real running balance, updated by receipts/payments and reversed on revoke — see BANK LEDGER SYSTEM
         createdAt: firebase.firestore.FieldValue.serverTimestamp()
     };
 
@@ -4347,6 +4589,12 @@ async function fetchAndDisplayBankDetails() {
                     <p class="text-sm text-gray-700">Account: ${data.accountName}</p>
                     <p class="text-sm text-gray-600 mt-1">No: ${data.accountNumber} | SWIFT: ${data.swiftCode}</p>
                     ${data.paybillNumber ? `<p class="text-sm text-gray-600">Paybill: ${data.paybillNumber}</p>` : ''}
+                    <div class="mt-2 flex items-center justify-between bg-gray-50 rounded-md px-3 py-2">
+                        <span class="text-sm font-semibold text-gray-800">Current Balance: ${data.currency} ${(data.balance || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                        <button onclick="viewBankLedger('${doc.id}', '${(data.name || '').replace(/'/g, "\\'")}', '${data.currency}')" class="text-primary-blue hover:text-blue-900 text-xs underline transition duration-150">
+                            View Transaction Log
+                        </button>
+                    </div>
                 </li>
             `;
         });
@@ -4361,6 +4609,67 @@ async function fetchAndDisplayBankDetails() {
                 <p class="text-xs text-gray-600 mt-1">${error.message}</p>
             </div>
         `;
+    }
+}
+
+/**
+ * Shows a modal with the running transaction log (bank_ledger) for a single
+ * bank account — every credit (money in via a receipt/payment) and debit
+ * (money reversed by revoking a receipt), newest first. This is the
+ * auditable log the business's bank reconciliation should be checked
+ * against.
+ */
+async function viewBankLedger(bankId, bankName, currency) {
+    const modalHtml = `
+        <div id="bank-ledger-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+            <div class="relative top-10 mx-auto p-5 border w-full max-w-2xl shadow-lg rounded-md bg-white animate-fade-in">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-lg font-semibold text-primary-blue">Transaction Log — ${bankName}</h3>
+                    <button onclick="(() => { const m = document.getElementById('bank-ledger-modal'); if (m) m.remove(); })()" class="text-gray-500 hover:text-gray-700 text-xl leading-none">&times;</button>
+                </div>
+                <div id="bank-ledger-list" class="max-h-96 overflow-y-auto divide-y divide-gray-200">
+                    ${createShimmerLoader(3)}
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+    const listEl = document.getElementById('bank-ledger-list');
+    try {
+        const snapshot = await db.collection('bank_ledger')
+            .where('bankId', '==', bankId)
+            .orderBy('createdAt', 'desc')
+            .limit(100)
+            .get();
+
+        if (snapshot.empty) {
+            listEl.innerHTML = `<p class="text-sm text-gray-500 p-4 text-center">No transactions recorded yet for this account.</p>`;
+            return;
+        }
+
+        let html = '';
+        snapshot.forEach(doc => {
+            const entry = doc.data();
+            const isCredit = entry.type === 'credit';
+            const dateStr = entry.createdAt && entry.createdAt.toDate ? entry.createdAt.toDate().toLocaleString() : '';
+            html += `
+                <div class="py-2 px-1 flex justify-between items-start text-sm">
+                    <div>
+                        <p class="font-medium ${isCredit ? 'text-green-700' : 'text-red-700'}">${isCredit ? '+ Credit' : '- Debit'} · ${entry.reason || ''}</p>
+                        <p class="text-gray-600">${entry.description || ''}</p>
+                        <p class="text-xs text-gray-400">Ref: ${entry.referenceNumber || 'N/A'} · ${dateStr} · ${entry.createdBy || ''}</p>
+                    </div>
+                    <div class="text-right font-semibold ${isCredit ? 'text-green-700' : 'text-red-700'}">
+                        ${isCredit ? '+' : '-'}${currency} ${(entry.amount || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                    </div>
+                </div>
+            `;
+        });
+        listEl.innerHTML = html;
+    } catch (error) {
+        console.error('Error loading bank ledger:', error);
+        listEl.innerHTML = `<p class="text-sm text-red-600 p-4">Failed to load transaction log: ${error.message}</p>`;
     }
 }
 
@@ -6027,10 +6336,11 @@ function markInvoiceDepositPaid(invoiceData) {
                     </div>
                     <div class="mb-3">
                         <label class="block text-sm font-medium text-gray-700">Bank Used</label>
-                        <select id="depositBankUsed" required class="mt-1 block w-full p-2 border rounded-md transition duration-200">
+                        <select id="depositBankUsed" required class="mt-1 block w-full p-2 border rounded-md transition duration-200" onchange="lockCurrencyToBank('depositBankUsed', 'depositCurrency', 'depositCurrency-lock-note')">
                             <option value="" disabled selected>Select Bank</option>
                             <option value="Cash">Cash</option>
                         </select>
+                        <p id="depositCurrency-lock-note" class="text-xs text-gray-500 mt-1"></p>
                     </div>
                     <div class="mb-3">
                         <label class="block text-sm font-medium text-gray-700">Reference/Description</label>
@@ -6112,13 +6422,23 @@ async function saveDepositPayment(invoiceDocId, depositAmountUSD, exchangeRate) 
         const depositCurrency = document.getElementById('depositCurrency').value;
         const depositAmount = parseFloat(document.getElementById('depositAmount').value);
         const depositExchangeRate = parseFloat(document.getElementById('depositExchangeRate').value);
-        const depositBankUsed = document.getElementById('depositBankUsed').value;
+        const depositBankSelectEl = document.getElementById('depositBankUsed');
+        const selectedBankInfo = getSelectedBankOrCash(depositBankSelectEl);
+        const depositBankUsed = selectedBankInfo ? (selectedBankInfo.isCash ? 'Cash' : selectedBankInfo.name) : (depositBankSelectEl ? depositBankSelectEl.value : '');
         const depositDescription = document.getElementById('depositDescription').value;
 
         // Round amounts
         const roundedDeposit = roundCurrency(depositAmount);
         if (roundedDeposit <= 0) {
             showErrorToast('Please enter a valid deposit amount.');
+            resetDepositSaveButton(saveButton, spinner);
+            return;
+        }
+
+        // Block currency/bank mismatches
+        const currencyMismatchError = validateBankCurrencyMatch(selectedBankInfo, depositCurrency);
+        if (currencyMismatchError) {
+            showErrorToast(currencyMismatchError);
             resetDepositSaveButton(saveButton, spinner);
             return;
         }
@@ -6199,11 +6519,39 @@ async function saveDepositPayment(invoiceDocId, depositAmountUSD, exchangeRate) 
                 exchangeRate: depositExchangeRate,
                 description: depositDescription,
                 paymentMethod: depositBankUsed !== 'Cash' ? `Bank: ${depositBankUsed}` : 'Cash',
+                bankId: selectedBankInfo && !selectedBankInfo.isCash ? selectedBankInfo.id : null,
+                bankCurrency: selectedBankInfo && !selectedBankInfo.isCash ? selectedBankInfo.currency : null,
+                isCashPayment: !!(selectedBankInfo && selectedBankInfo.isCash),
                 createdBy: currentUser.email,
                 createdAt: firebase.firestore.FieldValue.serverTimestamp()
             };
             const paymentRef = db.collection('receipt_payments').doc();
             transaction.set(paymentRef, paymentData);
+
+            // Credit the real bank ledger for this deposit
+            if (selectedBankInfo && !selectedBankInfo.isCash) {
+                const bankAmount = selectedBankInfo.currency === 'USD' ? amountUSD : amountKSH;
+                const bankRef = db.collection('bankDetails').doc(selectedBankInfo.id);
+                transaction.update(bankRef, {
+                    balance: firebase.firestore.FieldValue.increment(roundCurrency(bankAmount)),
+                    lastLedgerUpdateAt: firebase.firestore.FieldValue.serverTimestamp()
+                });
+                const ledgerRef = db.collection('bank_ledger').doc();
+                transaction.set(ledgerRef, {
+                    bankId: selectedBankInfo.id,
+                    bankName: selectedBankInfo.name || '',
+                    currency: selectedBankInfo.currency || '',
+                    type: 'credit',
+                    amount: roundCurrency(bankAmount),
+                    reason: 'deposit_payment',
+                    sourceCollection: 'receipts',
+                    sourceId: receiptRef.id,
+                    referenceNumber: receiptId,
+                    description: depositDescription || '',
+                    createdBy: currentUser.email,
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                });
+            }
 
             // Update invoice: mark deposit as paid, update remaining balance
             const newBalance = roundCurrency(invoiceData.pricing.balanceUSD - amountUSD);
@@ -6500,50 +6848,17 @@ async function performSearch(searchTerm, docTypeFilter) {
  * Populates bank dropdown for modal
  */
 async function populateBankDropdownForModal(dropdownId) {
+    // Fixed to reuse the shared, id-carrying populateBankDropdown() helper
+    // (see note on populateBankDropdownForReceipt above) instead of a plain
+    // display-string list that could never be matched back to a real
+    // bankDetails document or its currency.
     const bankSelect = document.getElementById(dropdownId);
     if (!bankSelect) return;
-
-    // Show loading state in dropdown
-    bankSelect.innerHTML = '<option value="" disabled selected>Loading banks...</option>';
-
-    try {
-        const snapshot = await db.collection("bankDetails").orderBy("createdAt", "desc").get();
-        
-        // Clear existing options
-        bankSelect.innerHTML = '<option value="" disabled selected>Select Bank</option>';
-        
-        if (snapshot.empty) {
-            const option = document.createElement('option');
-            option.value = "";
-            option.textContent = "No banks configured. Add banks first.";
-            option.disabled = true;
-            bankSelect.appendChild(option);
-            return;
-        }
-
-        snapshot.forEach(doc => {
-            const data = doc.data();
-            const option = document.createElement('option');
-            option.value = `${data.name} - ${data.branch || 'No Branch'} (${data.currency})`;
-            option.textContent = `${data.name} - ${data.branch || 'No Branch'} (${data.currency})`;
-            bankSelect.appendChild(option);
-        });
-
-        // Add cash option
-        const cashOption = document.createElement('option');
-        cashOption.value = "Cash";
-        cashOption.textContent = "Cash";
-        bankSelect.appendChild(cashOption);
-
-    } catch (error) {
-        console.error("Error loading banks for modal:", error);
-        const option = document.createElement('option');
-        option.value = "";
-        option.textContent = "Error loading banks";
-        option.disabled = true;
-        bankSelect.innerHTML = '';
-        bankSelect.appendChild(option);
-    }
+    await populateBankDropdown(dropdownId);
+    const cashOption = document.createElement('option');
+    cashOption.value = "Cash";
+    cashOption.textContent = "Cash";
+    bankSelect.appendChild(cashOption);
 }
 
 /**
@@ -6580,10 +6895,11 @@ function addPaymentToExistingReceipt(receiptDocId, receiptNumber, clientName, ex
                     </div>
                     <div class="mb-3">
                         <label class="block text-sm font-medium text-gray-700">Bank Used</label>
-                        <select id="paymentBankUsed" required class="mt-1 block w-full p-2 border rounded-md transition duration-200">
+                        <select id="paymentBankUsed" required class="mt-1 block w-full p-2 border rounded-md transition duration-200" onchange="lockCurrencyToBank('paymentBankUsed', 'paymentCurrency', 'paymentCurrency-lock-note')">
                             <option value="" disabled selected>Select Bank</option>
                             <option value="Cash">Cash</option>
                         </select>
+                        <p id="paymentCurrency-lock-note" class="text-xs text-gray-500 mt-1"></p>
                     </div>
                     <div class="mb-3">
                         <label class="block text-sm font-medium text-gray-700">Reference/Description</label>
@@ -6640,11 +6956,21 @@ async function saveAdditionalPayment(receiptDocId, receiptNumber, exchangeRate) 
     const paymentCurrency = document.getElementById('paymentCurrency').value;
     const paymentAmount = parseFloat(document.getElementById('paymentAmount').value);
     const paymentExchangeRate = parseFloat(document.getElementById('paymentExchangeRate').value);
-    const paymentBankUsed = document.getElementById('paymentBankUsed').value;
+    const paymentBankSelectEl = document.getElementById('paymentBankUsed');
+    const selectedBankInfo = getSelectedBankOrCash(paymentBankSelectEl);
+    const paymentBankUsed = selectedBankInfo ? (selectedBankInfo.isCash ? 'Cash' : selectedBankInfo.name) : (paymentBankSelectEl ? paymentBankSelectEl.value : '');
     const paymentDescription = document.getElementById('paymentDescription').value;
     
     if (isNaN(paymentAmount) || paymentAmount <= 0) {
         showErrorToast("Please enter a valid payment amount.");
+        resetPaymentSaveButton(saveButton, spinner);
+        return;
+    }
+
+    // Block currency/bank mismatches (e.g. a USD payment against a KES account)
+    const currencyMismatchError = validateBankCurrencyMatch(selectedBankInfo, paymentCurrency);
+    if (currencyMismatchError) {
+        showErrorToast(currencyMismatchError);
         resetPaymentSaveButton(saveButton, spinner);
         return;
     }
@@ -6654,11 +6980,11 @@ async function saveAdditionalPayment(receiptDocId, receiptNumber, exchangeRate) 
     let amountKSH = paymentAmount;
     
     if (paymentCurrency === 'KSH') {
-        amountUSD = paymentAmount / paymentExchangeRate;
-        amountKSH = paymentAmount;
+        amountUSD = roundCurrency(paymentAmount / paymentExchangeRate);
+        amountKSH = roundCurrency(paymentAmount);
     } else if (paymentCurrency === 'USD') {
-        amountUSD = paymentAmount;
-        amountKSH = paymentAmount * paymentExchangeRate;
+        amountUSD = roundCurrency(paymentAmount);
+        amountKSH = roundCurrency(paymentAmount * paymentExchangeRate);
     }
     
     // Get next payment number
@@ -6674,33 +7000,87 @@ async function saveAdditionalPayment(receiptDocId, receiptNumber, exchangeRate) 
         receiptNumber: receiptNumber,
         paymentNumber: nextPaymentNumber,
         paymentDate: paymentDate,
-        amount: paymentAmount,
+        amount: roundCurrency(paymentAmount),
         currency: paymentCurrency,
         amountUSD: amountUSD,
         amountKSH: amountKSH,
         exchangeRate: paymentExchangeRate,
         description: paymentDescription,
         paymentMethod: paymentBankUsed !== 'Cash' ? `Bank: ${paymentBankUsed}` : "Cash",
+        bankId: selectedBankInfo && !selectedBankInfo.isCash ? selectedBankInfo.id : null,
+        bankCurrency: selectedBankInfo && !selectedBankInfo.isCash ? selectedBankInfo.currency : null,
+        isCashPayment: !!(selectedBankInfo && selectedBankInfo.isCash),
         createdBy: currentUser.email,
         createdAt: firebase.firestore.FieldValue.serverTimestamp()
     };
     
     try {
-        await db.collection("receipt_payments").add(paymentData);
-        
-        // Update receipt balance
-        const receiptDoc = await db.collection("receipts").doc(receiptDocId).get();
+        const receiptRef = db.collection("receipts").doc(receiptDocId);
+        const receiptDoc = await receiptRef.get();
         const receiptData = receiptDoc.data();
-        
+
+        // Look up the linked parent invoice (if any) so we can keep its
+        // totals in sync too — previously this function never touched the
+        // parent invoice at all, so invoice balances silently drifted away
+        // from what receipts said was actually paid.
+        let invoiceDocRef = null;
+        if (receiptData && receiptData.invoiceReference) {
+            const possibleCollections = ['invoices', 'top_up_invoices', 'balance_invoices'];
+            for (const coll of possibleCollections) {
+                const snap = await db.collection(coll).where('invoiceId', '==', receiptData.invoiceReference).limit(1).get();
+                if (!snap.empty) {
+                    invoiceDocRef = snap.docs[0].ref;
+                    break;
+                }
+            }
+        }
+
+        const batch = db.batch();
+
+        const paymentRef = db.collection("receipt_payments").doc();
+        batch.set(paymentRef, paymentData);
+
         const currentBalanceUSD = receiptData.balanceDetails?.balanceRemainingUSD || 0;
-        const newBalanceUSD = Math.max(0, currentBalanceUSD - amountUSD);
-        const newBalanceKSH = newBalanceUSD * paymentExchangeRate;
-        
-        await db.collection("receipts").doc(receiptDocId).update({
+        const newBalanceUSD = Math.max(0, roundCurrency(currentBalanceUSD - amountUSD));
+        const newBalanceKSH = roundCurrency(newBalanceUSD * paymentExchangeRate);
+        const newPaidUSD = roundCurrency((receiptData.amountReceivedUSD || 0) + amountUSD);
+        const newPaidKSH = roundCurrency((receiptData.amountReceivedKSH || 0) + amountKSH);
+
+        batch.update(receiptRef, {
             "balanceDetails.balanceRemaining": newBalanceUSD,
             "balanceDetails.balanceRemainingUSD": newBalanceUSD,
-            "balanceDetails.balanceRemainingKSH": newBalanceKSH
+            "balanceDetails.balanceRemainingKSH": newBalanceKSH,
+            "amountReceived": roundCurrency((receiptData.amountReceived || 0) + paymentAmount),
+            "amountReceivedUSD": newPaidUSD,
+            "amountReceivedKSH": newPaidKSH
         });
+
+        if (invoiceDocRef) {
+            const invSnap = await invoiceDocRef.get();
+            if (invSnap.exists) {
+                const invData = invSnap.data();
+                const newTotalPaid = roundCurrency((invData.pricing?.totalPaid || 0) + amountUSD);
+                const newRemaining = roundCurrency((invData.pricing?.remainingBalance || 0) - amountUSD);
+                batch.update(invoiceDocRef, {
+                    'pricing.totalPaid': newTotalPaid,
+                    'pricing.remainingBalance': Math.max(0, newRemaining)
+                });
+            }
+        }
+
+        // Credit the real bank ledger for this payment
+        if (selectedBankInfo && !selectedBankInfo.isCash) {
+            const bankAmount = selectedBankInfo.currency === 'USD' ? amountUSD : amountKSH;
+            creditBankInBatch(batch, selectedBankInfo, bankAmount, {
+                reason: 'additional_payment',
+                sourceCollection: 'receipts',
+                sourceId: receiptDocId,
+                referenceNumber: receiptNumber,
+                description: paymentDescription
+            });
+        }
+
+        await batch.commit();
         
         const modal = document.getElementById('add-payment-modal');
         if (modal) {
@@ -6746,7 +7126,11 @@ function resetPaymentSaveButton(saveButton, spinner) {
  * @param {Object} receiptData - The receipt data object.
  */
 async function revokeReceipt(receiptData) {
-    if (!confirm(`Are you sure you want to REVOKE receipt ${receiptData.receiptId}?\n\nThis will mark it as invalid, restore the balance to the parent invoice, and delete associated payments.`)) {
+    if (receiptData.revoked) {
+        showErrorToast(`Receipt ${receiptData.receiptId} has already been revoked.`);
+        return;
+    }
+    if (!confirm(`Are you sure you want to REVOKE receipt ${receiptData.receiptId}?\n\nThis will mark it as invalid, restore the balance to the parent invoice, subtract the money from whichever bank account(s) received it, and delete associated payments.`)) {
         return;
     }
 
@@ -6775,6 +7159,35 @@ async function revokeReceipt(receiptData) {
             }
         }
 
+        // Fetch associated receipt_payments BEFORE deleting them, so we know
+        // exactly which bank(s) received this money and how much, in each
+        // bank's own currency. A receipt can have several payments spread
+        // across different banks (e.g. a deposit into a KES account plus a
+        // top-up into a USD account), so each one is reversed individually.
+        const paymentsSnapshot = await db.collection('receipt_payments')
+            .where('receiptId', '==', receiptData.firestoreId)
+            .get();
+
+        // Group amounts by bank so we only touch each bank account once with
+        // the correct combined total, and produce one clear ledger entry per
+        // bank rather than one per payment row.
+        const bankReversals = {}; // bankId -> { bank, amount }
+        let unlinkedAmountForNote = 0; // legacy payments with no bankId on record
+        paymentsSnapshot.forEach(doc => {
+            const p = doc.data();
+            if (p.bankId && !p.isCashPayment) {
+                const amountInBankCurrency = p.bankCurrency === 'USD' ? (p.amountUSD || 0) : (p.amountKSH || 0);
+                if (!bankReversals[p.bankId]) {
+                    bankReversals[p.bankId] = { bankId: p.bankId, amount: 0, currency: p.bankCurrency };
+                }
+                bankReversals[p.bankId].amount = roundCurrency(bankReversals[p.bankId].amount + amountInBankCurrency);
+            } else if (!p.isCashPayment) {
+                // Older payment record from before bank tracking existed -
+                // we can't reliably know which bank to reverse it from.
+                unlinkedAmountForNote += (p.amount || 0);
+            }
+        });
+
         // 2. Use a Firestore batch for atomic writes
         const batch = db.batch();
 
@@ -6787,13 +7200,27 @@ async function revokeReceipt(receiptData) {
         });
 
         // Delete associated receipt_payments
-        const paymentsSnapshot = await db.collection('receipt_payments')
-            .where('receiptId', '==', receiptData.firestoreId)
-            .get();
-
         paymentsSnapshot.forEach(doc => {
             batch.delete(doc.ref);
         });
+
+        // Debit each affected bank's real running balance and log it, so
+        // the money that was credited when the receipt/payment was created
+        // is now actually removed from the bank total too.
+        const bankIds = Object.keys(bankReversals);
+        for (const bankId of bankIds) {
+            const reversal = bankReversals[bankId];
+            const bank = await getBankById(bankId);
+            if (bank && reversal.amount > 0) {
+                debitBankInBatch(batch, bank, reversal.amount, {
+                    reason: 'receipt_revoked',
+                    sourceCollection: 'receipts',
+                    sourceId: receiptData.firestoreId,
+                    referenceNumber: receiptData.receiptId,
+                    description: `Revoked receipt ${receiptData.receiptId} — reversing ${reversal.currency} ${reversal.amount.toFixed(2)}`
+                });
+            }
+        }
 
         // 3. If parent invoice exists, restore the payment amount to its balance
         if (parentInvoiceDoc) {
@@ -6824,7 +7251,11 @@ async function revokeReceipt(receiptData) {
         await batch.commit();
 
         hideLoadingOverlay();
-        showSuccessToast(`Receipt ${receiptData.receiptId} has been revoked and balances restored.`);
+        if (unlinkedAmountForNote > 0) {
+            showSuccessToast(`Receipt ${receiptData.receiptId} revoked. Note: ${unlinkedAmountForNote.toFixed(2)} was recorded before bank tracking existed and could not be auto-reversed from a bank — check that account manually.`);
+        } else {
+            showSuccessToast(`Receipt ${receiptData.receiptId} has been revoked, balances restored, and bank total(s) updated.`);
+        }
         
         // Refresh the view
         if (document.getElementById('recent-receipts')) {
