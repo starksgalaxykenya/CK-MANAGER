@@ -4032,6 +4032,190 @@ async function unrevokeInvoice(invoiceData) {
     }
 }
 
+// -----------------------------------------------------------------
+// NEW: Balance Invoice revoke/unrevoke. This never existed before —
+// once a Balance Invoice was created there was no way to invalidate it,
+// restore the parent invoice's balance, or reverse its bank credit.
+// Mirrors revokeTopUpInvoice/unrevokeTopUpInvoice.
+// -----------------------------------------------------------------
+async function revokeBalanceInvoice(data) {
+    if (data.revoked) {
+        showErrorToast(`Balance invoice ${data.invoiceId} has already been revoked.`);
+        return;
+    }
+    if (!confirm(`Are you sure you want to REVOKE balance invoice ${data.invoiceId}?\n\nThis will mark it as invalid, restore the balance on the parent invoice, and subtract the money from the bank account that received it.`)) {
+        return;
+    }
+
+    const loadingOverlay = showLoadingOverlay("Revoking invoice...");
+
+    try {
+        const paidAmountUSD = data.pricing?.currentPaymentDue || 0;
+        const bankId = data.bankDetails?.id || data.bankId || null;
+        const sourceRef = data.sourceInvoiceFirestoreId
+            ? db.collection('invoices').doc(data.sourceInvoiceFirestoreId) // balance invoices' source is always the original 'invoices' doc
+            : null;
+
+        await db.runTransaction(async (transaction) => {
+            const balanceRef = db.collection("balance_invoices").doc(data.firestoreId);
+
+            let sourceSnap = null;
+            if (sourceRef) {
+                sourceSnap = await transaction.get(sourceRef);
+            }
+            let bank = null;
+            if (bankId) {
+                const bankSnap = await transaction.get(db.collection('bankDetails').doc(bankId));
+                if (bankSnap.exists) bank = { id: bankSnap.id, ...bankSnap.data() };
+            }
+
+            transaction.update(balanceRef, {
+                revoked: true,
+                revokedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                revokedBy: currentUser.email
+            });
+
+            if (sourceRef && sourceSnap && sourceSnap.exists) {
+                const sourceData = sourceSnap.data();
+                const newTotalPaid = Math.max(0, roundCurrency((sourceData.pricing?.totalPaid || 0) - paidAmountUSD));
+                const newRemaining = roundCurrency((sourceData.pricing?.remainingBalance || 0) + paidAmountUSD);
+                transaction.update(sourceRef, {
+                    'pricing.totalPaid': newTotalPaid,
+                    'pricing.remainingBalance': newRemaining,
+                    runningBalance: newRemaining
+                });
+            }
+
+            if (bank && paidAmountUSD) {
+                const bankCurrencyUpper = (bank.currency || '').toUpperCase();
+                const bankAmount = bankCurrencyUpper === 'USD'
+                    ? paidAmountUSD
+                    : roundCurrency(paidAmountUSD * (data.exchangeRate || 130));
+                const bankRef = db.collection('bankDetails').doc(bank.id);
+                transaction.update(bankRef, {
+                    balance: firebase.firestore.FieldValue.increment(-roundCurrency(bankAmount)),
+                    lastLedgerUpdateAt: firebase.firestore.FieldValue.serverTimestamp()
+                });
+                const ledgerRef = db.collection('bank_ledger').doc();
+                transaction.set(ledgerRef, {
+                    bankId: bank.id,
+                    bankName: bank.name || '',
+                    currency: bank.currency || '',
+                    type: 'debit',
+                    amount: roundCurrency(bankAmount),
+                    reason: 'balance_invoice_revoked',
+                    sourceCollection: 'balance_invoices',
+                    sourceId: data.firestoreId,
+                    referenceNumber: data.invoiceId,
+                    description: `Revoked Balance Invoice ${data.invoiceId}`,
+                    createdBy: currentUser.email,
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                });
+            }
+        });
+
+        hideLoadingOverlay();
+        showSuccessToast(`Balance invoice ${data.invoiceId} has been revoked, parent balance restored, and bank total updated.`);
+
+        if (data.clientName) {
+            viewClientInvoiceTrail(data.clientName);
+        }
+    } catch (error) {
+        console.error("Error revoking balance invoice:", error);
+        hideLoadingOverlay();
+        showErrorToast("Failed to revoke invoice: " + error.message);
+    }
+}
+
+async function unrevokeBalanceInvoice(data) {
+    if (!data.revoked) {
+        showErrorToast(`Balance invoice ${data.invoiceId} is not currently revoked.`);
+        return;
+    }
+    if (!confirm(`Are you sure you want to UNREVOKE balance invoice ${data.invoiceId}?\n\nThis will re-apply its payment to the parent invoice and re-credit the bank account.`)) {
+        return;
+    }
+
+    const loadingOverlay = showLoadingOverlay("Unrevoking invoice...");
+
+    try {
+        const paidAmountUSD = data.pricing?.currentPaymentDue || 0;
+        const bankId = data.bankDetails?.id || data.bankId || null;
+        const sourceRef = data.sourceInvoiceFirestoreId
+            ? db.collection('invoices').doc(data.sourceInvoiceFirestoreId)
+            : null;
+
+        await db.runTransaction(async (transaction) => {
+            const balanceRef = db.collection("balance_invoices").doc(data.firestoreId);
+
+            let sourceSnap = null;
+            if (sourceRef) {
+                sourceSnap = await transaction.get(sourceRef);
+            }
+            let bank = null;
+            if (bankId) {
+                const bankSnap = await transaction.get(db.collection('bankDetails').doc(bankId));
+                if (bankSnap.exists) bank = { id: bankSnap.id, ...bankSnap.data() };
+            }
+
+            transaction.update(balanceRef, {
+                revoked: false,
+                unrevokedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                unrevokedBy: currentUser.email
+            });
+
+            if (sourceRef && sourceSnap && sourceSnap.exists) {
+                const sourceData = sourceSnap.data();
+                const newTotalPaid = roundCurrency((sourceData.pricing?.totalPaid || 0) + paidAmountUSD);
+                const newRemaining = Math.max(0, roundCurrency((sourceData.pricing?.remainingBalance || 0) - paidAmountUSD));
+                transaction.update(sourceRef, {
+                    'pricing.totalPaid': newTotalPaid,
+                    'pricing.remainingBalance': newRemaining,
+                    runningBalance: newRemaining
+                });
+            }
+
+            if (bank && paidAmountUSD) {
+                const bankCurrencyUpper = (bank.currency || '').toUpperCase();
+                const bankAmount = bankCurrencyUpper === 'USD'
+                    ? paidAmountUSD
+                    : roundCurrency(paidAmountUSD * (data.exchangeRate || 130));
+                const bankRef = db.collection('bankDetails').doc(bank.id);
+                transaction.update(bankRef, {
+                    balance: firebase.firestore.FieldValue.increment(roundCurrency(bankAmount)),
+                    lastLedgerUpdateAt: firebase.firestore.FieldValue.serverTimestamp()
+                });
+                const ledgerRef = db.collection('bank_ledger').doc();
+                transaction.set(ledgerRef, {
+                    bankId: bank.id,
+                    bankName: bank.name || '',
+                    currency: bank.currency || '',
+                    type: 'credit',
+                    amount: roundCurrency(bankAmount),
+                    reason: 'balance_invoice_unrevoked',
+                    sourceCollection: 'balance_invoices',
+                    sourceId: data.firestoreId,
+                    referenceNumber: data.invoiceId,
+                    description: `Unrevoked Balance Invoice ${data.invoiceId}`,
+                    createdBy: currentUser.email,
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                });
+            }
+        });
+
+        hideLoadingOverlay();
+        showSuccessToast(`Balance invoice ${data.invoiceId} has been unrevoked, balance and bank total restored.`);
+
+        if (data.clientName) {
+            viewClientInvoiceTrail(data.clientName);
+        }
+    } catch (error) {
+        console.error("Error unrevoking balance invoice:", error);
+        hideLoadingOverlay();
+        showErrorToast("Failed to unrevoke invoice: " + error.message);
+    }
+}
+
 /**
  * Re-downloads the PDF for a selected invoice document.
  * @param {object} data - The invoice data object retrieved from Firestore.
@@ -9053,57 +9237,122 @@ async function saveTopUpInvoice(onlySave = false) {
             return;
         }
         
-        // Calculate totals
-        const totalPrice = sourceInvoice.totalPrice || sourceInvoice.pricing?.totalUSD || 0;
-        const totalPaidSoFar = sourceInvoice.totalPaid || 0;
-        const newTotalPaid = totalPaidSoFar + currentPaymentDue;
-        const remainingAfter = totalPrice - newTotalPaid;
-        
-        // Generate invoice number
-        const carMakeModel = sourceInvoice.carDetails?.make && sourceInvoice.carDetails?.model 
-            ? `${sourceInvoice.carDetails.make} ${sourceInvoice.carDetails.model}` 
-            : sourceInvoice.vehicleDetails?.makeModel || 'Unknown';
-        
-        const invoiceId = await generateTopUpInvoiceNumber(sourceInvoice.clientName, carMakeModel, sourceInvoice.invoiceId);
-        
-        // Prepare invoice data
-        const topUpData = {
-            docType: 'Top-Up Invoice',
-            invoiceId,
-            sourceInvoiceId: sourceInvoice.invoiceId,
-            sourceInvoiceFirestoreId: sourceInvoice.firestoreId,
-            sourceInvoiceType: sourceInvoice.sourceType || 'regular',
-            clientName: sourceInvoice.clientName,
-            clientPhone: sourceInvoice.clientPhone || '',
-            issueDate: getCurrentDateForDocument(),
-            dueDate: dueDate || null,
-            paymentDays: paymentDays,
-            exchangeRate,
-            carDetails: sourceInvoice.carDetails || sourceInvoice.vehicleDetails || {
-                make: sourceInvoice.carDetails?.make || '',
-                model: sourceInvoice.carDetails?.model || '',
-                year: sourceInvoice.carDetails?.year || '',
-                vin: sourceInvoice.carDetails?.vin || sourceInvoice.vehicleDetails?.vin || '',
-                color: sourceInvoice.carDetails?.color || ''
-            },
-            pricing: {
-                totalUSD: totalPrice,
-                totalPaid: totalPaidSoFar,
-                currentPaymentDue: currentPaymentDue,
-                newTotalPaid: newTotalPaid,
-                remainingBalance: remainingAfter,
-                paymentPercentage: (currentPaymentDue / totalPrice * 100),
-                totalPaidPercentage: (newTotalPaid / totalPrice * 100)
-            },
-            paymentReference: paymentReference,
-            bankDetails: selectedBank,
-            createdBy: currentUser.email,
-            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-            revoked: false
-        };
-        
-        // Save to Firestore
-        const docRef = await db.collection("top_up_invoices").add(topUpData);
+        // Determine which collection the source invoice lives in (regular/
+        // auction invoices are always in 'invoices')
+        const sourceInvoiceRef = db.collection('invoices').doc(sourceInvoice.firestoreId);
+
+        // Use a transaction: read the LATEST parent invoice totals (not the
+        // possibly-stale copy held in memory since the page loaded), then
+        // write the top-up invoice + updated parent totals + bank ledger
+        // credit all atomically.
+        const result = await db.runTransaction(async (transaction) => {
+            const sourceSnap = await transaction.get(sourceInvoiceRef);
+            if (!sourceSnap.exists) {
+                throw new Error('Source invoice not found in Firestore');
+            }
+            const sourceData = sourceSnap.data();
+
+            // FIX: these previously read sourceInvoice.totalPrice /
+            // sourceInvoice.totalPaid — flat fields that don't exist on this
+            // collection's documents. The real data lives under `pricing`,
+            // so this always silently computed totalPaidSoFar as 0.
+            const totalPrice = sourceData.pricing?.totalUSD || sourceData.totalPrice || 0;
+            const totalPaidSoFar = sourceData.pricing?.totalPaid || 0;
+            const newTotalPaid = roundCurrency(totalPaidSoFar + currentPaymentDue);
+            const remainingAfter = roundCurrency(totalPrice - newTotalPaid);
+
+            // Generate invoice number
+            const carMakeModel = sourceInvoice.carDetails?.make && sourceInvoice.carDetails?.model
+                ? `${sourceInvoice.carDetails.make} ${sourceInvoice.carDetails.model}`
+                : sourceInvoice.vehicleDetails?.makeModel || 'Unknown';
+
+            const invoiceId = await generateTopUpInvoiceNumber(sourceInvoice.clientName, carMakeModel, sourceInvoice.invoiceId);
+
+            const topUpData = {
+                docType: 'Top-Up Invoice',
+                invoiceId,
+                sourceInvoiceId: sourceInvoice.invoiceId,
+                sourceInvoiceFirestoreId: sourceInvoice.firestoreId,
+                sourceInvoiceType: sourceInvoice.sourceType || 'regular',
+                clientName: sourceInvoice.clientName,
+                clientPhone: sourceInvoice.clientPhone || '',
+                issueDate: getCurrentDateForDocument(),
+                dueDate: dueDate || null,
+                paymentDays: paymentDays,
+                exchangeRate,
+                carDetails: sourceInvoice.carDetails || sourceInvoice.vehicleDetails || {
+                    make: sourceInvoice.carDetails?.make || '',
+                    model: sourceInvoice.carDetails?.model || '',
+                    year: sourceInvoice.carDetails?.year || '',
+                    vin: sourceInvoice.carDetails?.vin || sourceInvoice.vehicleDetails?.vin || '',
+                    color: sourceInvoice.carDetails?.color || ''
+                },
+                pricing: {
+                    totalUSD: totalPrice,
+                    totalPaid: totalPaidSoFar,
+                    currentPaymentDue: currentPaymentDue,
+                    newTotalPaid: newTotalPaid,
+                    remainingBalance: remainingAfter,
+                    paymentPercentage: totalPrice ? (currentPaymentDue / totalPrice * 100) : 0,
+                    totalPaidPercentage: totalPrice ? (newTotalPaid / totalPrice * 100) : 0
+                },
+                paymentReference: paymentReference,
+                bankDetails: selectedBank,
+                createdBy: currentUser.email,
+                createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                revoked: false
+            };
+
+            const docRef = db.collection("top_up_invoices").doc();
+            transaction.set(docRef, topUpData);
+
+            // FIX: this write to the parent invoice never happened before —
+            // the top-up invoice recorded the payment, but the original
+            // invoice never reflected it, so it looked unpaid forever.
+            transaction.update(sourceInvoiceRef, {
+                'pricing.totalPaid': newTotalPaid,
+                'pricing.remainingBalance': Math.max(0, remainingAfter),
+                topUpCreated: true,
+                topUpInvoiceId: invoiceId,
+                topUpCreatedAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+
+            // Credit the real bank ledger — this money was previously
+            // recorded on the invoice only, never reflected in any bank
+            // balance.
+            if (selectedBank && selectedBank.id) {
+                const bankCurrency = (selectedBank.currency || '').toUpperCase();
+                const bankAmount = bankCurrency === 'USD'
+                    ? currentPaymentDue
+                    : roundCurrency(currentPaymentDue * exchangeRate);
+                const bankRef = db.collection('bankDetails').doc(selectedBank.id);
+                transaction.update(bankRef, {
+                    balance: firebase.firestore.FieldValue.increment(bankAmount),
+                    lastLedgerUpdateAt: firebase.firestore.FieldValue.serverTimestamp()
+                });
+                const ledgerRef = db.collection('bank_ledger').doc();
+                transaction.set(ledgerRef, {
+                    bankId: selectedBank.id,
+                    bankName: selectedBank.name || '',
+                    currency: selectedBank.currency || '',
+                    type: 'credit',
+                    amount: bankAmount,
+                    reason: 'topup_invoice_payment',
+                    sourceCollection: 'top_up_invoices',
+                    sourceId: docRef.id,
+                    referenceNumber: invoiceId,
+                    description: `Top-Up Invoice ${invoiceId} — ${sourceInvoice.clientName}`,
+                    createdBy: currentUser.email,
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                });
+            }
+
+            return { docRef, invoiceId, topUpData };
+        });
+
+        const docRef = result.docRef;
+        const invoiceId = result.invoiceId;
+        const topUpData = result.topUpData;
         
         resetTopUpSaveButton(saveButton, spinner, onlySave);
         showSuccessToast(`Top-Up Invoice ${invoiceId} saved successfully!`);
@@ -9416,21 +9665,90 @@ function reDownloadTopUpInvoice(data) {
  * Revokes a top-up invoice
  */
 async function revokeTopUpInvoice(data) {
-    if (!confirm(`Are you sure you want to REVOKE top-up invoice ${data.invoiceId}?\n\nThis will mark it as invalid.`)) {
+    if (data.revoked) {
+        showErrorToast(`Top-up invoice ${data.invoiceId} has already been revoked.`);
+        return;
+    }
+    if (!confirm(`Are you sure you want to REVOKE top-up invoice ${data.invoiceId}?\n\nThis will mark it as invalid, restore the balance on the parent invoice, and subtract the money from the bank account that received it.`)) {
         return;
     }
     
     const loadingOverlay = showLoadingOverlay("Revoking invoice...");
     
     try {
-        await db.collection("top_up_invoices").doc(data.firestoreId).update({
-            revoked: true,
-            revokedAt: firebase.firestore.FieldValue.serverTimestamp(),
-            revokedBy: currentUser.email
+        const paidAmountUSD = data.pricing?.currentPaymentDue || 0;
+        const bankId = data.bankDetails?.id || data.bankId || null;
+        const sourceRef = data.sourceInvoiceFirestoreId
+            ? db.collection('invoices').doc(data.sourceInvoiceFirestoreId)
+            : null;
+
+        await db.runTransaction(async (transaction) => {
+            const topUpRef = db.collection("top_up_invoices").doc(data.firestoreId);
+
+            // Reads first (Firestore transaction rule)
+            let sourceSnap = null;
+            if (sourceRef) {
+                sourceSnap = await transaction.get(sourceRef);
+            }
+            let bank = null;
+            if (bankId) {
+                const bankSnap = await transaction.get(db.collection('bankDetails').doc(bankId));
+                if (bankSnap.exists) bank = { id: bankSnap.id, ...bankSnap.data() };
+            }
+
+            // Now the writes
+            transaction.update(topUpRef, {
+                revoked: true,
+                revokedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                revokedBy: currentUser.email
+            });
+
+            // Restore the parent invoice's balance — this previously never
+            // happened, so the parent kept showing the top-up as paid even
+            // after it was revoked.
+            if (sourceRef && sourceSnap && sourceSnap.exists) {
+                const sourceData = sourceSnap.data();
+                const newTotalPaid = Math.max(0, roundCurrency((sourceData.pricing?.totalPaid || 0) - paidAmountUSD));
+                const newRemaining = roundCurrency((sourceData.pricing?.remainingBalance || 0) + paidAmountUSD);
+                transaction.update(sourceRef, {
+                    'pricing.totalPaid': newTotalPaid,
+                    'pricing.remainingBalance': newRemaining,
+                    runningBalance: newRemaining
+                });
+            }
+
+            // Debit the real bank ledger — pull the money back out of the
+            // bank total, with a logged reason pointing back at this revoke.
+            if (bank && paidAmountUSD) {
+                const bankCurrencyUpper = (bank.currency || '').toUpperCase();
+                const bankAmount = bankCurrencyUpper === 'USD'
+                    ? paidAmountUSD
+                    : roundCurrency(paidAmountUSD * (data.exchangeRate || 130));
+                const bankRef = db.collection('bankDetails').doc(bank.id);
+                transaction.update(bankRef, {
+                    balance: firebase.firestore.FieldValue.increment(-roundCurrency(bankAmount)),
+                    lastLedgerUpdateAt: firebase.firestore.FieldValue.serverTimestamp()
+                });
+                const ledgerRef = db.collection('bank_ledger').doc();
+                transaction.set(ledgerRef, {
+                    bankId: bank.id,
+                    bankName: bank.name || '',
+                    currency: bank.currency || '',
+                    type: 'debit',
+                    amount: roundCurrency(bankAmount),
+                    reason: 'topup_invoice_revoked',
+                    sourceCollection: 'top_up_invoices',
+                    sourceId: data.firestoreId,
+                    referenceNumber: data.invoiceId,
+                    description: `Revoked Top-Up Invoice ${data.invoiceId}`,
+                    createdBy: currentUser.email,
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                });
+            }
         });
         
         hideLoadingOverlay();
-        showSuccessToast(`Top-up invoice ${data.invoiceId} has been revoked.`);
+        showSuccessToast(`Top-up invoice ${data.invoiceId} has been revoked, parent balance restored, and bank total updated.`);
         
         // Refresh the current view
         if (document.getElementById('topup-history-list')) {
@@ -9450,21 +9768,85 @@ async function revokeTopUpInvoice(data) {
  * Unrevokes a top-up invoice
  */
 async function unrevokeTopUpInvoice(data) {
-    if (!confirm(`Are you sure you want to UNREVOKE top-up invoice ${data.invoiceId}?`)) {
+    if (!data.revoked) {
+        showErrorToast(`Top-up invoice ${data.invoiceId} is not currently revoked.`);
+        return;
+    }
+    if (!confirm(`Are you sure you want to UNREVOKE top-up invoice ${data.invoiceId}?\n\nThis will re-apply its payment to the parent invoice and re-credit the bank account.`)) {
         return;
     }
     
     const loadingOverlay = showLoadingOverlay("Unrevoking invoice...");
     
     try {
-        await db.collection("top_up_invoices").doc(data.firestoreId).update({
-            revoked: false,
-            unrevokedAt: firebase.firestore.FieldValue.serverTimestamp(),
-            unrevokedBy: currentUser.email
+        const paidAmountUSD = data.pricing?.currentPaymentDue || 0;
+        const bankId = data.bankDetails?.id || data.bankId || null;
+        const sourceRef = data.sourceInvoiceFirestoreId
+            ? db.collection('invoices').doc(data.sourceInvoiceFirestoreId)
+            : null;
+
+        await db.runTransaction(async (transaction) => {
+            const topUpRef = db.collection("top_up_invoices").doc(data.firestoreId);
+
+            let sourceSnap = null;
+            if (sourceRef) {
+                sourceSnap = await transaction.get(sourceRef);
+            }
+            let bank = null;
+            if (bankId) {
+                const bankSnap = await transaction.get(db.collection('bankDetails').doc(bankId));
+                if (bankSnap.exists) bank = { id: bankSnap.id, ...bankSnap.data() };
+            }
+
+            transaction.update(topUpRef, {
+                revoked: false,
+                unrevokedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                unrevokedBy: currentUser.email
+            });
+
+            // Re-apply the payment to the parent invoice
+            if (sourceRef && sourceSnap && sourceSnap.exists) {
+                const sourceData = sourceSnap.data();
+                const newTotalPaid = roundCurrency((sourceData.pricing?.totalPaid || 0) + paidAmountUSD);
+                const newRemaining = Math.max(0, roundCurrency((sourceData.pricing?.remainingBalance || 0) - paidAmountUSD));
+                transaction.update(sourceRef, {
+                    'pricing.totalPaid': newTotalPaid,
+                    'pricing.remainingBalance': newRemaining,
+                    runningBalance: newRemaining
+                });
+            }
+
+            // Re-credit the bank
+            if (bank && paidAmountUSD) {
+                const bankCurrencyUpper = (bank.currency || '').toUpperCase();
+                const bankAmount = bankCurrencyUpper === 'USD'
+                    ? paidAmountUSD
+                    : roundCurrency(paidAmountUSD * (data.exchangeRate || 130));
+                const bankRef = db.collection('bankDetails').doc(bank.id);
+                transaction.update(bankRef, {
+                    balance: firebase.firestore.FieldValue.increment(roundCurrency(bankAmount)),
+                    lastLedgerUpdateAt: firebase.firestore.FieldValue.serverTimestamp()
+                });
+                const ledgerRef = db.collection('bank_ledger').doc();
+                transaction.set(ledgerRef, {
+                    bankId: bank.id,
+                    bankName: bank.name || '',
+                    currency: bank.currency || '',
+                    type: 'credit',
+                    amount: roundCurrency(bankAmount),
+                    reason: 'topup_invoice_unrevoked',
+                    sourceCollection: 'top_up_invoices',
+                    sourceId: data.firestoreId,
+                    referenceNumber: data.invoiceId,
+                    description: `Unrevoked Top-Up Invoice ${data.invoiceId}`,
+                    createdBy: currentUser.email,
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                });
+            }
         });
         
         hideLoadingOverlay();
-        showSuccessToast(`Top-up invoice ${data.invoiceId} has been unrevoked.`);
+        showSuccessToast(`Top-up invoice ${data.invoiceId} has been unrevoked, balance and bank total restored.`);
         
         if (document.getElementById('topup-history-list')) {
             renderTopUpHistory();
@@ -10055,56 +10437,112 @@ async function saveTopUpFromAuction(onlySave = false) {
             return;
         }
         
-        // Calculate totals
-        const totalPaidSoFar = auctionData.totalPaid || 0;
-        const newTotalPaid = totalPaidSoFar + amountToPay;
-        const remainingAfter = newTotalPrice - newTotalPaid;
-        
-        // Generate invoice number
-        const carMakeModel = `${auctionData.carDetails?.make || ''} ${auctionData.carDetails?.model || ''}`.trim() || 'Unknown';
-        const invoiceId = await generateTopUpInvoiceNumber(auctionData.clientName, carMakeModel, auctionData.invoiceId);
-        
-        // Prepare invoice data
-        const topUpData = {
-            docType: 'Top-Up Invoice',
-            invoiceId,
-            sourceInvoiceId: auctionData.invoiceId,
-            sourceInvoiceFirestoreId: auctionData.firestoreId,
-            sourceType: 'auction',
-            clientName: auctionData.clientName,
-            clientPhone: auctionData.clientPhone || '',
-            issueDate: getCurrentDateForDocument(),
-            dueDate: dueDate || null,
-            paymentDays: 10,
-            exchangeRate: exchangeRate,
-            carDetails: auctionData.carDetails || {
-                make: '',
-                model: '',
-                year: '',
-                vin: '',
-                color: ''
-            },
-            pricing: {
-                totalUSD: newTotalPrice,
-                totalPaid: totalPaidSoFar,
-                currentPaymentDue: amountToPay,
-                newTotalPaid: newTotalPaid,
-                remainingBalance: remainingAfter,
-                paymentPercentage: (amountToPay / newTotalPrice * 100),
-                totalPaidPercentage: (newTotalPaid / newTotalPrice * 100),
-                targetPercentage: percentageTarget
-            },
-            paymentReference: paymentReference,
-            bankDetails: selectedBank,
-            createdBy: currentUser.email,
-            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-            revoked: false,
-            auctionOriginalPrice: auctionData.auctionPrice,
-            auctionOriginalCurrency: auctionData.auctionPriceCurrency
-        };
-        
-        // Save to Firestore
-        const docRef = await db.collection("top_up_invoices").add(topUpData);
+        const auctionRef = db.collection('invoices').doc(auctionData.firestoreId);
+
+        // Use a transaction: read the LATEST auction invoice totals, then
+        // write the top-up invoice + updated parent totals + bank ledger
+        // credit all atomically.
+        const result = await db.runTransaction(async (transaction) => {
+            const auctionSnap = await transaction.get(auctionRef);
+            if (!auctionSnap.exists) {
+                throw new Error('Source auction invoice not found in Firestore');
+            }
+            const freshAuctionData = auctionSnap.data();
+
+            // FIX: previously read auctionData.totalPaid — a flat field that
+            // doesn't exist on this collection's documents (real data is
+            // nested under `pricing`), so this always computed 0 here.
+            const totalPaidSoFar = freshAuctionData.pricing?.totalPaid || 0;
+            const newTotalPaid = roundCurrency(totalPaidSoFar + amountToPay);
+            const remainingAfter = roundCurrency(newTotalPrice - newTotalPaid);
+
+            const carMakeModel = `${auctionData.carDetails?.make || ''} ${auctionData.carDetails?.model || ''}`.trim() || 'Unknown';
+            const invoiceId = await generateTopUpInvoiceNumber(auctionData.clientName, carMakeModel, auctionData.invoiceId);
+
+            const topUpData = {
+                docType: 'Top-Up Invoice',
+                invoiceId,
+                sourceInvoiceId: auctionData.invoiceId,
+                sourceInvoiceFirestoreId: auctionData.firestoreId,
+                sourceType: 'auction',
+                clientName: auctionData.clientName,
+                clientPhone: auctionData.clientPhone || '',
+                issueDate: getCurrentDateForDocument(),
+                dueDate: dueDate || null,
+                paymentDays: 10,
+                exchangeRate: exchangeRate,
+                carDetails: auctionData.carDetails || {
+                    make: '', model: '', year: '', vin: '', color: ''
+                },
+                pricing: {
+                    totalUSD: newTotalPrice,
+                    totalPaid: totalPaidSoFar,
+                    currentPaymentDue: amountToPay,
+                    newTotalPaid: newTotalPaid,
+                    remainingBalance: remainingAfter,
+                    paymentPercentage: newTotalPrice ? (amountToPay / newTotalPrice * 100) : 0,
+                    totalPaidPercentage: newTotalPrice ? (newTotalPaid / newTotalPrice * 100) : 0,
+                    targetPercentage: percentageTarget
+                },
+                paymentReference: paymentReference,
+                bankDetails: selectedBank,
+                createdBy: currentUser.email,
+                createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                revoked: false,
+                auctionOriginalPrice: auctionData.auctionPrice,
+                auctionOriginalCurrency: auctionData.auctionPriceCurrency
+            };
+
+            const docRef = db.collection("top_up_invoices").doc();
+            transaction.set(docRef, topUpData);
+
+            // FIX: this write-back to the parent invoice never happened
+            // before, so the auction invoice never showed the top-up
+            // payment as received.
+            transaction.update(auctionRef, {
+                'pricing.totalPaid': newTotalPaid,
+                'pricing.remainingBalance': Math.max(0, remainingAfter),
+                totalVehiclePrice: newTotalPrice,
+                runningBalance: Math.max(0, remainingAfter),
+                topUpCreated: true,
+                topUpInvoiceId: invoiceId,
+                topUpCreatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                lastStageInvoiceId: invoiceId
+            });
+
+            if (selectedBank && selectedBank.id) {
+                const bankCurrencyUpper = (selectedBank.currency || '').toUpperCase();
+                const bankAmount = bankCurrencyUpper === 'USD'
+                    ? amountToPay
+                    : roundCurrency(amountToPay * exchangeRate);
+                const bankRef = db.collection('bankDetails').doc(selectedBank.id);
+                transaction.update(bankRef, {
+                    balance: firebase.firestore.FieldValue.increment(bankAmount),
+                    lastLedgerUpdateAt: firebase.firestore.FieldValue.serverTimestamp()
+                });
+                const ledgerRef = db.collection('bank_ledger').doc();
+                transaction.set(ledgerRef, {
+                    bankId: selectedBank.id,
+                    bankName: selectedBank.name || '',
+                    currency: selectedBank.currency || '',
+                    type: 'credit',
+                    amount: bankAmount,
+                    reason: 'topup_invoice_payment',
+                    sourceCollection: 'top_up_invoices',
+                    sourceId: docRef.id,
+                    referenceNumber: invoiceId,
+                    description: `Top-Up Invoice ${invoiceId} — ${auctionData.clientName}`,
+                    createdBy: currentUser.email,
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                });
+            }
+
+            return { docRef, invoiceId, topUpData };
+        });
+
+        const docRef = result.docRef;
+        const invoiceId = result.invoiceId;
+        const topUpData = result.topUpData;
         
         resetTopUpAuctionSaveButton(saveButton, spinner, onlySave);
         showSuccessToast(`Top-Up Invoice ${invoiceId} saved successfully!`);
@@ -10761,10 +11199,21 @@ function renderInvoiceTrailView(clientName, invoices, vehicleGroups = {}) {
 
         const invoiceDataJson = JSON.stringify({...invoice, firestoreId: invoice.firestoreId});
 
+        let balanceRevokeBtn = '';
+        if (invoice.type === 'balance') {
+            balanceRevokeBtn = invoice.revoked
+                ? `<button onclick='unrevokeBalanceInvoice(${invoiceDataJson})' class="text-gray-600 hover:text-gray-900" title="Unrevoke">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                   </button>`
+                : `<button onclick='revokeBalanceInvoice(${invoiceDataJson})' class="text-red-600 hover:text-red-800" title="Revoke">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                   </button>`;
+        }
+
         html += `
-            <tr class="hover:bg-gray-50 ${index % 2 === 0 ? '' : 'bg-gray-50/40'}">
+            <tr class="hover:bg-gray-50 ${index % 2 === 0 ? '' : 'bg-gray-50/40'} ${invoice.revoked ? 'bg-red-50' : ''}">
                 <td class="px-4 py-3 text-sm text-gray-600">${issueDate}</td>
-                <td class="px-4 py-3 text-sm font-medium text-primary-blue">${invoice.invoiceId}</td>
+                <td class="px-4 py-3 text-sm font-medium text-primary-blue">${invoice.invoiceId}${invoice.revoked ? ' <span class="text-xs text-red-600 font-bold">(REVOKED)</span>' : ''}</td>
                 <td class="px-4 py-3">
                     <span class="px-2 py-1 text-xs rounded-full font-medium ${typeColor}">${stageBadge}</span>
                 </td>
@@ -10782,6 +11231,7 @@ function renderInvoiceTrailView(clientName, invoices, vehicleGroups = {}) {
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
                         </button>
                         ${nextStageBtn}
+                        ${balanceRevokeBtn}
                     </div>
                 </td>
             </tr>
@@ -11374,19 +11824,46 @@ async function saveTopUpFromAuctionCorrected(onlySave = false) {
             auctionDepositAmount: depositPaid
         };
         
-        // Save to Firestore
-        const docRef = await db.collection("top_up_invoices").add(topUpData);
-        
+        // Save to Firestore (batch so invoice + auction update + ledger
+        // credit succeed or fail together)
+        const batch = db.batch();
+        const docRef = db.collection("top_up_invoices").doc();
+        batch.set(docRef, topUpData);
+
         // Mark the auction invoice as having a top-up created
-      // Update running balance on the auction (vehicle anchor) document
-        await db.collection("invoices").doc(auctionData.firestoreId).update({
+        // Update running balance on the auction (vehicle anchor) document.
+        // Both the newer runningBalance/totalVehiclePrice fields AND the
+        // canonical pricing.totalPaid/remainingBalance fields are updated
+        // here — other parts of the app (receipts, revoke, reports) read
+        // pricing.*, so leaving it stale would show wrong numbers there
+        // even though runningBalance was correct.
+        const auctionRef = db.collection("invoices").doc(auctionData.firestoreId);
+        batch.update(auctionRef, {
             topUpCreated: true,
             topUpInvoiceId: invoiceId,
             topUpCreatedAt: firebase.firestore.FieldValue.serverTimestamp(),
             totalVehiclePrice: newTotalPrice,
-            runningBalance: remainingAfter,              // ← NEW
-            lastStageInvoiceId: invoiceId                // ← NEW
+            runningBalance: remainingAfter,
+            lastStageInvoiceId: invoiceId,
+            'pricing.totalPaid': newTotalPaid,
+            'pricing.remainingBalance': Math.max(0, remainingAfter)
         });
+
+        if (selectedBank && selectedBank.id) {
+            const bankCurrencyUpper = (selectedBank.currency || '').toUpperCase();
+            const bankAmount = bankCurrencyUpper === 'USD'
+                ? amountToPay
+                : roundCurrency(amountToPay * exchangeRate);
+            creditBankInBatch(batch, selectedBank, bankAmount, {
+                reason: 'topup_invoice_payment',
+                sourceCollection: 'top_up_invoices',
+                sourceId: docRef.id,
+                referenceNumber: invoiceId,
+                description: `Top-Up Invoice ${invoiceId} — ${auctionData.clientName}`
+            });
+        }
+
+        await batch.commit();
         
         resetTopUpAuctionCorrectedSaveButton(saveButton, spinner, onlySave);
         showSuccessToast(`Top-Up Invoice ${invoiceId} saved successfully!`);
@@ -11776,6 +12253,36 @@ async function saveBalanceInvoiceCorrected(onlySave = false) {
             const newBalanceRef = db.collection('balance_invoices').doc();
             transaction.set(newBalanceRef, balanceData);
 
+            // Credit the real bank ledger for this payment — previously
+            // this money was only recorded on the invoice, never reflected
+            // in any bank balance.
+            if (selectedBank && selectedBank.id) {
+                const bankCurrencyUpper = (selectedBank.currency || '').toUpperCase();
+                const bankAmount = bankCurrencyUpper === 'USD'
+                    ? roundedPayment
+                    : roundCurrency(roundedPayment * exchangeRate);
+                const bankRef = db.collection('bankDetails').doc(selectedBank.id);
+                transaction.update(bankRef, {
+                    balance: firebase.firestore.FieldValue.increment(bankAmount),
+                    lastLedgerUpdateAt: firebase.firestore.FieldValue.serverTimestamp()
+                });
+                const ledgerRef = db.collection('bank_ledger').doc();
+                transaction.set(ledgerRef, {
+                    bankId: selectedBank.id,
+                    bankName: selectedBank.name || '',
+                    currency: selectedBank.currency || '',
+                    type: 'credit',
+                    amount: bankAmount,
+                    reason: 'balance_invoice_payment',
+                    sourceCollection: 'balance_invoices',
+                    sourceId: newBalanceRef.id,
+                    referenceNumber: invoiceId,
+                    description: `Balance Invoice ${invoiceId} — ${sourceData.clientName}`,
+                    createdBy: currentUser.email,
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                });
+            }
+
             // Update the source invoice's balances
             transaction.update(sourceRef, {
                 'pricing.totalPaid': newTotalPaid,
@@ -12121,6 +12628,10 @@ window.createReceiptFromInvoice = createReceiptFromInvoice;
 window.createAdditionalInvoice = createAdditionalInvoice;
 window.revokeInvoice = revokeInvoice;
 window.unrevokeInvoice = unrevokeInvoice;
+window.revokeBalanceInvoice = revokeBalanceInvoice;
+window.unrevokeBalanceInvoice = unrevokeBalanceInvoice;
+window.lockCurrencyToBank = lockCurrencyToBank;
+window.viewBankLedger = viewBankLedger;
 window.revokePortChargesInvoice = revokePortChargesInvoice;
 window.unrevokePortChargesInvoice = unrevokePortChargesInvoice;
 window.toggleAuctionFields = toggleAuctionFields;
