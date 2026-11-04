@@ -48,12 +48,24 @@ async function loadInvoiceChain(transaction, firstRef, firstSnap) {
     let ref = firstRef, snap = firstSnap, guard = 0;
     while (ref && snap && snap.exists && guard < 15) {
         const d = snap.data();
-        const isTopUp = d.docType === 'Top-Up Invoice';
+        // Top-up and balance invoices are "staged" documents: they keep their
+        // own historical paid amounts and point at their parent.
+        const isTopUp = d.docType === 'Top-Up Invoice' || d.docType === 'Balance Invoice';
         chain.push({ ref, snap, isTopUp });
         if (!isTopUp || !d.sourceInvoiceFirestoreId) break;
-        const coll = d.sourceInvoiceCollection || (d.sourceInvoiceType === 'topup' ? 'top_up_invoices' : 'invoices');
-        ref = db.collection(coll).doc(d.sourceInvoiceFirestoreId);
-        snap = await transaction.get(ref);
+        // Find the parent: use the stored collection if present, otherwise
+        // try every invoice collection (document ids are unique).
+        const hinted = d.sourceInvoiceCollection
+            || (d.sourceInvoiceType === 'topup' || d.sourceType === 'topup' ? 'top_up_invoices'
+                : d.sourceType === 'balance' ? 'balance_invoices' : 'invoices');
+        const order = [hinted, 'invoices', 'top_up_invoices', 'balance_invoices'].filter((c, i, arr) => arr.indexOf(c) === i);
+        let nextRef = null, nextSnap = null;
+        for (const coll of order) {
+            const r = db.collection(coll).doc(d.sourceInvoiceFirestoreId);
+            const sn = await transaction.get(r);
+            if (sn.exists) { nextRef = r; nextSnap = sn; break; }
+        }
+        ref = nextRef; snap = nextSnap;
         guard++;
     }
     return chain;
@@ -1084,146 +1096,12 @@ function performGlobalSearch(searchTerm = '', filter = 'all') {
 /**
  * Searches across all document types
  */
-async function searchDocuments() {
-    const searchTerm = document.getElementById('document-search')?.value.trim().toLowerCase();
-    const docTypeFilter = document.getElementById('document-type-filter')?.value;
-    
-    if (!searchTerm) {
-        showErrorToast("Please enter a search term");
-        return;
-    }
-    
-    // Get references to DOM elements
-    const resultsList = document.getElementById('search-results-list');
-    const searchResultsDiv = document.getElementById('search-results');
-    const docCreationArea = document.getElementById('document-creation-area');
-    
-    // If we're not on the document generator page, navigate to it first
-    if (!resultsList || !searchResultsDiv || !docCreationArea) {
-        // Navigate to document generator first
-        handleDocumentGenerator();
-        
-        // Wait for DOM to update, then search again
-        setTimeout(() => {
-            // Set the search term in the input
-            const searchInput = document.getElementById('document-search');
-            if (searchInput) {
-                searchInput.value = searchTerm;
-            }
-            
-            // Set the filter if it was specified
-            const filterSelect = document.getElementById('document-type-filter');
-            if (filterSelect && docTypeFilter) {
-                filterSelect.value = docTypeFilter;
-            }
-            
-            // Perform the search
-            performSearch(searchTerm, docTypeFilter || 'all');
-        }, 100);
-        return;
-    }
-    
-    // We're already on the document generator page, perform search
-    await performSearch(searchTerm, docTypeFilter || 'all');
-}
+// (removed duplicate definition; the later one in this file is the active version)
 
 /**
  * Helper function to perform the actual search
  */
-async function performSearch(searchTerm, docTypeFilter) {
-    // Get references to DOM elements again (they should exist now)
-    const resultsList = document.getElementById('search-results-list');
-    const searchResultsDiv = document.getElementById('search-results');
-    const docCreationArea = document.getElementById('document-creation-area');
-    
-    // Double-check elements exist
-    if (!resultsList || !searchResultsDiv || !docCreationArea) {
-        console.error("Required DOM elements not found");
-        showErrorToast("Error: Unable to perform search. Please try again.");
-        return;
-    }
-    
-    // Show loading state with shimmer effect
-    resultsList.innerHTML = createShimmerLoader(3);
-    searchResultsDiv.classList.remove('hidden');
-    docCreationArea.classList.add('hidden');
-    
-    let allResults = [];
-    
-    try {
-        // Show loading overlay for search
-        const searchOverlay = showLoadingOverlay("Searching documents...");
-        
-        // Search Receipts if applicable
-        if (docTypeFilter === 'all' || docTypeFilter === 'receipt') {
-            const receiptResults = await searchReceipts(searchTerm);
-            allResults = allResults.concat(receiptResults.map(r => ({...r, type: 'receipt'})));
-        }
-        
-        // Search Invoices if applicable
-        if (docTypeFilter === 'all' || docTypeFilter === 'invoice') {
-            const invoiceResults = await searchInvoices(searchTerm);
-            allResults = allResults.concat(invoiceResults.map(i => ({...i, type: 'invoice'})));
-        }
-        
-        // Search Agreements if applicable
-        if (docTypeFilter === 'all' || docTypeFilter === 'agreement') {
-            const agreementResults = await searchAgreements(searchTerm);
-            allResults = allResults.concat(agreementResults.map(a => ({...a, type: 'agreement'})));
-        }
-
-        if (docTypeFilter === 'all' || docTypeFilter === 'portcharges') {
-            const portResults = await searchPortChargesInvoices(searchTerm);
-            allResults = allResults.concat(portResults.map(p => ({...p, type: 'portcharges'})));
-        }
-        
-        // Search Top Up Invoices
-        if (docTypeFilter === 'all' || docTypeFilter === 'topup') {
-            const topUpResults = await searchTopUpInvoices(searchTerm);
-            allResults = allResults.concat(topUpResults.map(t => ({...t, type: 'topup'})));
-        }
-        
-        // Sort by date (newest first)
-        allResults.sort((a, b) => {
-            const dateA = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(a.createdAt || 0);
-            const dateB = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(b.createdAt || 0);
-            return dateB - dateA;
-        });
-        
-        // Hide loading overlay
-        hideLoadingOverlay();
-        
-        // Display results
-        if (resultsList) {
-            displaySearchResults(allResults, searchTerm);
-        }
-        
-        // Show success message
-        if (allResults.length > 0) {
-            showSuccessToast(`Found ${allResults.length} documents`);
-        }
-        
-    } catch (error) {
-        console.error("Error searching documents:", error);
-        hideLoadingOverlay();
-        
-        if (resultsList) {
-            resultsList.innerHTML = `
-                <div class="text-center p-8 bg-red-50 rounded-lg border border-red-200 animate-fade-in">
-                    <svg class="w-12 h-12 text-red-500 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                    </svg>
-                    <p class="text-red-600 font-semibold mb-2">Search Error</p>
-                    <p class="text-sm text-gray-600">${error.message}</p>
-                    <button onclick="clearSearch()" class="mt-4 bg-primary-blue hover:bg-blue-900 text-white font-bold py-2 px-4 rounded-md transition duration-150">
-                        Return to Document Generator
-                    </button>
-                </div>
-            `;
-        }
-        showErrorToast("Error searching documents. Please try again.");
-    }
-}
+// (removed duplicate definition; the later one in this file is the active version)
 
 /**
  * Helper function to display search results
@@ -2856,6 +2734,16 @@ async function addPaymentToExistingReceiptFromForm(receiptDocId, receiptNumber, 
             }
             const receiptData = receiptSnap.data();
 
+            // 1b. Read the linked invoice chain NOW. Firestore requires every
+            // transaction read to happen before the first write; this read
+            // used to happen after writes and made the whole save fail for
+            // any receipt linked to an invoice.
+            let linkedChain = [];
+            if (receiptData.invoiceReference && foundInvoiceRef) {
+                const linkedSnap = await transaction.get(foundInvoiceRef);
+                linkedChain = await loadInvoiceChain(transaction, foundInvoiceRef, linkedSnap);
+            }
+
             // 2. Calculate new balances
             const currentBalanceUSD = receiptData.balanceDetails?.balanceRemainingUSD || 0;
             const currentPaidUSD = receiptData.amountReceivedUSD || 0;
@@ -2927,19 +2815,9 @@ async function addPaymentToExistingReceiptFromForm(receiptDocId, receiptNumber, 
             //    (foundInvoiceRef was already resolved via query before the
             //    transaction started, since transaction.get() only accepts
             //    a DocumentReference, not a Query, in this SDK version)
-            if (receiptData.invoiceReference) {
-                if (foundInvoiceRef) {
-                    // Update parent invoice's paid amount and remaining balance
-                    const invSnap = await transaction.get(foundInvoiceRef);
-                    const invData = invSnap.data();
-                    const newTotalPaid = roundCurrency((invData.pricing?.totalPaid || 0) + roundedAmountUSD);
-                    const newRemaining = roundCurrency((invData.pricing?.remainingBalance || 0) - roundedAmountUSD);
-                    transaction.update(foundInvoiceRef, {
-                        'pricing.totalPaid': newTotalPaid,
-                        'pricing.remainingBalance': Math.max(0, newRemaining)
-                    });
-                }
-            }
+            linkedChain.forEach(item => {
+                transaction.update(item.ref, buildChainUpdate(item, roundedAmountUSD));
+            });
         });
 
         showSuccessToast(`Additional payment of ${currency} ${roundedAmount.toFixed(2)} added to receipt ${receiptNumber} successfully!`);
@@ -4091,16 +3969,19 @@ async function revokeBalanceInvoice(data) {
     try {
         const paidAmountUSD = data.pricing?.currentPaymentDue || 0;
         const bankId = data.bankDetails?.id || data.bankId || null;
+        // The parent may be a regular invoice, a top-up or an earlier balance invoice
         const sourceRef = data.sourceInvoiceFirestoreId
-            ? db.collection('invoices').doc(data.sourceInvoiceFirestoreId) // balance invoices' source is always the original 'invoices' doc
+            ? db.collection(data.sourceInvoiceCollection || (data.sourceType === 'topup' ? 'top_up_invoices' : data.sourceType === 'balance' ? 'balance_invoices' : 'invoices')).doc(data.sourceInvoiceFirestoreId)
             : null;
 
         await db.runTransaction(async (transaction) => {
             const balanceRef = db.collection("balance_invoices").doc(data.firestoreId);
 
             let sourceSnap = null;
+            let chain = [];
             if (sourceRef) {
                 sourceSnap = await transaction.get(sourceRef);
+                chain = await loadInvoiceChain(transaction, sourceRef, sourceSnap);
             }
             let bank = null;
             if (bankId) {
@@ -4114,16 +3995,9 @@ async function revokeBalanceInvoice(data) {
                 revokedBy: currentUser.email
             });
 
-            if (sourceRef && sourceSnap && sourceSnap.exists) {
-                const sourceData = sourceSnap.data();
-                const newTotalPaid = Math.max(0, roundCurrency((sourceData.pricing?.totalPaid || 0) - paidAmountUSD));
-                const newRemaining = roundCurrency((sourceData.pricing?.remainingBalance || 0) + paidAmountUSD);
-                transaction.update(sourceRef, {
-                    'pricing.totalPaid': newTotalPaid,
-                    'pricing.remainingBalance': newRemaining,
-                    runningBalance: newRemaining
-                });
-            }
+            chain.forEach(item => {
+                transaction.update(item.ref, buildChainUpdate(item, -paidAmountUSD));
+            });
 
             if (bank && paidAmountUSD) {
                 const bankCurrencyUpper = (bank.currency || '').toUpperCase();
@@ -4181,15 +4055,17 @@ async function unrevokeBalanceInvoice(data) {
         const paidAmountUSD = data.pricing?.currentPaymentDue || 0;
         const bankId = data.bankDetails?.id || data.bankId || null;
         const sourceRef = data.sourceInvoiceFirestoreId
-            ? db.collection('invoices').doc(data.sourceInvoiceFirestoreId)
+            ? db.collection(data.sourceInvoiceCollection || (data.sourceType === 'topup' ? 'top_up_invoices' : data.sourceType === 'balance' ? 'balance_invoices' : 'invoices')).doc(data.sourceInvoiceFirestoreId)
             : null;
 
         await db.runTransaction(async (transaction) => {
             const balanceRef = db.collection("balance_invoices").doc(data.firestoreId);
 
             let sourceSnap = null;
+            let chain = [];
             if (sourceRef) {
                 sourceSnap = await transaction.get(sourceRef);
+                chain = await loadInvoiceChain(transaction, sourceRef, sourceSnap);
             }
             let bank = null;
             if (bankId) {
@@ -4203,16 +4079,9 @@ async function unrevokeBalanceInvoice(data) {
                 unrevokedBy: currentUser.email
             });
 
-            if (sourceRef && sourceSnap && sourceSnap.exists) {
-                const sourceData = sourceSnap.data();
-                const newTotalPaid = roundCurrency((sourceData.pricing?.totalPaid || 0) + paidAmountUSD);
-                const newRemaining = Math.max(0, roundCurrency((sourceData.pricing?.remainingBalance || 0) - paidAmountUSD));
-                transaction.update(sourceRef, {
-                    'pricing.totalPaid': newTotalPaid,
-                    'pricing.remainingBalance': newRemaining,
-                    runningBalance: newRemaining
-                });
-            }
+            chain.forEach(item => {
+                transaction.update(item.ref, buildChainUpdate(item, paidAmountUSD));
+            });
 
             if (bank && paidAmountUSD) {
                 const bankCurrencyUpper = (bank.currency || '').toUpperCase();
@@ -4259,10 +4128,7 @@ async function unrevokeBalanceInvoice(data) {
  * Re-downloads the PDF for a selected invoice document.
  * @param {object} data - The invoice data object retrieved from Firestore.
  */
-function reDownloadInvoice(data) {
-    // Show date confirmation dialog
-    showDateConfirmationDialog(data, 'invoice', null);
-}
+// (removed duplicate definition; the later one in this file is the active version)
 
 // =================================================================
 //                 9. CAR SALES AGREEMENT BANK HELPER (FROM bankDetails)
@@ -4614,40 +4480,7 @@ async function fetchAgreements() {
     }
 }
 
-async function reDownloadAgreement(data) {
-    // 1. Check if bankDetails are already present
-    if (data.bankDetails && data.bankDetails.name) {
-        showDateConfirmationDialog(data, 'agreement', null);
-        return;
-    }
-
-    let bankDetails = null;
-    const bankIdValue = data.salesTerms?.bankId;
-
-    if (bankIdValue) {
-        // Check if the value is a stringified JSON object (to support old, bugged data)
-        if (bankIdValue.startsWith('{') && bankIdValue.endsWith('}')) {
-            try {
-                // If it's the bugged full JSON string, parse it
-                bankDetails = JSON.parse(bankIdValue);
-            } catch (e) {
-                console.warn("Could not parse old bankId JSON string. Falling back to ID fetch.");
-            }
-        }
-        
-        // If bankDetails is still null, assume it's the correct new format (just the ID) or the fallback failed
-        if (!bankDetails) {
-            const banks = await _getBankDetailsData();
-            bankDetails = banks.find(b => b.id === bankIdValue);
-        }
-    }
-    
-    // Attach the fetched/parsed details to the data object
-    data.bankDetails = bankDetails || {};
-    
-    // Show date confirmation dialog
-    showDateConfirmationDialog(data, 'agreement', null);
-}
+// (removed duplicate definition; the later one in this file is the active version)
 
 // =================================================================
 //                 7. BANK MANAGEMENT MODULE (UPDATED WITH PAYBILL)
@@ -6460,9 +6293,7 @@ async function reDownloadAgreement(data) {
     showDateConfirmationDialog(data, 'agreement');
 }
 
-function reDownloadPortChargesInvoice(data) {
-    showDateConfirmationDialog(data, 'portcharges');
-}
+// (removed duplicate definition; the later one in this file is the active version)
 /**
  * View balances for a specific receipt
  */
@@ -6677,6 +6508,7 @@ async function saveDepositPayment(invoiceDocId, depositAmountUSD, exchangeRate) 
         }
 
         // Use a transaction to update invoice and create receipt/payment
+        let savedInvoiceNumber = null;
         await db.runTransaction(async (transaction) => {
             // Get the invoice document
             const invoiceRef = db.collection('invoices').doc(invoiceDocId);
@@ -6685,6 +6517,7 @@ async function saveDepositPayment(invoiceDocId, depositAmountUSD, exchangeRate) 
                 throw new Error('Invoice not found');
             }
             const invoiceData = invoiceSnap.data();
+            savedInvoiceNumber = invoiceData.invoiceId;
 
             // Validate that deposit is not already paid
             if (invoiceData.pricing?.depositPaid) {
@@ -6793,7 +6626,7 @@ async function saveDepositPayment(invoiceDocId, depositAmountUSD, exchangeRate) 
         showSuccessToast(`Deposit payment of ${depositCurrency} ${roundedDeposit.toFixed(2)} saved successfully!`);
 
         // Navigate to receipt form with the invoice reference for easy PDF generation
-        renderReceiptForm(invoiceData.invoiceId);
+        renderReceiptForm(savedInvoiceNumber);
 
     } catch (error) {
         console.error('Error saving deposit payment:', error);
@@ -9282,8 +9115,9 @@ async function saveTopUpInvoice(onlySave = false) {
         // TOPUP-... number), whose document lives in 'top_up_invoices', not
         // 'invoices'. Looking in the wrong collection caused
         // "Source invoice not found in Firestore".
-        const sourceIsTopUp = sourceInvoice.sourceType === 'topup' || sourceInvoice.docType === 'Top-Up Invoice';
-        const sourceCollName = sourceIsTopUp ? 'top_up_invoices' : getInvoiceCollectionName(sourceInvoice);
+        const sourceCollName = getInvoiceCollectionName(sourceInvoice);
+        // Top-up and balance parents are "staged" documents with their own history
+        const sourceIsTopUp = sourceCollName !== 'invoices';
         const sourceInvoiceRef = db.collection(sourceCollName).doc(sourceInvoice.firestoreId);
 
         // Use a transaction: read the LATEST parent invoice totals (not the
@@ -9323,7 +9157,7 @@ async function saveTopUpInvoice(onlySave = false) {
                 invoiceId,
                 sourceInvoiceId: sourceInvoice.invoiceId,
                 sourceInvoiceFirestoreId: sourceInvoice.firestoreId,
-                sourceInvoiceType: sourceIsTopUp ? 'topup' : (sourceInvoice.sourceType || 'regular'),
+                sourceInvoiceType: sourceCollName === 'top_up_invoices' ? 'topup' : sourceCollName === 'balance_invoices' ? 'balance' : 'regular',
                 sourceInvoiceCollection: sourceCollName,
                 clientName: sourceInvoice.clientName,
                 clientPhone: sourceInvoice.clientPhone || '',
@@ -10469,7 +10303,7 @@ async function saveTopUpFromAuction(onlySave = false) {
         const newTotalPrice = parseFloat(document.getElementById('topupTotalPrice').value) || 0;
         const amountToPay = parseFloat(document.getElementById('topupAmountToPay').value) || 0;
         const percentageTarget = parseFloat(document.getElementById('topupPercentageTarget').value) || 50;
-        const exchangeRate = parseFloat(document.getElementById('balanceExchangeRate')?.value) || 130;
+        const exchangeRate = parseFloat(document.getElementById('topupExchangeRate')?.value) || auctionData.exchangeRate || 130;
         const dueDate = document.getElementById('topupDueDate').value;
         const paymentReference = document.getElementById('topupPaymentReference').value;
         
@@ -10659,119 +10493,9 @@ function updateBalanceCalculations() {
  * Saves balance invoice
  */
 async function saveBalanceInvoice(onlySave = false) {
-    const form = document.getElementById('balance-form');
-    if (!form.checkValidity()) {
-        form.reportValidity();
-        return;
-    }
-    
-    const sourceInvoice = window.currentBalanceSourceInvoice;
-    if (!sourceInvoice) {
-        showErrorToast("Source invoice data not found");
-        return;
-    }
-    
-    // Show loading state
-    const saveButton = onlySave ? document.getElementById('save-balance-only-btn') : document.getElementById('save-balance-btn');
-    const spinner = onlySave ? document.getElementById('balance-only-spinner') : document.getElementById('balance-spinner');
-    
-    if (saveButton && spinner) {
-        saveButton.disabled = true;
-        spinner.classList.remove('hidden');
-        const buttonText = onlySave ? 'Saving...' : 'Generating & Saving...';
-        saveButton.innerHTML = `<span>${buttonText}</span>${spinner.outerHTML}`;
-    }
-    
-    try {
-        const paymentDue = parseFloat(document.getElementById('balancePaymentDue').value) || 0;
-        const exchangeRate = parseFloat(document.getElementById('balanceExchangeRate').value) || 130;
-        const dueDate = document.getElementById('balanceDueDate').value;
-        const paymentReference = document.getElementById('balancePaymentReference').value;
-        
-        // Collect bank details
-        // AFTER
-        // Collect bank details
-        const bankSelect = document.getElementById('balanceBankDetailsSelect');
-        const selectedBank = parseBankSelectValue(bankSelect);
-        
-        if (!selectedBank) {
-            showErrorToast("Please select a bank account.");
-            resetBalanceSaveButton(saveButton, spinner, onlySave);
-            return;
-        }
-        
-        // Calculate totals
-        const totalPrice = sourceInvoice.totalPrice || 0;
-        const totalPaidSoFar = sourceInvoice.totalPaid || 0;
-        const remainingBalance = sourceInvoice.remainingBalance || 0;
-        const newTotalPaid = totalPaidSoFar + paymentDue;
-        const remainingAfter = remainingBalance - paymentDue;
-        
-        // Generate invoice number
-        const carMakeModel = sourceInvoice.carDetails?.make && sourceInvoice.carDetails?.model 
-            ? `${sourceInvoice.carDetails.make} ${sourceInvoice.carDetails.model}` 
-            : sourceInvoice.vehicleDetails?.makeModel || 'Unknown';
-        
-        const invoiceId = await generateBalanceInvoiceNumber(sourceInvoice.clientName, carMakeModel, sourceInvoice.invoiceId);
-        
-        // Prepare invoice data
-      const parentVehicleId = sourceInvoice.parentVehicleId 
-            || sourceInvoice.carDetails?.vin 
-            || sourceInvoice.firestoreId 
-            || 'UNKNOWN';
-
-        const balanceData = {
-            docType: 'Balance Invoice',
-            invoiceStage: 'Balance',                          // ← NEW
-            parentVehicleId,                                  // ← NEW
-            linkedTransactionId: sourceInvoice.sourceInvoiceId || sourceInvoice.invoiceId, // ← NEW
-            invoiceId,
-            sourceInvoiceId: sourceInvoice.invoiceId,
-            sourceInvoiceFirestoreId: sourceInvoice.firestoreId,
-            sourceType: sourceInvoice.sourceType || 'regular',
-            clientName: sourceInvoice.clientName,
-            clientPhone: sourceInvoice.clientPhone || '',
-            issueDate: getCurrentDateForDocument(),
-            dueDate: dueDate || null,
-            exchangeRate,
-            carDetails: sourceInvoice.carDetails || sourceInvoice.vehicleDetails || { make: '', model: '', year: '', vin: '', color: '' },
-            pricing: {
-                totalUSD: totalPrice,
-                totalPaidBefore: totalPaidBefore,
-                currentPaymentDue: paymentDue,
-                newTotalPaid: newTotalPaid,
-                remainingBalance: remainingAfter,
-                paymentPercentage: (paymentDue / totalPrice * 100),
-                totalPaidPercentage: (newTotalPaid / totalPrice * 100),
-                remainingBalanceBefore: remainingBalanceBefore
-            },
-            paymentReference: paymentReference,
-            bankDetails: selectedBank,
-            createdBy: currentUser.email,
-            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-            revoked: false
-        };
-        
-        // Save to Firestore
-        const docRef = await db.collection("balance_invoices").add(balanceData);
-        
-        resetBalanceSaveButton(saveButton, spinner, onlySave);
-        showSuccessToast(`Balance Invoice ${invoiceId} saved successfully!`);
-        
-        if (!onlySave) {
-            balanceData.firestoreId = docRef.id;
-            generateBalancePDF(balanceData);
-        }
-        
-        // Clear global data and refresh
-        window.currentBalanceSourceInvoice = null;
-        renderInvoiceHistory();
-        
-    } catch (error) {
-        console.error("Error saving balance invoice:", error);
-        resetBalanceSaveButton(saveButton, spinner, onlySave);
-        showErrorToast("Failed to save invoice: " + error.message);
-    }
+    // Legacy entry point: it referenced undefined variables and never updated
+    // the parent invoice or the bank ledger. Always use the corrected version.
+    return saveBalanceInvoiceCorrected(onlySave);
 }
 
 /**
@@ -10970,6 +10694,7 @@ summaryY += 5;
 
 doc.text(`Amount Payable for this Invoice:`, margin + 5, summaryY);
 drawText(`USD ${formatAmount(data.pricing.currentPaymentDue)}`, margin + 70, summaryY, 12, 'bold', secondaryColor);
+summaryY += 6;
 
     doc.text(`Remaining Balance:`, margin + 5, summaryY);
     drawText(`USD ${formatAmount(data.pricing.remainingBalance)}`, margin + 70, summaryY, 10, 'bold', data.pricing.remainingBalance > 0 ? secondaryColor : primaryColor);
@@ -12248,9 +11973,15 @@ async function saveBalanceInvoiceCorrected(onlySave = false) {
                 throw new Error('Source invoice not found in Firestore');
             }
             const sourceData = sourceSnap.data();
+            const sourceIsStaged = sourceData.docType === 'Top-Up Invoice' || sourceData.docType === 'Balance Invoice';
+            // All reads must happen before any write
+            const chain = await loadInvoiceChain(transaction, sourceRef, sourceSnap);
             const totalPrice = sourceData.pricing?.totalUSD || 0;
-            const totalPaidBefore = sourceData.pricing?.totalPaid || 0;
-            const remainingBefore = sourceData.pricing?.remainingBalance || 0;
+            // A top-up / balance parent keeps its running total in newTotalPaid
+            const totalPaidBefore = sourceIsStaged
+                ? (sourceData.pricing?.newTotalPaid ?? sourceData.pricing?.totalPaid ?? 0)
+                : (sourceData.pricing?.totalPaid || 0);
+            const remainingBefore = sourceData.pricing?.remainingBalance ?? roundCurrency(totalPrice - totalPaidBefore);
 
             // Validate that payment does not exceed remaining
             if (roundedPayment > remainingBefore) {
@@ -12273,7 +12004,8 @@ async function saveBalanceInvoiceCorrected(onlySave = false) {
                 invoiceId,
                 sourceInvoiceId: sourceData.invoiceId,
                 sourceInvoiceFirestoreId: sourceRef.id,
-                sourceType: sourceData.sourceType || 'regular',
+                sourceInvoiceCollection: sourceColl,
+                sourceType: sourceColl === 'top_up_invoices' ? 'topup' : sourceColl === 'balance_invoices' ? 'balance' : 'regular',
                 clientName: sourceData.clientName,
                 clientPhone: sourceData.clientPhone || '',
                 issueDate: getCurrentDateForDocument(),
@@ -12332,10 +12064,12 @@ async function saveBalanceInvoiceCorrected(onlySave = false) {
             }
 
             // Update the source invoice's balances
-            transaction.update(sourceRef, {
-                'pricing.totalPaid': newTotalPaid,
-                'pricing.remainingBalance': newRemaining
+            chain.slice(1).forEach(item => {
+                transaction.update(item.ref, buildChainUpdate(item, roundedPayment));
             });
+            transaction.update(sourceRef, sourceIsStaged
+                ? { 'pricing.remainingBalance': newRemaining }
+                : { 'pricing.totalPaid': newTotalPaid, 'pricing.remainingBalance': newRemaining });
 
             // Also update runningBalance and lastStageInvoiceId on the source if it has those fields
             transaction.update(sourceRef, {
@@ -12373,14 +12107,7 @@ async function saveBalanceInvoiceCorrected(onlySave = false) {
 /**
  * Resets balance corrected save button
  */
-function resetBalanceCorrectedSaveButton(saveButton, spinner, onlySave) {
-    if (saveButton && spinner) {
-        saveButton.disabled = false;
-        spinner.classList.add('hidden');
-        const buttonText = onlySave ? 'Save Only (No PDF)' : 'Generate & Save Balance Invoice';
-        saveButton.innerHTML = `<span>${buttonText}</span>${spinner.outerHTML}`;
-    }
-}
+// (removed duplicate definition; the later one in this file is the active version)
 
 //HELPER FUNCTIONS
 
@@ -12585,7 +12312,6 @@ function renderAuctionInvoiceHistory() {
                             <td class="px-4 py-2 text-sm text-right font-semibold">USD ${totalPrice.toFixed(2)}</td>
                             <td class="px-4 py-2 text-sm text-right text-green-600 font-semibold">USD ${totalPaid.toFixed(2)}</td>
                             <td class="px-4 py-2 text-sm text-right ${remaining > 0 ? 'text-red-600' : 'text-green-600'} font-semibold">USD ${remaining.toFixed(2)}</td>
-                            <td class="px-4 py-2 text-sm text-right ${remaining > 0 ? 'text-red-600' : 'text-green-600'} font-semibold">USD ${remaining.toFixed(2)}</td>
                             <td class="px-4 py-2 text-center">
                                 <div class="flex justify-center gap-2">
                                     <button onclick='reDownloadInvoiceForTrail(${invoiceDataJson})' class="text-primary-blue hover:text-blue-700" title="Download PDF">
@@ -12605,7 +12331,6 @@ function renderAuctionInvoiceHistory() {
                                     ` : ''}
                                 </div>
                             </td>
-                        </tr>
                         </tr>
                     `;
                 }
