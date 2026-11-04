@@ -985,6 +985,7 @@ auth.onAuthStateChanged(user => {
         // User is signed out.
         authStatus.innerHTML = '';
         mainNav.classList.add('hidden');
+        DocStore.reset();
         renderAuthForm();
     }
 });
@@ -1106,70 +1107,73 @@ function performGlobalSearch(searchTerm = '', filter = 'all') {
 /**
  * Helper function to display search results
  */
-function displaySearchResults(results, searchTerm) {
+function displaySearchResults(results, searchTerm, meta = {}) {
     const resultsList = document.getElementById('search-results-list');
-    
     if (!resultsList) return;
-    
+
+    const total = meta.total ?? results.length;
+    const st = SearchState;
+    const opt = (key, list) => list.map(([v, l]) => `<option value="${v}" ${st[key] === v ? 'selected' : ''}>${l}</option>`).join('');
+    const sel = (key, list) => `<select onchange="SearchUI.set('${key}', this.value)" class="p-2 border border-gray-300 rounded-lg text-sm bg-white">${opt(key, list)}</select>`;
+    const filtersActive = st.status !== 'all' || st.balance !== 'all' || st.range !== 'all';
+
+    const controls = `
+        <div class="mb-4 p-3 bg-gray-50 border border-gray-200 rounded-xl flex flex-wrap gap-2 items-center">
+            ${sel('status', [['all', 'All statuses'], ['active', 'Active'], ['revoked', 'Revoked']])}
+            ${sel('balance', [['all', 'Any balance'], ['due', 'Balance due'], ['paid', 'Fully paid']])}
+            ${sel('range', [['all', 'All time'], ['7', 'Last 7 days'], ['30', 'Last 30 days'], ['90', 'Last 90 days'], ['ytd', 'This year']])}
+            ${sel('sort', [['relevance', 'Best match'], ['newest', 'Newest first'], ['oldest', 'Oldest first'], ['amount-desc', 'Amount: high to low'], ['amount-asc', 'Amount: low to high'], ['client', 'Client A–Z']])}
+            ${filtersActive ? `<button type="button" onclick="SearchUI.reset()" class="text-sm text-gray-600 hover:text-primary-blue px-2">Reset filters</button>` : ''}
+        </div>`;
+
     if (results.length === 0) {
         resultsList.innerHTML = `
+            ${controls}
             <div class="text-center p-8 bg-gray-50 rounded-lg border border-gray-200 animate-fade-in">
-                <svg class="w-16 h-16 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                </svg>
                 <p class="text-gray-600 mb-2">No documents found for</p>
-                <p class="font-semibold text-primary-blue text-lg mb-1">"${searchTerm}"</p>
-                <p class="text-sm text-gray-500 mt-2">Try searching with different terms</p>
+                <p class="font-semibold text-primary-blue text-lg mb-1">"${smartEscape(searchTerm)}"</p>
+                <p class="text-sm text-gray-500 mt-2">${filtersActive ? 'Try resetting the filters, or ' : 'Try '}different words — names, references, VINs and phone numbers all work.</p>
             </div>
         `;
         return;
     }
-    
-    let html = `
-        <div class="mb-6 p-4 bg-gradient-to-r from-primary-blue/5 to-blue-50 rounded-lg border border-primary-blue/20 animate-fade-in">
-            <div class="flex items-center justify-between">
-                <div>
-                    <p class="text-gray-600">Found <span class="font-bold text-primary-blue text-xl">${results.length}</span> documents for</p>
-                    <p class="font-semibold text-lg text-primary-blue">"${searchTerm}"</p>
-                </div>
-                <div class="bg-primary-blue text-white text-xs font-bold px-3 py-1 rounded-full">
-                    ${results.length} Results
-                </div>
-            </div>
+
+    let html = controls + `
+        <div class="mb-4 flex items-baseline justify-between animate-fade-in">
+            <p class="text-gray-600">
+                <span class="font-bold text-primary-blue text-lg">${total}</span> document${total === 1 ? '' : 's'}
+                for <span class="font-semibold text-primary-blue">"${smartEscape(searchTerm)}"</span>
+                ${meta.fuzzy ? '<span class="ml-2 text-xs bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded-full">close matches</span>' : ''}
+            </p>
         </div>
     `;
-    
-    results.forEach((doc, index) => {
-        // Add delay for staggered animation
-        const animationDelay = index * 50;
-        
+
+    results.forEach((doc) => {
         const docJson = JSON.stringify({
             ...doc,
             firestoreId: doc.id,
             createdAt: doc.createdAt ? (doc.createdAt.toDate ? doc.createdAt.toDate().toISOString() : doc.createdAt) : new Date().toISOString()
         });
-        
+
         let resultHtml = '';
-        if (doc.type === 'receipt') {
-            resultHtml = renderReceiptSearchResult(doc, docJson);
-        } else if (doc.type === 'invoice') {
-            resultHtml = renderInvoiceSearchResult(doc, docJson);
-        } else if (doc.type === 'agreement') {
-            resultHtml = renderAgreementSearchResult(doc, docJson);
-        } else if (doc.type === 'portcharges') {
-            resultHtml = renderPortChargesSearchResult(doc, docJson);
-        } else if (doc.type === 'topup') {
-            resultHtml = renderTopUpSearchResult(doc, docJson);
-        }
-        
-        // Wrap each result with animation
-        html += `
-            <div class="animate-fade-in" style="animation-delay: ${animationDelay}ms">
-                ${resultHtml}
-            </div>
-        `;
+        if (doc.type === 'receipt') resultHtml = renderReceiptSearchResult(doc, docJson);
+        else if (doc.type === 'invoice') resultHtml = renderInvoiceSearchResult(doc, docJson);
+        else if (doc.type === 'agreement') resultHtml = renderAgreementSearchResult(doc, docJson);
+        else if (doc.type === 'portcharges') resultHtml = renderPortChargesSearchResult(doc, docJson);
+        else if (doc.type === 'topup') resultHtml = renderTopUpSearchResult(doc, docJson);
+
+        html += `<div class="mb-4">${resultHtml}</div>`;
     });
-    
+
+    if (total > results.length) {
+        html += `
+            <div class="text-center mt-2">
+                <button type="button" onclick="SearchUI.more()" class="bg-primary-blue hover:bg-blue-900 text-white font-medium px-5 py-2 rounded-lg">
+                    Show ${Math.min(25, total - results.length)} more <span class="opacity-75">(${results.length} of ${total})</span>
+                </button>
+            </div>`;
+    }
+
     resultsList.innerHTML = html;
 }
 
@@ -1488,6 +1492,7 @@ function renderTopUpSearchResult(doc, docJson) {
  * Clears search and shows the default view
  */
 function clearSearch() {
+    Object.assign(SearchState, { status: 'all', balance: 'all', range: 'all', sort: 'relevance', limit: 25, lastTerm: '', lastType: 'all' });
     // Get elements with null checks
     const searchInput = document.getElementById('document-search');
     const filterSelect = document.getElementById('document-type-filter');
@@ -1615,6 +1620,7 @@ function renderDashboard() {
     `;
 
     renderMainNav();
+    DocStore.warm();
 }
 
 // New Utility for Shared Reference & Serial Generation
@@ -1680,7 +1686,8 @@ function handleDocumentGenerator() {
                 </div>
             </div>
             <div class="mt-3 text-sm text-gray-600">
-                <p>Search by: Client Name, Reference Number, Car Make/Model, Phone Number, or VIN</p>
+                <p>Type any words, in any order — name, reference, car, VIN or phone. Typos are forgiven.</p>
+                <p class="mt-1 text-xs text-gray-500">Shortcuts: <code>is:unpaid</code> · <code>is:revoked</code> · <code>type:topup</code> · <code>min:5000</code> · <code>max:20000</code> · <code>after:2026-01-01</code> · <code>after:30d</code></p>
             </div>
         </div>
 
@@ -1729,15 +1736,20 @@ function handleDocumentGenerator() {
         </div>
     `;
     
-    // Add event listener for Enter key
+    // Search as you type (instant: results come from the in-memory cache)
     const searchInput = document.getElementById('document-search');
+    const typeSelect = document.getElementById('document-type-filter');
     if (searchInput) {
+        searchInput.addEventListener('input', smartDebounce(liveSearch, 250));
         searchInput.addEventListener('keypress', function(e) {
             if (e.key === 'Enter') {
                 searchDocuments();
             }
         });
+        searchInput.focus();
     }
+    if (typeSelect) typeSelect.addEventListener('change', liveSearch);
+    DocStore.warm();
 }
 
 // =================================================================
@@ -3775,7 +3787,7 @@ async function fetchInvoices() {
     const listElement = document.getElementById('invoice-history-list');
     let html = ``;
     try {
-        const snapshot = await db.collection("invoices").orderBy("createdAt", "desc").limit(10).get();
+        const snapshot = await getHistorySnapshot(HV.invoices);
         if (snapshot.empty) {
             listElement.innerHTML = `
                 <div class="text-center p-8 border border-dashed border-gray-300 rounded-lg">
@@ -3904,6 +3916,7 @@ async function fetchInvoices() {
         });
         html += `</ul>`;
         listElement.innerHTML = html;
+        historyAfterRender(HV.invoices);
     } catch (error) {
         console.error("Error fetching invoices:", error);
         listElement.innerHTML = `
@@ -6661,6 +6674,588 @@ function resetDepositSaveButton(saveButton, spinner) {
 }
 
 // =================================================================
+//        SMART DATA LAYER: live cache + search + filters + sorting
+// =================================================================
+// Why: every search used to download whole collections from Firestore and
+// every history page re-queried (the auction history ran one query per
+// invoice). Now each collection is loaded ONCE into memory and kept in sync
+// by a live listener, so searching, filtering, sorting and paging are
+// instant and always up to date (revokes/new documents appear by themselves).
+
+const DOC_COLLECTIONS = {
+    invoice: 'invoices',
+    topup: 'top_up_invoices',
+    balance: 'balance_invoices',
+    receipt: 'receipts',
+    agreement: 'sales_agreements',
+    portcharges: 'port_charges_invoices'
+};
+
+function smartEscape(s) {
+    return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+/** lower-case, accent-free, punctuation turned into spaces */
+function smartNorm(s) {
+    return String(s ?? '')
+        .toLowerCase()
+        .normalize('NFD').replace(/[̀-ͯ]/g, '')
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim();
+}
+
+function smartToMillis(v) {
+    if (!v) return Date.now();                       // pending server timestamp
+    if (typeof v.toMillis === 'function') return v.toMillis();
+    if (typeof v.toDate === 'function') return v.toDate().getTime();
+    const t = new Date(v).getTime();
+    return isNaN(t) ? 0 : t;
+}
+
+/** Edit distance with swaps (e.g. "jhon" -> "john" = 1); returns max+1 if further than max. */
+function smartEditDistance(a, b, max) {
+    if (Math.abs(a.length - b.length) > max) return max + 1;
+    const m = a.length, n = b.length;
+    const d = [];
+    for (let i = 0; i <= m; i++) { d[i] = new Array(n + 1).fill(0); d[i][0] = i; }
+    for (let j = 0; j <= n; j++) d[0][j] = j;
+    for (let i = 1; i <= m; i++) {
+        for (let j = 1; j <= n; j++) {
+            const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+            d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost);
+            if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
+                d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+            }
+        }
+    }
+    return d[m][n];
+}
+
+function smartBuildEntry(type, doc) {
+    const d = doc.data({ serverTimestamps: 'estimate' });
+    const money = v => (typeof v === 'number' && !isNaN(v)) ? v : null;
+
+    let amount = 0, balance = null;
+    if (type === 'portcharges') {
+        amount = money(d.totals?.totalUSD) ?? 0;
+        balance = money(d.totals?.remainingBalance);
+    } else if (type === 'receipt') {
+        amount = money(d.amountReceivedUSD) ?? money(d.amountReceived) ?? 0;
+        balance = money(d.balanceDetails?.balanceRemainingUSD);
+    } else if (type === 'agreement') {
+        amount = money(d.salesTerms?.price) ?? 0;
+    } else {
+        amount = money(d.pricing?.totalUSD) ?? money(d.totalPrice) ?? 0;
+        balance = money(d.pricing?.remainingBalance) ?? (d.pricing ? amount : null);
+    }
+
+    const client = d.clientName || d.receivedFrom || d.buyer?.name || '';
+    const ref = d.invoiceId || d.receiptId || d.invoiceReference || '';
+
+    // [text, weight] — higher weight = matters more for ranking
+    const raw = [
+        [d.invoiceId, 3], [d.receiptId, 3], [d.invoiceReference, 2], [d.receiptReference, 2],
+        [d.sourceInvoiceId, 2], [d.linkedTransactionId, 1.5],
+        [client, 2.5],
+        [d.clientPhone, 2], [d.buyer?.phone, 2],
+        [d.carDetails?.vin, 2], [d.vehicleDetails?.vin, 2], [d.vehicle?.vin, 2],
+        [[d.carDetails?.make, d.carDetails?.model, d.carDetails?.year, d.carDetails?.color].filter(Boolean).join(' '), 2],
+        [[d.vehicleDetails?.makeModel, d.vehicleDetails?.year].filter(Boolean).join(' '), 2],
+        [[d.vehicle?.makeModel, d.vehicle?.year, d.vehicle?.color].filter(Boolean).join(' '), 2],
+        [d.beingPaidFor, 1], [d.paymentReference, 1.5], [d.docType, 1], [d.receiptType, 1],
+        [d.issueDate, 1], [d.receiptDate, 1], [d.agreementDate, 1],
+        [d.createdBy, 0.5],
+        [amount ? String(amount) : '', 1],
+        [d.revoked ? 'revoked' : '', 0.5]
+    ];
+    const fields = [];
+    raw.forEach(([t, w]) => {
+        const n = smartNorm(t);
+        if (!n) return;
+        fields.push({ t: n, c: n.replace(/ /g, ''), words: n.split(' '), w });
+    });
+
+    return {
+        id: doc.id, type, data: d,
+        ts: smartToMillis(d.createdAt),
+        client, ref, amount, balance,
+        revoked: !!d.revoked,
+        fields
+    };
+}
+
+const DocStore = {
+    cols: {},
+    watcher: null,
+    _timer: null,
+
+    /** Starts (once) a live listener for a collection; resolves after the first load. */
+    ensure(key) {
+        let c = this.cols[key];
+        if (c) return c.ready;
+        c = this.cols[key] = { map: new Map(), list: null };
+        c.ready = new Promise(resolve => {
+            let first = true;
+            const done = () => { if (first) { first = false; resolve(c); } };
+            c.unsub = db.collection(DOC_COLLECTIONS[key]).onSnapshot(snap => {
+                snap.docChanges().forEach(ch => {
+                    if (ch.type === 'removed') c.map.delete(ch.doc.id);
+                    else c.map.set(ch.doc.id, smartBuildEntry(key, ch.doc));
+                });
+                c.list = null;
+                done();
+                this._notify();
+            }, err => {
+                console.error(`Live load failed for ${key}, falling back to one-time read:`, err);
+                db.collection(DOC_COLLECTIONS[key]).get().then(snap => {
+                    snap.forEach(doc => c.map.set(doc.id, smartBuildEntry(key, doc)));
+                    c.list = null;
+                }).catch(e => console.error(e)).finally(done);
+            });
+        });
+        return c.ready;
+    },
+
+    ensureAll(keys) { return Promise.all(keys.map(k => this.ensure(k))); },
+
+    /** All cached entries of a type, newest first. */
+    entries(key) {
+        const c = this.cols[key];
+        if (!c) return [];
+        if (!c.list) c.list = Array.from(c.map.values()).sort((a, b) => b.ts - a.ts);
+        return c.list;
+    },
+
+    warm() {
+        try { ['invoice', 'topup', 'receipt', 'agreement', 'portcharges', 'balance'].forEach(k => this.ensure(k)); }
+        catch (e) { console.warn('Cache warm-up skipped:', e); }
+    },
+
+    reset() {
+        Object.values(this.cols).forEach(c => { try { c.unsub && c.unsub(); } catch (e) { /* ignore */ } });
+        this.cols = {};
+        this.watcher = null;
+    },
+
+    watch(fn) { this.watcher = fn; },
+
+    _notify() {
+        if (!this.watcher) return;
+        clearTimeout(this._timer);
+        this._timer = setTimeout(() => { try { this.watcher && this.watcher(); } catch (e) { console.error(e); } }, 200);
+    }
+};
+
+// ---------- query language ----------
+const SMART_TYPES = {
+    invoice: 'invoice', invoices: 'invoice', topup: 'topup', 'top-up': 'topup', topups: 'topup',
+    receipt: 'receipt', receipts: 'receipt', agreement: 'agreement', agreements: 'agreement',
+    port: 'portcharges', portcharges: 'portcharges', balance: 'balance'
+};
+
+function smartParseDate(s) {
+    s = String(s).trim().toLowerCase();
+    let m = s.match(/^(\d+)d$/);
+    if (m) return Date.now() - Number(m[1]) * 86400000;
+    const t = new Date(s).getTime();
+    return isNaN(t) ? null : t;
+}
+
+/**
+ * "john is:unpaid min:5000 type:topup after:2026-01-01" ->
+ *   { words: ['john'], filters: { balance:'due', min:5000, types:['topup'], from:<ms> } }
+ */
+function smartParseQuery(raw) {
+    const out = { words: [], filters: {} };
+    String(raw || '').trim().split(/\s+/).filter(Boolean).forEach(part => {
+        const m = part.match(/^(type|status|is|min|max|after|before|from|to):(.*)$/i);
+        if (!m || !m[2]) { out.words.push(part); return; }
+        const k = m[1].toLowerCase(), v = m[2].toLowerCase();
+        if (k === 'type' && SMART_TYPES[v]) out.filters.types = [SMART_TYPES[v]];
+        else if ((k === 'status' || k === 'is') && (v === 'revoked' || v === 'active')) out.filters.status = v;
+        else if ((k === 'status' || k === 'is') && (v === 'unpaid' || v === 'due' || v === 'outstanding')) out.filters.balance = 'due';
+        else if ((k === 'status' || k === 'is') && (v === 'paid' || v === 'settled')) out.filters.balance = 'paid';
+        else if (k === 'min' && !isNaN(parseFloat(v))) out.filters.min = parseFloat(v);
+        else if (k === 'max' && !isNaN(parseFloat(v))) out.filters.max = parseFloat(v);
+        else if ((k === 'after' || k === 'from') && smartParseDate(v) !== null) out.filters.from = smartParseDate(v);
+        else if ((k === 'before' || k === 'to') && smartParseDate(v) !== null) out.filters.to = smartParseDate(v) + 86400000;
+        else out.words.push(part);
+    });
+    return out;
+}
+
+function smartRangeStart(range) {
+    const day = 86400000;
+    if (range === '7') return Date.now() - 7 * day;
+    if (range === '30') return Date.now() - 30 * day;
+    if (range === '90') return Date.now() - 90 * day;
+    if (range === 'ytd') return new Date(new Date().getFullYear(), 0, 1).getTime();
+    return null;
+}
+
+function smartPassesFilters(e, f) {
+    if (f.types && f.types.length && !f.types.includes(e.type)) return false;
+    if (f.status === 'revoked' && !e.revoked) return false;
+    if (f.status === 'active' && e.revoked) return false;
+    if (f.balance === 'due' && !(e.balance !== null && e.balance > 0.009 && !e.revoked)) return false;
+    if (f.balance === 'paid' && !(e.balance !== null && e.balance <= 0.009)) return false;
+    const from = f.from ?? smartRangeStart(f.range);
+    if (from != null && e.ts < from) return false;
+    if (f.to != null && e.ts > f.to) return false;
+    if (f.min != null && e.amount < f.min) return false;
+    if (f.max != null && e.amount > f.max) return false;
+    return true;
+}
+
+/** Score one word against one entry (0 = no match). */
+function smartScoreWord(e, w, fuzzy, extra) {
+    let best = 0;
+    const lim = w.length >= 8 ? 2 : 1;
+    const consider = (fld) => {
+        let s = 0;
+        if (fld.words.includes(w) || fld.t === w) s = 10;
+        else if (w.length >= 2 && fld.words.some(x => x.startsWith(w))) s = 7;
+        else if (fld.c === w) s = 10;
+        else if (w.length >= 3 && fld.c.includes(w)) s = 5;      // very short words only match whole words / word starts
+        else if (w.length >= 3 && fld.t.includes(w)) s = 4;
+        else if (fuzzy && w.length >= 4) {
+            for (const x of fld.words) {
+                if (x.length >= 3 && smartEditDistance(w, x, lim) <= lim) { s = 2.5; break; }
+            }
+        }
+        const v = s * fld.w;
+        if (v > best) best = v;
+    };
+    e.fields.forEach(consider);
+    if (extra) extra.forEach(consider);
+    return best;
+}
+
+/**
+ * Core search. opts: { text, types[], filters{}, sort, extra(entry)->fields[] }
+ * Returns { items:[entry...], total, fuzzy, words }
+ */
+async function smartSearch(opts) {
+    const types = opts.types && opts.types.length ? opts.types : ['invoice', 'topup', 'receipt', 'agreement', 'portcharges'];
+    await DocStore.ensureAll(types);
+
+    const parsed = smartParseQuery(opts.text);
+    const f = Object.assign({}, opts.filters || {});
+    // operators typed in the box narrow what the dropdowns allow
+    if (parsed.filters.types) f.types = (f.types && f.types.length) ? f.types.filter(t => parsed.filters.types.includes(t)) : parsed.filters.types;
+    ['status', 'balance', 'min', 'max', 'from', 'to'].forEach(k => { if (parsed.filters[k] != null) f[k] = parsed.filters[k]; });
+
+    const useTypes = (f.types && f.types.length) ? types.filter(t => f.types.includes(t)) : types;
+    let pool = [];
+    useTypes.forEach(t => { pool = pool.concat(DocStore.entries(t)); });
+    if (opts.base) pool = pool.filter(opts.base);
+    pool = pool.filter(e => smartPassesFilters(e, f));
+
+    // Each space-separated chunk is a unit ("bal-2" = one unit of words ["bal","2"]).
+    // A unit matches if all its words match, OR its joined form ("bal2") matches an
+    // id-like field, so references typed with or without dashes both work.
+    const units = parsed.words.map(w => {
+        const ws = smartNorm(w).split(' ').filter(Boolean);
+        return { words: ws, compact: ws.join('') };
+    }).filter(u => u.words.length);
+    const words = units.reduce((acc, u) => acc.concat(u.words), []);
+
+    const scoreUnit = (e, u, fuzzy, extra) => {
+        let wordSum = 0, wordsOk = true;
+        for (const w of u.words) {
+            const s = smartScoreWord(e, w, fuzzy, extra);
+            if (s <= 0) { wordsOk = false; break; }
+            wordSum += s;
+        }
+        let compactScore = 0;
+        if (u.words.length > 1 && u.compact.length >= 3) {
+            const check = (fld) => {
+                const v = (fld.c === u.compact ? 12 : fld.c.includes(u.compact) ? 8 : 0) * fld.w;
+                if (v > compactScore) compactScore = v;
+            };
+            e.fields.forEach(check);
+            if (extra) extra.forEach(check);
+        }
+        return Math.max(wordsOk ? wordSum : 0, compactScore);
+    };
+
+    const run = (fuzzy) => {
+        const scored = [];
+        for (const e of pool) {
+            const extra = opts.extra ? opts.extra(e) : null;
+            let total = 0, ok = true;
+            for (const u of units) {
+                const s = scoreUnit(e, u, fuzzy, extra);
+                if (s <= 0) { ok = false; break; }
+                total += s;
+            }
+            if (ok) scored.push({ e, score: total });
+        }
+        return scored;
+    };
+
+    let fuzzy = false, scored;
+    if (!words.length) {
+        scored = pool.map(e => ({ e, score: 0 }));
+    } else {
+        scored = run(false);
+        if (!scored.length) { scored = run(true); fuzzy = scored.length > 0; }
+    }
+
+    const sort = opts.sort || (words.length ? 'relevance' : 'newest');
+    const by = {
+        relevance: (a, b) => (b.score - a.score) || (b.e.ts - a.e.ts),
+        newest: (a, b) => b.e.ts - a.e.ts,
+        oldest: (a, b) => a.e.ts - b.e.ts,
+        'amount-desc': (a, b) => (b.e.amount - a.e.amount) || (b.e.ts - a.e.ts),
+        'amount-asc': (a, b) => (a.e.amount - b.e.amount) || (b.e.ts - a.e.ts),
+        client: (a, b) => (a.e.client || '').localeCompare(b.e.client || '') || (b.e.ts - a.e.ts)
+    };
+    scored.sort(by[sort] || by.newest);
+    return { items: scored.map(s => s.e), total: scored.length, fuzzy, words };
+}
+
+/** Wrap matched words in <mark> inside a rendered container. */
+function smartHighlight(container, words) {
+    const list = (words || []).filter(w => w.length >= 2);
+    if (!container || !list.length) return;
+    const re = new RegExp('(' + list.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')', 'ig');
+    const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, {
+        acceptNode: n => (n.parentElement && !/^(BUTTON|SCRIPT|STYLE|MARK|SVG|PATH)$/i.test(n.parentElement.tagName) && n.nodeValue.trim())
+            ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT
+    });
+    const nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    nodes.forEach(n => {
+        if (!re.test(n.nodeValue)) { re.lastIndex = 0; return; }
+        re.lastIndex = 0;
+        const span = document.createElement('span');
+        span.innerHTML = smartEscape(n.nodeValue).replace(re, '<mark class="bg-yellow-200 rounded px-0.5">$1</mark>');
+        n.replaceWith(...span.childNodes);
+    });
+}
+
+function smartDebounce(fn, ms = 250) {
+    let t;
+    return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
+}
+
+// =================================================================
+//        HISTORY PAGES: shared toolbar (search/filter/sort/paging)
+// =================================================================
+// Each history page keeps its original look; it just asks
+// getHistorySnapshot() for the (filtered, sorted, paged) documents instead
+// of querying Firestore itself, and gets a toolbar + "Show more" for free.
+
+const HistoryViews = {};   // id -> { cfg, state }
+
+function historyDefaults(cfg) {
+    return { q: '', status: 'all', balance: 'all', range: 'all', sort: 'newest', limit: cfg.pageSize || 25 };
+}
+
+function historyMount(cfg) {
+    let view = HistoryViews[cfg.id];
+    if (!view) view = HistoryViews[cfg.id] = { cfg, state: historyDefaults(cfg) };
+    view.cfg = cfg;                                     // keep the latest reload() closure
+    const list = document.getElementById(cfg.listId);
+    if (!list) return view;
+
+    if (!document.getElementById(`hv-bar-${cfg.id}`)) {
+        const s = view.state;
+        const sel = (key, opts) => `<select onchange="HistoryUI.set('${cfg.id}','${key}',this.value)" class="p-2 border border-gray-300 rounded-lg text-sm bg-white">${
+            opts.map(([v, l]) => `<option value="${v}" ${s[key] === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
+        const bar = document.createElement('div');
+        bar.id = `hv-bar-${cfg.id}`;
+        bar.className = 'mb-4 p-3 bg-gray-50 border border-gray-200 rounded-xl flex flex-wrap gap-2 items-center';
+        bar.innerHTML = `
+            <input id="hv-q-${cfg.id}" type="search" value="${smartEscape(s.q)}" placeholder="Search client, reference, car, VIN, phone…"
+                   oninput="HistoryUI.typing('${cfg.id}', this.value)"
+                   class="flex-1 min-w-[200px] p-2 border border-gray-300 rounded-lg text-sm focus:ring-primary-blue focus:border-primary-blue">
+            ${sel('status', [['all', 'All statuses'], ['active', 'Active'], ['revoked', 'Revoked']])}
+            ${cfg.balance ? sel('balance', [['all', 'Any balance'], ['due', 'Balance due'], ['paid', 'Fully paid']]) : ''}
+            ${sel('range', [['all', 'All time'], ['7', 'Last 7 days'], ['30', 'Last 30 days'], ['90', 'Last 90 days'], ['ytd', 'This year']])}
+            ${sel('sort', [['newest', 'Newest first'], ['oldest', 'Oldest first'], ['amount-desc', 'Amount: high to low'], ['amount-asc', 'Amount: low to high'], ['client', 'Client A–Z'], ['relevance', 'Best match']])}
+            <button type="button" onclick="HistoryUI.reset('${cfg.id}')" class="text-sm text-gray-600 hover:text-primary-blue px-2">Reset</button>`;
+        list.parentNode.insertBefore(bar, list);
+    }
+    if (!document.getElementById(`hv-foot-${cfg.id}`)) {
+        const foot = document.createElement('div');
+        foot.id = `hv-foot-${cfg.id}`;
+        foot.className = 'mt-4 flex items-center justify-between text-sm text-gray-500';
+        list.parentNode.insertBefore(foot, list.nextSibling);
+    }
+    return view;
+}
+
+function historyFilters(state) {
+    const f = { status: state.status, balance: state.balance, range: state.range };
+    return f;
+}
+
+/** Drop-in replacement for `db.collection(x).orderBy(...).limit(n).get()`. */
+async function getHistorySnapshot(cfg) {
+    const view = historyMount(cfg);
+    const state = view.state;
+    const res = await smartSearch({
+        text: state.q,
+        types: cfg.ensure || [cfg.source],
+        filters: Object.assign(historyFilters(state), { types: [cfg.source] }),
+        base: cfg.base,
+        extra: cfg.extra,
+        sort: state.sort === 'relevance' && !state.q ? 'newest' : state.sort
+    });
+
+    const shown = res.items.slice(0, state.limit);
+    const docs = shown.map(e => ({ id: e.id, data: () => Object.assign({}, e.data) }));
+    const snap = {
+        docs, size: docs.length, empty: docs.length === 0,
+        forEach(cb) { docs.forEach((d, i) => cb(d, i)); }
+    };
+
+    const foot = document.getElementById(`hv-foot-${cfg.id}`);
+    if (foot) {
+        const more = res.total > shown.length;
+        foot.innerHTML = `
+            <span>${res.total === 0 ? 'No documents match these filters.' : `Showing ${shown.length} of ${res.total}`}${res.fuzzy ? ' · close matches' : ''}</span>
+            ${more ? `<button type="button" onclick="HistoryUI.more('${cfg.id}')" class="bg-primary-blue hover:bg-blue-900 text-white text-sm font-medium px-4 py-2 rounded-lg">Show ${Math.min(cfg.pageSize || 25, res.total - shown.length)} more</button>` : ''}`;
+    }
+    snap._words = res.words;
+    DocStore.watch(() => { if (document.getElementById(cfg.listId)) cfg.reload(); });
+    return snap;
+}
+
+/** Highlights the search words inside a freshly rendered history list. */
+function historyAfterRender(cfg, snap) {
+    const view = HistoryViews[cfg.id];
+    if (view && view.state.q) smartHighlight(document.getElementById(cfg.listId), smartParseQuery(view.state.q).words.map(smartNorm).join(' ').split(' '));
+}
+
+const HistoryUI = {
+    _debounced: {},
+    set(id, key, val) {
+        const v = HistoryViews[id]; if (!v) return;
+        v.state[key] = val;
+        v.state.limit = v.cfg.pageSize || 25;
+        v.cfg.reload();
+    },
+    typing(id, val) {
+        const v = HistoryViews[id]; if (!v) return;
+        if (!this._debounced[id]) {
+            this._debounced[id] = smartDebounce((value) => {
+                v.state.q = value;
+                v.state.limit = v.cfg.pageSize || 25;
+                if (value && v.state.sort === 'newest') v.state.sort = 'relevance';
+                const sortSel = document.querySelector(`#hv-bar-${id} select:last-of-type`);
+                if (sortSel) sortSel.value = v.state.sort;
+                v.cfg.reload();
+            }, 200);
+        }
+        this._debounced[id](val);
+    },
+    more(id) {
+        const v = HistoryViews[id]; if (!v) return;
+        v.state.limit += (v.cfg.pageSize || 25);
+        v.cfg.reload();
+    },
+    reset(id) {
+        const v = HistoryViews[id]; if (!v) return;
+        v.state = historyDefaults(v.cfg);
+        const bar = document.getElementById(`hv-bar-${id}`); if (bar) bar.remove();
+        const foot = document.getElementById(`hv-foot-${id}`); if (foot) foot.remove();
+        v.cfg.reload();
+    }
+};
+
+// History page configurations
+const HV = {
+    invoices: {
+        id: 'invoices', listId: 'invoice-history-list', source: 'invoice', balance: true,
+        // auction-related documents live in the Auction history instead
+        base: e => !(e.data.docType === 'Auction Invoice' || e.data.sourceType === 'auction' || e.data.auctionOriginalInvoiceId),
+        reload: () => fetchInvoices()
+    },
+    topups: {
+        id: 'topups', listId: 'topup-history-list', source: 'topup', balance: true,
+        reload: () => loadTopUpHistoryList()
+    },
+    port: {
+        id: 'port', listId: 'port-charges-history-list', source: 'portcharges', balance: true,
+        reload: () => fetchPortChargesInvoices()
+    },
+    auction: {
+        id: 'auction', listId: 'auction-history-list', source: 'invoice', balance: true,
+        ensure: ['invoice', 'topup', 'balance'],
+        base: e => e.data.docType === 'Auction Invoice',
+        // an auction group also matches on its top-ups / balance invoices
+        extra: e => {
+            const out = [];
+            const inv = e.data.invoiceId;
+            if (!inv) return out;
+            DocStore.entries('topup').forEach(t => {
+                if (t.data.sourceInvoiceId === inv) {
+                    out.push(...t.fields);
+                    DocStore.entries('balance').forEach(b => { if (b.data.sourceInvoiceId === t.data.invoiceId) out.push(...b.fields); });
+                }
+            });
+            return out;
+        },
+        reload: () => renderAuctionList()
+    }
+};
+
+/** Related-document lookups for the auction history (served from the cache). */
+function cachedRelated(typeKey, field, value, ascending = true) {
+    const docs = DocStore.entries(typeKey)
+        .filter(e => e.data[field] === value)
+        .sort((a, b) => ascending ? a.ts - b.ts : b.ts - a.ts)
+        .map(e => ({ id: e.id, data: () => Object.assign({}, e.data) }));
+    return { docs, size: docs.length, empty: docs.length === 0, forEach(cb) { docs.forEach((d, i) => cb(d, i)); } };
+}
+
+// =================================================================
+//        DOCUMENT SEARCH PAGE: instant, ranked, filterable
+// =================================================================
+const SearchState = {
+    status: 'all', balance: 'all', range: 'all', sort: 'relevance', limit: 25,
+    lastTerm: '', lastType: 'all'
+};
+
+const SearchUI = {
+    set(key, val) {
+        SearchState[key] = val;
+        if (key !== 'limit') SearchState.limit = 25;
+        performSearch(SearchState.lastTerm, SearchState.lastType);
+    },
+    more() {
+        SearchState.limit += 25;
+        performSearch(SearchState.lastTerm, SearchState.lastType, { keepScroll: true });
+    },
+    reset() {
+        Object.assign(SearchState, { status: 'all', balance: 'all', range: 'all', sort: 'relevance', limit: 25 });
+        performSearch(SearchState.lastTerm, SearchState.lastType);
+    }
+};
+
+/** Live "search as you type" for the Document Generator page. */
+function liveSearch() {
+    const input = document.getElementById('document-search');
+    const typeSel = document.getElementById('document-type-filter');
+    if (!input) return;
+    const term = input.value.trim();
+    const type = typeSel ? typeSel.value : 'all';
+    if (!term) { silentClearSearch(); return; }
+    if (term.length < 2) return;
+    performSearch(term, type);
+}
+
+function silentClearSearch() {
+    const resultsDiv = document.getElementById('search-results');
+    const area = document.getElementById('document-creation-area');
+    if (resultsDiv) resultsDiv.classList.add('hidden');
+    if (area) area.classList.remove('hidden');
+}
+
+// =================================================================
 //                 SEARCH FUNCTIONS
 // =================================================================
 
@@ -6803,78 +7398,53 @@ async function searchDocuments() {
 }
 
 // Update the performSearch function to show better messages:
-async function performSearch(searchTerm, docTypeFilter) {
+async function performSearch(searchTerm, docTypeFilter, opts = {}) {
     const resultsList = document.getElementById('search-results-list');
     const searchResultsDiv = document.getElementById('search-results');
     const docCreationArea = document.getElementById('document-creation-area');
-    
+
     if (!resultsList || !searchResultsDiv || !docCreationArea) {
         console.error("Required DOM elements not found");
         showErrorToast("Error: Please try searching again.");
         return;
     }
-    
-    resultsList.innerHTML = createShimmerLoader(3);
+
+    SearchState.lastTerm = searchTerm;
+    SearchState.lastType = docTypeFilter || 'all';
+
+    const typeMap = {
+        receipt: ['receipt'], invoice: ['invoice'], agreement: ['agreement'],
+        portcharges: ['portcharges'], topup: ['topup']
+    };
+    const types = typeMap[docTypeFilter] || null;
+
+    // Only show the loading shimmer the first time (while the cache fills);
+    // afterwards results are instant and the page does not flicker.
+    const needsLoad = (types || ['invoice', 'topup', 'receipt', 'agreement', 'portcharges']).some(t => !DocStore.cols[t]);
+    if (needsLoad) resultsList.innerHTML = createShimmerLoader(3);
     searchResultsDiv.classList.remove('hidden');
-    searchResultsDiv.style.opacity = '1';
-    searchResultsDiv.style.transition = 'opacity 0.3s ease-in';
     docCreationArea.classList.add('hidden');
-    
-    let allResults = [];
-    
+
+    const requestId = (performSearch._req = (performSearch._req || 0) + 1);
+
     try {
-        console.log(`Searching for: "${searchTerm}" in ${docTypeFilter}`);
-        
-        if (docTypeFilter === 'all' || docTypeFilter === 'receipt') {
-            const receiptResults = await searchReceipts(searchTerm);
-            console.log(`Found ${receiptResults.length} receipts`);
-            allResults = allResults.concat(receiptResults.map(r => ({...r, type: 'receipt'})));
-        }
-        
-        if (docTypeFilter === 'all' || docTypeFilter === 'invoice') {
-            const invoiceResults = await searchInvoices(searchTerm);
-            console.log(`Found ${invoiceResults.length} invoices`);
-            allResults = allResults.concat(invoiceResults.map(i => ({...i, type: 'invoice'})));
-        }
-        
-        if (docTypeFilter === 'all' || docTypeFilter === 'agreement') {
-            const agreementResults = await searchAgreements(searchTerm);
-            console.log(`Found ${agreementResults.length} agreements`);
-            allResults = allResults.concat(agreementResults.map(a => ({...a, type: 'agreement'})));
-        }
-        
-        if (docTypeFilter === 'all' || docTypeFilter === 'portcharges') {
-            const portResults = await searchPortChargesInvoices(searchTerm);
-            console.log(`Found ${portResults.length} port charges`);
-            allResults = allResults.concat(portResults.map(p => ({...p, type: 'portcharges'})));
-        }
-        
-        if (docTypeFilter === 'all' || docTypeFilter === 'topup') {
-            const topUpResults = await searchTopUpInvoices(searchTerm);
-            console.log(`Found ${topUpResults.length} top-up invoices`);
-            allResults = allResults.concat(topUpResults.map(t => ({...t, type: 'topup'})));
-        }
-        
-        console.log(`Total results: ${allResults.length}`);
-        
-        // Sort by date (newest first)
-        allResults.sort((a, b) => {
-            const dateA = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(a.createdAt || 0);
-            const dateB = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(b.createdAt || 0);
-            return dateB - dateA;
+        const res = await smartSearch({
+            text: searchTerm,
+            types,
+            filters: { types, status: SearchState.status, balance: SearchState.balance, range: SearchState.range },
+            sort: SearchState.sort
         });
-        
-        displaySearchResults(allResults, searchTerm);
-        
+        if (requestId !== performSearch._req) return;      // a newer search superseded this one
+
+        const results = res.items.slice(0, SearchState.limit).map(e => ({ id: e.id, ...e.data, type: e.type }));
+        displaySearchResults(results, searchTerm, { total: res.total, fuzzy: res.fuzzy, words: res.words });
+        smartHighlight(resultsList, res.words);
     } catch (error) {
         console.error("Error searching documents:", error);
         resultsList.innerHTML = `
             <div class="text-center p-8 bg-red-50 rounded-lg border border-red-200 animate-fade-in">
-                <svg class="w-16 h-16 text-red-500 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.998-.833-2.732 0L4.342 16.5c-.77.833.192 2.5 1.732 2.5z"></path>
-                </svg>
                 <p class="text-red-600 font-semibold mb-2">Search Error</p>
-                <p class="text-sm text-gray-600 mt-2">${error.message}</p>
+                <p class="text-sm text-gray-600 mt-2">${smartEscape(error.message)}</p>
                 <button onclick="clearSearch()" class="mt-4 bg-primary-blue hover:bg-blue-900 text-white font-bold py-2 px-4 rounded-md transition duration-150">
                     Return to Document Generator
                 </button>
@@ -8403,7 +8973,7 @@ async function fetchPortChargesInvoices() {
     if (!listElement) return;
     
     try {
-        const snapshot = await db.collection("port_charges_invoices").orderBy("createdAt", "desc").limit(20).get();
+        const snapshot = await getHistorySnapshot(HV.port);
         
         if (snapshot.empty) {
             listElement.innerHTML = `
@@ -8476,6 +9046,7 @@ async function fetchPortChargesInvoices() {
         
         html += `</ul>`;
         listElement.innerHTML = html;
+        historyAfterRender(HV.port);
         
     } catch (error) {
         console.error("Error fetching port charges invoices:", error);
@@ -9375,13 +9946,16 @@ function renderTopUpHistory() {
         </div>
     `;
     
-    // Load top-up invoices
-    (async () => {
+    loadTopUpHistoryList();
+}
+
+async function loadTopUpHistoryList() {
+    {
         const listElement = document.getElementById('topup-history-list');
         if (!listElement) return;
         
         try {
-            const snapshot = await db.collection("top_up_invoices").orderBy("createdAt", "desc").limit(20).get();
+            const snapshot = await getHistorySnapshot(HV.topups);
             
             if (snapshot.empty) {
                 listElement.innerHTML = `
@@ -9494,6 +10068,7 @@ function renderTopUpHistory() {
             });
             html += `</ul>`;
             listElement.innerHTML = html;
+            historyAfterRender(HV.topups);
             
         } catch (error) {
             console.error("Error fetching top-up invoices:", error);
@@ -9504,7 +10079,7 @@ function renderTopUpHistory() {
                 </div>
             `;
         }
-    })();
+    }
 }
 
 /**
@@ -12185,17 +12760,18 @@ function renderAuctionInvoiceHistory() {
         </div>
     `;
     
-    // Load auction-related invoices
-    (async () => {
+    renderAuctionList();
+}
+
+async function renderAuctionList() {
+    {
         const listElement = document.getElementById('auction-history-list');
         if (!listElement) return;
         
         try {
             // Get auction invoices
-            const auctionSnapshot = await db.collection("invoices")
-                .where("docType", "==", "Auction Invoice")
-                .orderBy("createdAt", "desc")
-                .get();
+            // Served from the live cache (filters/sort/paging via the toolbar)
+            const auctionSnapshot = await getHistorySnapshot(HV.auction);
             
             if (auctionSnapshot.empty) {
                 listElement.innerHTML = `
@@ -12216,10 +12792,7 @@ function renderAuctionInvoiceHistory() {
                 auctionData.firestoreId = auctionDoc.id;
                 
                 // Get related top-up invoices
-                const topUpSnapshot = await db.collection("top_up_invoices")
-                    .where("sourceInvoiceId", "==", auctionData.invoiceId)
-                    .orderBy("createdAt", "asc")
-                    .get();
+                const topUpSnapshot = cachedRelated('topup', 'sourceInvoiceId', auctionData.invoiceId);
                 
                 // Get related balance invoices from top-ups
                 const allRelated = [];
@@ -12234,10 +12807,7 @@ function renderAuctionInvoiceHistory() {
                     allRelated.push({ ...topUpData, type: 'topup', docType: 'Top-Up Invoice', relation: 'Top-Up' });
                     
                     // Get balance invoices for this top-up
-                    const balanceSnapshot = await db.collection("balance_invoices")
-                        .where("sourceInvoiceId", "==", topUpData.invoiceId)
-                        .orderBy("createdAt", "asc")
-                        .get();
+                    const balanceSnapshot = cachedRelated('balance', 'sourceInvoiceId', topUpData.invoiceId);
                     
                     balanceSnapshot.forEach(balanceDoc => {
                         const balanceData = balanceDoc.data();
@@ -12333,6 +12903,7 @@ function renderAuctionInvoiceHistory() {
             
             html += `</div>`;
             listElement.innerHTML = html;
+            historyAfterRender(HV.auction);
             
         } catch (error) {
             console.error("Error fetching auction invoices:", error);
@@ -12343,7 +12914,7 @@ function renderAuctionInvoiceHistory() {
                 </div>
             `;
         }
-    })();
+    }
 }
 
 // =================================================================
