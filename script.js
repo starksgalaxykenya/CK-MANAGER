@@ -36,6 +36,45 @@ function getInvoiceCollectionName(invoiceData) {
     // Default to regular invoices
     return 'invoices';
 }
+
+/**
+ * Walks up a top-up chain (top-up -> top-up -> ... -> original invoice) and
+ * returns every ancestor as { ref, snap, isTopUp } starting with the immediate
+ * parent and ending with the root invoice. Must be called INSIDE a Firestore
+ * transaction, before any writes, because it uses transaction.get().
+ */
+async function loadInvoiceChain(transaction, firstRef, firstSnap) {
+    const chain = [];
+    let ref = firstRef, snap = firstSnap, guard = 0;
+    while (ref && snap && snap.exists && guard < 15) {
+        const d = snap.data();
+        const isTopUp = d.docType === 'Top-Up Invoice';
+        chain.push({ ref, snap, isTopUp });
+        if (!isTopUp || !d.sourceInvoiceFirestoreId) break;
+        const coll = d.sourceInvoiceCollection || (d.sourceInvoiceType === 'topup' ? 'top_up_invoices' : 'invoices');
+        ref = db.collection(coll).doc(d.sourceInvoiceFirestoreId);
+        snap = await transaction.get(ref);
+        guard++;
+    }
+    return chain;
+}
+
+/**
+ * Builds the update for one ancestor when a payment of `delta` USD is added
+ * (positive) or removed (negative). Top-up documents keep their own historical
+ * paid amounts and only get their remaining balance changed; the original
+ * invoice gets totalPaid and remainingBalance changed.
+ */
+function buildChainUpdate(item, delta) {
+    const pricing = item.snap.data().pricing || {};
+    const total = pricing.totalUSD || 0;
+    const remaining = Math.max(0, roundCurrency((pricing.remainingBalance ?? total) - delta));
+    const upd = { 'pricing.remainingBalance': remaining, runningBalance: remaining };
+    if (!item.isTopUp) {
+        upd['pricing.totalPaid'] = Math.max(0, roundCurrency((pricing.totalPaid || 0) + delta));
+    }
+    return upd;
+}
 // =================================================================
 //                 BANK LEDGER SYSTEM (real running balances)
 // =================================================================
@@ -9257,6 +9296,8 @@ async function saveTopUpInvoice(onlySave = false) {
                 throw new Error('Source invoice not found in Firestore');
             }
             const sourceData = sourceSnap.data();
+            // Whole chain up to the original invoice (reads before writes)
+            const chain = await loadInvoiceChain(transaction, sourceInvoiceRef, sourceSnap);
 
             // FIX: these previously read sourceInvoice.totalPrice /
             // sourceInvoice.totalPaid — flat fields that don't exist on this
@@ -9319,6 +9360,11 @@ async function saveTopUpInvoice(onlySave = false) {
             // FIX: this write to the parent invoice never happened before —
             // the top-up invoice recorded the payment, but the original
             // invoice never reflected it, so it looked unpaid forever.
+            // Update every ancestor: the immediate parent, any intermediate
+            // top-ups, and the original invoice, so all balances agree.
+            chain.slice(1).forEach(item => {
+                transaction.update(item.ref, buildChainUpdate(item, currentPaymentDue));
+            });
             const parentUpdate = sourceIsTopUp
                 ? { 'pricing.remainingBalance': Math.max(0, remainingAfter) }
                 : { 'pricing.totalPaid': newTotalPaid, 'pricing.remainingBalance': Math.max(0, remainingAfter) };
@@ -9699,8 +9745,10 @@ async function revokeTopUpInvoice(data) {
 
             // Reads first (Firestore transaction rule)
             let sourceSnap = null;
+            let chain = [];
             if (sourceRef) {
                 sourceSnap = await transaction.get(sourceRef);
+                chain = await loadInvoiceChain(transaction, sourceRef, sourceSnap);
             }
             let bank = null;
             if (bankId) {
@@ -9718,16 +9766,9 @@ async function revokeTopUpInvoice(data) {
             // Restore the parent invoice's balance — this previously never
             // happened, so the parent kept showing the top-up as paid even
             // after it was revoked.
-            if (sourceRef && sourceSnap && sourceSnap.exists) {
-                const sourceData = sourceSnap.data();
-                const newTotalPaid = Math.max(0, roundCurrency((sourceData.pricing?.totalPaid || 0) - paidAmountUSD));
-                const newRemaining = roundCurrency((sourceData.pricing?.remainingBalance || 0) + paidAmountUSD);
-                transaction.update(sourceRef, {
-                    'pricing.totalPaid': newTotalPaid,
-                    'pricing.remainingBalance': newRemaining,
-                    runningBalance: newRemaining
-                });
-            }
+            chain.forEach(item => {
+                transaction.update(item.ref, buildChainUpdate(item, -paidAmountUSD));
+            });
 
             // Debit the real bank ledger — pull the money back out of the
             // bank total, with a logged reason pointing back at this revoke.
@@ -9801,8 +9842,10 @@ async function unrevokeTopUpInvoice(data) {
             const topUpRef = db.collection("top_up_invoices").doc(data.firestoreId);
 
             let sourceSnap = null;
+            let chain = [];
             if (sourceRef) {
                 sourceSnap = await transaction.get(sourceRef);
+                chain = await loadInvoiceChain(transaction, sourceRef, sourceSnap);
             }
             let bank = null;
             if (bankId) {
@@ -9817,16 +9860,9 @@ async function unrevokeTopUpInvoice(data) {
             });
 
             // Re-apply the payment to the parent invoice
-            if (sourceRef && sourceSnap && sourceSnap.exists) {
-                const sourceData = sourceSnap.data();
-                const newTotalPaid = roundCurrency((sourceData.pricing?.totalPaid || 0) + paidAmountUSD);
-                const newRemaining = Math.max(0, roundCurrency((sourceData.pricing?.remainingBalance || 0) - paidAmountUSD));
-                transaction.update(sourceRef, {
-                    'pricing.totalPaid': newTotalPaid,
-                    'pricing.remainingBalance': newRemaining,
-                    runningBalance: newRemaining
-                });
-            }
+            chain.forEach(item => {
+                transaction.update(item.ref, buildChainUpdate(item, paidAmountUSD));
+            });
 
             // Re-credit the bank
             if (bank && paidAmountUSD) {
