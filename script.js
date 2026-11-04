@@ -9239,7 +9239,13 @@ async function saveTopUpInvoice(onlySave = false) {
         
         // Determine which collection the source invoice lives in (regular/
         // auction invoices are always in 'invoices')
-        const sourceInvoiceRef = db.collection('invoices').doc(sourceInvoice.firestoreId);
+        // FIX: the source may be a top-up invoice ("Top Up Again" / loading a
+        // TOPUP-... number), whose document lives in 'top_up_invoices', not
+        // 'invoices'. Looking in the wrong collection caused
+        // "Source invoice not found in Firestore".
+        const sourceIsTopUp = sourceInvoice.sourceType === 'topup' || sourceInvoice.docType === 'Top-Up Invoice';
+        const sourceCollName = sourceIsTopUp ? 'top_up_invoices' : getInvoiceCollectionName(sourceInvoice);
+        const sourceInvoiceRef = db.collection(sourceCollName).doc(sourceInvoice.firestoreId);
 
         // Use a transaction: read the LATEST parent invoice totals (not the
         // possibly-stale copy held in memory since the page loaded), then
@@ -9257,7 +9263,10 @@ async function saveTopUpInvoice(onlySave = false) {
             // collection's documents. The real data lives under `pricing`,
             // so this always silently computed totalPaidSoFar as 0.
             const totalPrice = sourceData.pricing?.totalUSD || sourceData.totalPrice || 0;
-            const totalPaidSoFar = sourceData.pricing?.totalPaid || 0;
+            // A top-up parent stores its running total in newTotalPaid
+            const totalPaidSoFar = sourceIsTopUp
+                ? (sourceData.pricing?.newTotalPaid ?? sourceData.pricing?.totalPaid ?? 0)
+                : (sourceData.pricing?.totalPaid || 0);
             const newTotalPaid = roundCurrency(totalPaidSoFar + currentPaymentDue);
             const remainingAfter = roundCurrency(totalPrice - newTotalPaid);
 
@@ -9273,7 +9282,8 @@ async function saveTopUpInvoice(onlySave = false) {
                 invoiceId,
                 sourceInvoiceId: sourceInvoice.invoiceId,
                 sourceInvoiceFirestoreId: sourceInvoice.firestoreId,
-                sourceInvoiceType: sourceInvoice.sourceType || 'regular',
+                sourceInvoiceType: sourceIsTopUp ? 'topup' : (sourceInvoice.sourceType || 'regular'),
+                sourceInvoiceCollection: sourceCollName,
                 clientName: sourceInvoice.clientName,
                 clientPhone: sourceInvoice.clientPhone || '',
                 issueDate: getCurrentDateForDocument(),
@@ -9309,9 +9319,11 @@ async function saveTopUpInvoice(onlySave = false) {
             // FIX: this write to the parent invoice never happened before —
             // the top-up invoice recorded the payment, but the original
             // invoice never reflected it, so it looked unpaid forever.
+            const parentUpdate = sourceIsTopUp
+                ? { 'pricing.remainingBalance': Math.max(0, remainingAfter) }
+                : { 'pricing.totalPaid': newTotalPaid, 'pricing.remainingBalance': Math.max(0, remainingAfter) };
             transaction.update(sourceInvoiceRef, {
-                'pricing.totalPaid': newTotalPaid,
-                'pricing.remainingBalance': Math.max(0, remainingAfter),
+                ...parentUpdate,
                 topUpCreated: true,
                 topUpInvoiceId: invoiceId,
                 topUpCreatedAt: firebase.firestore.FieldValue.serverTimestamp()
@@ -9679,7 +9691,7 @@ async function revokeTopUpInvoice(data) {
         const paidAmountUSD = data.pricing?.currentPaymentDue || 0;
         const bankId = data.bankDetails?.id || data.bankId || null;
         const sourceRef = data.sourceInvoiceFirestoreId
-            ? db.collection('invoices').doc(data.sourceInvoiceFirestoreId)
+            ? db.collection(data.sourceInvoiceCollection || (data.sourceInvoiceType === 'topup' ? 'top_up_invoices' : 'invoices')).doc(data.sourceInvoiceFirestoreId)
             : null;
 
         await db.runTransaction(async (transaction) => {
@@ -9782,7 +9794,7 @@ async function unrevokeTopUpInvoice(data) {
         const paidAmountUSD = data.pricing?.currentPaymentDue || 0;
         const bankId = data.bankDetails?.id || data.bankId || null;
         const sourceRef = data.sourceInvoiceFirestoreId
-            ? db.collection('invoices').doc(data.sourceInvoiceFirestoreId)
+            ? db.collection(data.sourceInvoiceCollection || (data.sourceInvoiceType === 'topup' ? 'top_up_invoices' : 'invoices')).doc(data.sourceInvoiceFirestoreId)
             : null;
 
         await db.runTransaction(async (transaction) => {
