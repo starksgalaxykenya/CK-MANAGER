@@ -1541,40 +1541,80 @@ document.addEventListener('DOMContentLoaded', function() {
 //                 3. DASHBOARD & NAVIGATION (UPDATED)
 // =================================================================
 
-function renderDashboard() {
-    appContent.innerHTML = `
-        <h2 class="text-4xl font-extrabold mb-8 text-primary-blue animate-fade-in">CDMS Dashboard</h2>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
-            ${createDashboardCard('Document Generator', 'Invoices, Receipts, Agreements, Top-Ups', 'bg-gradient-to-br from-green-50 to-green-100 border-green-400', 'handleDocumentGenerator', 0)}
-            ${createDashboardCard('Fleet Management', 'Car Tracking, Clearing, ETA', 'bg-gradient-to-br from-yellow-50 to-yellow-100 border-yellow-400', 'handleFleetManagement', 100)}
-        </div>
-    `;
-    
-    // Update navigation links
+// Shared SVG paths for the dashboard / toolbar icons
+const UI_ICONS = {"doc": "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z", "bolt": "M13 10V3L4 14h7v7l9-11h-7z", "check": "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z", "clock": "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z", "bank": "M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z", "pen": "M15.232 5.232l3.536 3.536M9 13l6.586-6.586a2 2 0 112.828 2.828L11.828 15.828a2 2 0 01-1.414.586H9v-2.414a2 2 0 01.586-1.414z", "ship": "M3 17h1m16 0h1M5 17l-1-6h16l-1 6M9 11V6h6v5"};
+
+function uiIcon(name, cls = 'w-5 h-5') {
+    return `<svg class="${cls}" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${UI_ICONS[name] || UI_ICONS.doc}"></path></svg>`;
+}
+
+/**
+ * Opens the Document Generator and then runs one of its actions
+ * (e.g. 'renderInvoiceForm'), so dashboard tiles go straight to the task.
+ */
+function openDocAction(fnName) {
+    handleDocumentGenerator();
+    if (typeof window[fnName] === 'function') window[fnName]();
+}
+
+function renderMainNav() {
+    const link = 'py-2 px-3 rounded-md text-sm font-medium hover:bg-white/15 transition duration-150';
     mainNav.innerHTML = `
-        <a href="#" onclick="renderDashboard()" class="py-2 px-3 rounded hover:bg-blue-500 transition duration-150">Home</a>
-        <a href="#" onclick="handleDocumentGenerator()" class="py-2 px-3 rounded hover:bg-blue-500 transition duration-150">Documents</a>
-        <a href="#" onclick="handleFleetManagement()" class="py-2 px-3 rounded hover:bg-blue-500 transition duration-150">Fleet</a>
+        <a href="#" onclick="renderDashboard(); return false;" class="${link}">Home</a>
+        <a href="#" onclick="handleDocumentGenerator(); return false;" class="${link}">Documents</a>
+        <a href="#" onclick="openDocAction('renderBankManagement'); return false;" class="${link}">Banks</a>
     `;
     mainNav.classList.remove('hidden');
 }
 
-function createDashboardCard(title, subtitle, colorClass, handler, delay = 0) {
-    return `
-        <div class="${colorClass} border-2 p-6 rounded-xl shadow-lg cursor-pointer hover:shadow-2xl hover:scale-[1.02] transition-all duration-300 transform animate-fade-in" 
-             onclick="${handler}()" 
-             style="animation-delay: ${delay}ms">
-            <div class="flex items-center mb-4">
-                <div class="w-12 h-12 rounded-lg bg-white flex items-center justify-center shadow-sm mr-4">
-                    ${title.includes('Document') ? 
-                        '<svg class="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>' :
-                        '<svg class="w-6 h-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>'}
-                </div>
-                <h3 class="text-2xl font-bold text-gray-800">${title}</h3>
+function renderDashboard() {
+    const tile = (label, hint, fn, icon) => `
+        <button type="button" onclick="openDocAction('${fn}')"
+                class="group text-left bg-white border border-gray-200 rounded-xl p-4 shadow-sm hover:shadow-md hover:border-primary-blue/40 focus:outline-none focus:ring-2 focus:ring-primary-blue/40 transition">
+            <span class="flex items-center gap-3">
+                <span class="w-10 h-10 shrink-0 rounded-lg bg-primary-blue/10 text-primary-blue flex items-center justify-center group-hover:bg-primary-blue group-hover:text-white transition">${uiIcon(icon)}</span>
+                <span>
+                    <span class="block font-semibold text-gray-800">${label}</span>
+                    <span class="block text-xs text-gray-500 mt-0.5">${hint}</span>
+                </span>
+            </span>
+        </button>`;
+    const section = (title, tiles) => `
+        <section class="mb-8">
+            <h3 class="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-3">${title}</h3>
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">${tiles}</div>
+        </section>`;
+
+    appContent.innerHTML = `
+        <div class="max-w-5xl mx-auto animate-fade-in">
+            <div class="mb-8">
+                <h2 class="text-3xl font-bold text-primary-blue">Dashboard</h2>
+                <p class="text-gray-500 mt-1">What would you like to do?</p>
             </div>
-            <p class="text-gray-600 mt-2">${subtitle}</p>
+            ${section('Create', [
+                tile('Invoice / Proforma', 'New invoice for a client', 'renderInvoiceForm', 'doc'),
+                tile('Top-Up Invoice', 'Collect a further payment', 'renderTopUpInvoiceForm', 'bolt'),
+                tile('Payment Receipt', 'Record money received', 'renderReceiptForm', 'check'),
+                tile('Car Sales Agreement', 'Draft an agreement', 'renderAgreementForm', 'pen'),
+                tile('Port Charges Invoice', 'Bill port and clearing costs', 'renderPortChargesInvoiceForm', 'ship')
+            ].join(''))}
+            ${section('Records', [
+                tile('Invoice History', 'Find and re-download invoices', 'renderInvoiceHistory', 'clock'),
+                tile('Auction Invoice History', 'Auction invoices and top-ups', 'renderAuctionInvoiceHistory', 'clock'),
+                tile('Port Charges History', 'Past port charge invoices', 'renderPortChargesHistory', 'clock')
+            ].join(''))}
+            ${section('Manage', [
+                tile('Bank Accounts', 'Balances and ledger', 'renderBankManagement', 'bank'),
+                `<button type="button" onclick="handleDocumentGenerator()" class="group text-left bg-white border border-gray-200 rounded-xl p-4 shadow-sm hover:shadow-md hover:border-primary-blue/40 focus:outline-none focus:ring-2 focus:ring-primary-blue/40 transition">
+                    <span class="flex items-center gap-3">
+                        <span class="w-10 h-10 shrink-0 rounded-lg bg-primary-blue/10 text-primary-blue flex items-center justify-center group-hover:bg-primary-blue group-hover:text-white transition">${uiIcon('doc')}</span>
+                        <span><span class="block font-semibold text-gray-800">Search Documents</span><span class="block text-xs text-gray-500 mt-0.5">By client, reference or VIN</span></span>
+                    </span></button>`
+            ].join(''))}
         </div>
     `;
+
+    renderMainNav();
 }
 
 // New Utility for Shared Reference & Serial Generation
@@ -1594,6 +1634,13 @@ async function generateSharedRefId(clientName, carModel, carYear, collectionName
 // =================================================================
 //                 4. DOCUMENT GENERATOR ROUTING (UPDATED WITH TOP-UP)
 // =================================================================
+
+function docToolbarButton(label, fn, icon, primary = false) {
+    const style = primary
+        ? 'bg-primary-blue text-white hover:bg-blue-900 border border-transparent'
+        : 'bg-white text-gray-700 hover:bg-gray-100 border border-gray-300';
+    return `<button type="button" onclick="${fn}()" class="${style} px-3 py-2 rounded-lg text-sm font-medium transition duration-150 flex items-center gap-2 focus:outline-none focus:ring-2 focus:ring-primary-blue/40">${uiIcon(icon, 'w-4 h-4')}${label}</button>`;
+}
 
 function handleDocumentGenerator() {
     appContent.innerHTML = `
@@ -1637,63 +1684,35 @@ function handleDocumentGenerator() {
             </div>
         </div>
 
-        <div class="flex space-x-4 mb-6 flex-wrap animate-fade-in" style="animation-delay: 200ms">
-            <button onclick="renderInvoiceForm()" class="bg-primary-blue hover:bg-blue-900 text-white p-3 rounded-lg transition duration-150 mb-2 flex items-center gap-2">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
-                </svg>
-                Invoice/Proforma
-            </button>
-            <button onclick="renderTopUpInvoiceForm()" class="bg-teal-600 hover:bg-teal-700 text-white p-3 rounded-lg transition duration-150 mb-2 flex items-center gap-2">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
-                </svg>
-                Top-Up Invoice
-            </button>
-          <button onclick="renderAuctionInvoiceHistory()" class="bg-teal-500 hover:bg-teal-600 text-white p-3 rounded-lg transition duration-150 mb-2 flex items-center gap-2">
-    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-    </svg>
-    Auc-Inv History
-</button>
-            <button onclick="renderInvoiceHistory()" class="bg-gray-700 hover:bg-gray-900 text-white p-3 rounded-lg transition duration-150 mb-2 flex items-center gap-2">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                </svg>
-                Invoice History
-            </button>
-            <button onclick="renderReceiptForm()" class="bg-secondary-red hover:bg-red-700 text-white p-3 rounded-lg transition duration-150 mb-2 flex items-center gap-2">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                </svg>
-                Payment Receipt
-            </button>
-            <button onclick="renderAgreementForm()" class="bg-gray-700 hover:bg-gray-900 text-white p-3 rounded-lg transition duration-150 mb-2 flex items-center gap-2">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
-                </svg>
-                Car Sales Agreement
-            </button>
-            <button onclick="renderPortChargesInvoiceForm()" class="bg-purple-600 hover:bg-purple-700 text-white p-3 rounded-lg transition duration-150 mb-2 flex items-center gap-2">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
-                </svg>
-                Port Charges Invoice
-            </button>
-            <button onclick="renderPortChargesHistory()" class="bg-indigo-600 hover:bg-indigo-700 text-white p-3 rounded-lg transition duration-150 mb-2 flex items-center gap-2">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                </svg>
-                Port Charges History
-            </button>
-            <button onclick="renderBankManagement()" class="bg-green-600 hover:bg-green-700 text-white p-3 rounded-lg transition duration-150 mb-2 flex items-center gap-2">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"></path>
-                </svg>
-                BANKS
-            </button>
+        <div class="mb-6 p-4 bg-white rounded-xl border border-gray-200 shadow-sm animate-fade-in" style="animation-delay: 200ms">
+            <div class="flex flex-wrap gap-x-8 gap-y-4">
+                <div>
+                    <p class="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2">Create</p>
+                    <div class="flex flex-wrap gap-2">
+                        ${docToolbarButton('Invoice / Proforma', 'renderInvoiceForm', 'doc', true)}
+                        ${docToolbarButton('Top-Up Invoice', 'renderTopUpInvoiceForm', 'bolt', true)}
+                        ${docToolbarButton('Payment Receipt', 'renderReceiptForm', 'check', true)}
+                        ${docToolbarButton('Sales Agreement', 'renderAgreementForm', 'pen', true)}
+                        ${docToolbarButton('Port Charges', 'renderPortChargesInvoiceForm', 'ship', true)}
+                    </div>
+                </div>
+                <div>
+                    <p class="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2">History</p>
+                    <div class="flex flex-wrap gap-2">
+                        ${docToolbarButton('Invoices', 'renderInvoiceHistory', 'clock')}
+                        ${docToolbarButton('Auction Invoices', 'renderAuctionInvoiceHistory', 'clock')}
+                        ${docToolbarButton('Port Charges', 'renderPortChargesHistory', 'clock')}
+                    </div>
+                </div>
+                <div>
+                    <p class="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2">Manage</p>
+                    <div class="flex flex-wrap gap-2">
+                        ${docToolbarButton('Banks', 'renderBankManagement', 'bank')}
+                    </div>
+                </div>
+            </div>
         </div>
-        
+
         <div id="document-form-area" class="animate-fade-in" style="animation-delay: 300ms">
             <div id="search-results" class="hidden">
                 <h3 class="text-xl font-bold mb-4 text-primary-blue">Search Results</h3>
@@ -1702,12 +1721,9 @@ function handleDocumentGenerator() {
                 </div>
             </div>
             <div id="document-creation-area">
-                <div class="text-center p-8 bg-gradient-to-r from-primary-blue/5 to-blue-50 rounded-xl border border-dashed border-primary-blue/30">
-                    <svg class="w-16 h-16 text-primary-blue/50 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
-                    </svg>
-                    <p class="text-gray-600 text-lg">Select a document type or manage bank accounts</p>
-                    <p class="text-sm text-gray-500 mt-2">Create invoices, receipts, agreements, port charges invoices, or search existing documents</p>
+                <div class="text-center p-10 bg-white rounded-xl border border-dashed border-gray-300">
+                    <p class="text-gray-700 font-medium">Pick an action above to get started</p>
+                    <p class="text-sm text-gray-500 mt-1">Or search existing documents by client, reference number, car or VIN.</p>
                 </div>
             </div>
         </div>
@@ -6642,34 +6658,6 @@ function resetDepositSaveButton(saveButton, spinner) {
         spinner.classList.add('hidden');
         saveButton.innerHTML = `<span>Save Deposit Payment</span>${spinner.outerHTML}`;
     }
-}
-
-// =================================================================
-//                 11. FLEET MANAGEMENT MODULE (SIMPLIFIED)
-// =================================================================
-
-function handleFleetManagement() {
-    appContent.innerHTML = `
-        <h2 class="text-3xl font-bold mb-8 text-primary-blue animate-fade-in">Fleet Management Dashboard</h2>
-        <div class="p-6 bg-gradient-to-r from-yellow-50 to-yellow-100 rounded-xl border border-yellow-400 animate-fade-in" style="animation-delay: 100ms">
-            <div class="flex items-center gap-4 mb-4">
-                <div class="w-12 h-12 rounded-lg bg-yellow-500 flex items-center justify-center shadow-sm">
-                    <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                    </svg>
-                </div>
-                <p class="text-gray-800 font-semibold text-lg">Fleet Management Features:</p>
-            </div>
-            <ul class="list-disc pl-5 space-y-2 text-gray-700">
-                <li class="flex items-center gap-2"><span class="w-2 h-2 bg-yellow-500 rounded-full"></span> Track vehicles from shipment to delivery</li>
-                <li class="flex items-center gap-2"><span class="w-2 h-2 bg-yellow-500 rounded-full"></span> Monitor ETA (Estimated Time of Arrival)</li>
-                <li class="flex items-center gap-2"><span class="w-2 h-2 bg-yellow-500 rounded-full"></span> Update status and add comments for each stage</li>
-                <li class="flex items-center gap-2"><span class="w-2 h-2 bg-yellow-500 rounded-full"></span> View status history for each vehicle</li>
-                <li class="flex items-center gap-2"><span class="w-2 h-2 bg-yellow-500 rounded-full"></span> Real-time updates using Firestore</li>
-            </ul>
-            <p class="mt-4 text-sm text-gray-600">Use the navigation to manage your fleet operations.</p>
-        </div>
-    `;
 }
 
 // =================================================================
@@ -12385,8 +12373,8 @@ window.renderPortChargesInvoiceForm = renderPortChargesInvoiceForm;
 window.renderPortChargesHistory = renderPortChargesHistory;
 window.renderBankManagement = renderBankManagement;
 window.handleDocumentGenerator = handleDocumentGenerator;
-window.handleFleetManagement = handleFleetManagement;
 window.renderDashboard = renderDashboard;
+window.openDocAction = openDocAction;
 window.handleLogout = handleLogout;
 window.reDownloadReceipt = reDownloadReceipt;
 window.reDownloadInvoice = reDownloadInvoice;
