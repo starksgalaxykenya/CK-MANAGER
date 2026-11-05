@@ -52,7 +52,8 @@ async function loadInvoiceChain(transaction, firstRef, firstSnap) {
         // own historical paid amounts and point at their parent.
         const isTopUp = d.docType === 'Top-Up Invoice' || d.docType === 'Balance Invoice';
         chain.push({ ref, snap, isTopUp });
-        if (!isTopUp || !d.sourceInvoiceFirestoreId) break;
+        const parentId = (isTopUp ? d.sourceInvoiceFirestoreId : null) || d.linkedInvoiceFirestoreId;
+        if (!parentId) break;
         // Find the parent: use the stored collection if present, otherwise
         // try every invoice collection (document ids are unique).
         const hinted = d.sourceInvoiceCollection
@@ -61,7 +62,7 @@ async function loadInvoiceChain(transaction, firstRef, firstSnap) {
         const order = [hinted, 'invoices', 'top_up_invoices', 'balance_invoices'].filter((c, i, arr) => arr.indexOf(c) === i);
         let nextRef = null, nextSnap = null;
         for (const coll of order) {
-            const r = db.collection(coll).doc(d.sourceInvoiceFirestoreId);
+            const r = db.collection(coll).doc(parentId);
             const sn = await transaction.get(r);
             if (sn.exists) { nextRef = r; nextSnap = sn; break; }
         }
@@ -78,6 +79,9 @@ async function loadInvoiceChain(transaction, firstRef, firstSnap) {
  * invoice gets totalPaid and remainingBalance changed.
  */
 function buildChainUpdate(item, delta) {
+    // Top-up / balance invoices are a snapshot of what was asked at issue time;
+    // live paid / owed figures come from the deal ledger, so never edit them.
+    if (item.isTopUp) return null;
     const pricing = item.snap.data().pricing || {};
     const total = pricing.totalUSD || 0;
     const remaining = Math.max(0, roundCurrency((pricing.remainingBalance ?? total) - delta));
@@ -1789,6 +1793,23 @@ function numberToWords(n) {
 
 // NEW FUNCTION: Fetch invoice amount based on invoice number
 async function fetchInvoiceAmount(invoiceNumber) {
+    const base = await fetchInvoiceAmountBase(invoiceNumber);
+    if (!base) return base;
+    try {
+        const deal = await getDealByInvoiceNumber(invoiceNumber);
+        if (deal) {            // live position of the whole deal, from receipts
+            base.totalPaid = deal.paid;
+            base.remainingBalance = deal.remaining;
+            base.balanceUSD = deal.remaining;            // owed before this payment is entered
+            base.dealTotalUSD = deal.total;
+            const row = deal.docs.find(d => d.number === invoiceNumber);
+            if (row && row.paid !== null) base.depositUSD = row.outstanding;   // what is still due on THIS invoice
+        }
+    } catch (e) { console.warn('Deal lookup failed, using stored invoice numbers', e); }
+    return base;
+}
+
+async function fetchInvoiceAmountBase(invoiceNumber) {
     try {
         // Search in regular invoices first
         const snapshot = await db.collection("invoices")
@@ -2471,6 +2492,21 @@ async function saveReceipt() {
     const receiptId = generateReceiptId(receiptType, receivedFrom);
     const receiptDate = getCurrentDateForDocument();
 
+    // --- 2b. Warn before recording more than the deal still owes ---
+    if (invoiceReference) {
+        try {
+            const deal = await getDealByInvoiceNumber(invoiceReference);
+            if (deal && amountReceivedUSD - deal.remaining > 0.009) {
+                const proceed = confirm(
+                    `This payment (USD ${ledgerFmt(amountReceivedUSD)}) is more than the USD ${ledgerFmt(deal.remaining)} still owed on this deal.\n\nRecord it anyway?`
+                );
+                if (!proceed) { resetSaveButton(); return; }
+            }
+        } catch (e) {
+            console.warn('Could not check the amount owed:', e);
+        }
+    }
+
     // --- 3. Check for existing receipt with same invoice reference ---
     let existingReceipt = null;
     let existingReceiptId = null;
@@ -2632,19 +2668,16 @@ async function saveReceipt() {
         }
 
         if (invoiceDocRef) {
-            // We need to read the current invoice data to update correctly.
-            // Since we are inside a batch, we must do the read outside the batch.
-            // However, we can read it now (outside the batch) and then update in the batch.
+            // Keep the stored paid/remaining figures of the real invoices in
+            // step (the referenced invoice and any invoice above it). Top-up
+            // and balance invoices are left alone: they are a snapshot of what
+            // was asked, and their live position comes from the deal ledger.
             const invSnap = await invoiceDocRef.get();
             if (invSnap.exists) {
-                const invData = invSnap.data();
-                const currentPaid = invData.pricing?.totalPaid || 0;
-                const currentRemaining = invData.pricing?.remainingBalance || 0;
-                const newTotalPaid = roundCurrency(currentPaid + amountReceivedUSD);
-                const newRemaining = roundCurrency(currentRemaining - amountReceivedUSD);
-                batch.update(invoiceDocRef, {
-                    'pricing.totalPaid': newTotalPaid,
-                    'pricing.remainingBalance': Math.max(0, newRemaining)
+                const chain = await loadInvoiceChain({ get: (r) => r.get() }, invoiceDocRef, invSnap);
+                chain.forEach(item => {
+                    const u = buildChainUpdate(item, amountReceivedUSD);
+                    if (u) batch.update(item.ref, u);
                 });
             }
         }
@@ -2844,7 +2877,7 @@ async function addPaymentToExistingReceiptFromForm(receiptDocId, receiptNumber, 
             //    transaction started, since transaction.get() only accepts
             //    a DocumentReference, not a Query, in this SDK version)
             linkedChain.forEach(item => {
-                transaction.update(item.ref, buildChainUpdate(item, roundedAmountUSD));
+                { const u = buildChainUpdate(item, roundedAmountUSD); if (u) transaction.update(item.ref, u); }
             });
         });
 
@@ -3127,7 +3160,6 @@ async function generateSequentialInvoiceNumber(clientName, carModel, carYear) {
     
     // Calculate next sequential number
     const nextNumber = (snapshot.size + 1).toString().padStart(4, '0');
-    
     // Get name and model parts for reference
     const namePart = clientName.split(' ')[0].toUpperCase().substring(0, 3);
     const modelPart = carModel.toUpperCase().substring(0, 3);
@@ -3247,6 +3279,11 @@ function autoFillBuyerConfirmation() {
  * Renders the Invoice/Proforma form.
  */
 function renderInvoiceForm() {
+    renderInvoiceFormBase();
+    injectInvoiceLinkField();
+}
+
+function renderInvoiceFormBase() {
     const formArea = document.getElementById('document-form-area');
     formArea.innerHTML = `
         <div class="p-6 border border-gray-300 rounded-xl bg-white shadow-lg animate-fade-in">
@@ -3724,6 +3761,9 @@ async function saveInvoice(onlySave) {
 
     // 5. Save to Firestore
     try {
+        // Optional link to the invoice/proforma this one belongs to
+        const link = await resolveInvoiceLink();
+        if (link) Object.assign(invoiceData, link);
         const docRef = await db.collection("invoices").add(invoiceData);
         
         // Reset button state
@@ -3836,9 +3876,11 @@ async function fetchInvoices() {
                             <strong class="text-primary-blue">${data.docType || 'Invoice'} ${data.invoiceId || 'N/A'}</strong><br>
                             <span class="text-sm text-gray-700">Client: ${data.clientName || 'N/A'} | Vehicle: ${carMake} ${carModel}</span><br>
                             <span class="text-xs text-gray-600">Total: USD ${totalUSD.toFixed(2)}</span>
+                            ${ledgerSummaryChip(doc.id)}
                             ${depositPaid ? `<br><span class="text-xs text-green-600 flex items-center gap-1"><svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg> Deposit Paid</span>` : `<br><span class="text-xs text-secondary-red flex items-center gap-1"><svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM7 9a1 1 0 000 2h6a1 1 0 100-2H7z" clip-rule="evenodd"/></svg> Deposit Pending</span>`}
                         </div>
                         <div class="mt-2 sm:mt-0 space-x-2">
+                            ${ledgerStatementButton(doc.id)}
                             <button onclick='reDownloadInvoice(${invoiceDataJson})' 
                                     class="bg-primary-blue hover:bg-blue-600 text-white text-xs py-1 px-3 rounded-full transition duration-150 flex items-center gap-1">
                                 <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -3984,12 +4026,45 @@ async function unrevokeInvoice(invoiceData) {
 // restore the parent invoice's balance, or reverse its bank credit.
 // Mirrors revokeTopUpInvoice/unrevokeTopUpInvoice.
 // -----------------------------------------------------------------
+/** Revoke / restore a top-up or balance invoice that follows the receipt-based model. */
+async function setLedgerInvoiceRevoked(collection, data, revoke) {
+    try {
+        if (revoke) {
+            const deal = await getDealForDoc(data);
+            const row = deal && deal.docs.find(d => d.id === data.firestoreId);
+            if (row && row.paid > 0 && !confirm(`USD ${ledgerFmt(row.paid)} of payments are recorded against ${data.invoiceId}.\n\nRevoking the invoice does not delete those payments. If a receipt was wrong, revoke that receipt instead.\n\nRevoke the invoice anyway?`)) {
+                return;
+            }
+        }
+        await db.collection(collection).doc(data.firestoreId).update(revoke ? {
+            revoked: true,
+            revokedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            revokedBy: currentUser.email
+        } : {
+            revoked: false,
+            unrevokedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            unrevokedBy: currentUser.email
+        });
+        showSuccessToast(`Invoice ${data.invoiceId} ${revoke ? 'revoked' : 'restored'}.`);
+    } catch (error) {
+        console.error('Error updating invoice status:', error);
+        showErrorToast('Failed to update invoice: ' + error.message);
+    }
+}
+
 async function revokeBalanceInvoice(data) {
     if (data.revoked) {
         showErrorToast(`Balance invoice ${data.invoiceId} has already been revoked.`);
         return;
     }
     if (!confirm(`Are you sure you want to REVOKE balance invoice ${data.invoiceId}?\n\nThis will mark it as invalid, restore the balance on the parent invoice, and subtract the money from the bank account that received it.`)) {
+        return;
+    }
+
+    // Invoices issued under the receipt-based model only state what is owed:
+    // revoking one changes no balance and touches no bank account.
+    if (data.paymentModel === 'ledger') {
+        await setLedgerInvoiceRevoked('balance_invoices', data, true);
         return;
     }
 
@@ -4025,7 +4100,7 @@ async function revokeBalanceInvoice(data) {
             });
 
             chain.forEach(item => {
-                transaction.update(item.ref, buildChainUpdate(item, -paidAmountUSD));
+                { const u = buildChainUpdate(item, -paidAmountUSD); if (u) transaction.update(item.ref, u); }
             });
 
             if (bank && paidAmountUSD) {
@@ -4078,6 +4153,13 @@ async function unrevokeBalanceInvoice(data) {
         return;
     }
 
+    // Invoices issued under the receipt-based model only state what is owed:
+    // revoking one changes no balance and touches no bank account.
+    if (data.paymentModel === 'ledger') {
+        await setLedgerInvoiceRevoked('balance_invoices', data, false);
+        return;
+    }
+
     const loadingOverlay = showLoadingOverlay("Unrevoking invoice...");
 
     try {
@@ -4109,7 +4191,7 @@ async function unrevokeBalanceInvoice(data) {
             });
 
             chain.forEach(item => {
-                transaction.update(item.ref, buildChainUpdate(item, paidAmountUSD));
+                { const u = buildChainUpdate(item, paidAmountUSD); if (u) transaction.update(item.ref, u); }
             });
 
             if (bank && paidAmountUSD) {
@@ -6688,7 +6770,8 @@ const DOC_COLLECTIONS = {
     balance: 'balance_invoices',
     receipt: 'receipts',
     agreement: 'sales_agreements',
-    portcharges: 'port_charges_invoices'
+    portcharges: 'port_charges_invoices',
+    payment: 'receipt_payments'
 };
 
 function smartEscape(s) {
@@ -6786,6 +6869,7 @@ function smartBuildEntry(type, doc) {
 
 const DocStore = {
     cols: {},
+    version: 0,
     watcher: null,
     _timer: null,
 
@@ -6803,6 +6887,7 @@ const DocStore = {
                     else c.map.set(ch.doc.id, smartBuildEntry(key, ch.doc));
                 });
                 c.list = null;
+                this.version++;
                 done();
                 this._notify();
             }, err => {
@@ -6810,6 +6895,7 @@ const DocStore = {
                 db.collection(DOC_COLLECTIONS[key]).get().then(snap => {
                     snap.forEach(doc => c.map.set(doc.id, smartBuildEntry(key, doc)));
                     c.list = null;
+                    this.version++;
                 }).catch(e => console.error(e)).finally(done);
             });
         });
@@ -6827,7 +6913,7 @@ const DocStore = {
     },
 
     warm() {
-        try { ['invoice', 'topup', 'receipt', 'agreement', 'portcharges', 'balance'].forEach(k => this.ensure(k)); }
+        try { ['invoice', 'topup', 'receipt', 'agreement', 'portcharges', 'balance', 'payment'].forEach(k => this.ensure(k)); }
         catch (e) { console.warn('Cache warm-up skipped:', e); }
     },
 
@@ -7170,12 +7256,14 @@ const HistoryUI = {
 const HV = {
     invoices: {
         id: 'invoices', listId: 'invoice-history-list', source: 'invoice', balance: true,
+        ensure: ['invoice', 'topup', 'balance', 'receipt', 'payment'],
         // auction-related documents live in the Auction history instead
         base: e => !(e.data.docType === 'Auction Invoice' || e.data.sourceType === 'auction' || e.data.auctionOriginalInvoiceId),
         reload: () => fetchInvoices()
     },
     topups: {
         id: 'topups', listId: 'topup-history-list', source: 'topup', balance: true,
+        ensure: ['invoice', 'topup', 'balance', 'receipt', 'payment'],
         reload: () => loadTopUpHistoryList()
     },
     port: {
@@ -7184,7 +7272,7 @@ const HV = {
     },
     auction: {
         id: 'auction', listId: 'auction-history-list', source: 'invoice', balance: true,
-        ensure: ['invoice', 'topup', 'balance'],
+        ensure: ['invoice', 'topup', 'balance', 'receipt', 'payment'],
         base: e => e.data.docType === 'Auction Invoice',
         // an auction group also matches on its top-ups / balance invoices
         extra: e => {
@@ -7210,6 +7298,526 @@ function cachedRelated(typeKey, field, value, ascending = true) {
         .sort((a, b) => ascending ? a.ts - b.ts : b.ts - a.ts)
         .map(e => ({ id: e.id, data: () => Object.assign({}, e.data) }));
     return { docs, size: docs.length, empty: docs.length === 0, forEach(cb) { docs.forEach((d, i) => cb(d, i)); } };
+}
+
+// =================================================================
+//        DEAL LEDGER: what is owed vs what is paid (single source of truth)
+// =================================================================
+// A "deal" is one vehicle sale: [Proforma] -> Invoice -> Auction invoice ->
+// Top-ups -> Balance invoices, joined by links (sourceInvoiceFirestoreId /
+// linkedInvoiceFirestoreId). Rules:
+//   * Invoices only say what is OWED. They never move money.
+//   * Receipts (their payment rows) are what is PAID, and the only thing
+//     that credits a bank account.
+//   * Everything shown (paid, owed, history) is calculated from those
+//     records, so the numbers cannot drift out of step.
+// Older top-up/balance invoices (before this change) recorded their payment
+// on the invoice itself; they are counted once as "Recorded on invoice".
+
+const LEDGER_STAGE_TYPES = ['Top-Up Invoice', 'Balance Invoice'];
+const ledgerIsStage = (d) => LEDGER_STAGE_TYPES.includes(d.docType);
+const ledgerMoney = (n) => Math.round((Number(n) || 0) * 100) / 100;
+const ledgerFmt = (n) => (Number(n) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+const DealLedger = {
+    _ver: -1,
+    _built: null,
+
+    async load() {
+        await DocStore.ensureAll(['invoice', 'topup', 'balance', 'receipt', 'payment']);
+        return this.build();
+    },
+
+    build() {
+        if (this._built && this._ver === DocStore.version) return this._built;
+
+        const byId = new Map(), byNumber = new Map(), all = [];
+        ['invoice', 'topup', 'balance'].forEach(t => DocStore.entries(t).forEach(e => {
+            byId.set(e.id, e);
+            if (e.data.invoiceId) byNumber.set(e.data.invoiceId, e);
+            all.push(e);
+        }));
+
+        const parentOf = (e) => {
+            const d = e.data;
+            const p = (d.sourceInvoiceFirestoreId && byId.get(d.sourceInvoiceFirestoreId))
+                || (d.linkedInvoiceFirestoreId && byId.get(d.linkedInvoiceFirestoreId))
+                || (d.sourceInvoiceId && byNumber.get(d.sourceInvoiceId))
+                || (d.linkedInvoiceId && byNumber.get(d.linkedInvoiceId));
+            return (p && p !== e) ? p : null;
+        };
+        const rootOf = (e) => {
+            let cur = e;
+            for (let guard = 0; guard < 25; guard++) {
+                const p = parentOf(cur);
+                if (!p) break;
+                cur = p;
+            }
+            return cur;
+        };
+
+        const deals = new Map(), dealOfDoc = new Map();
+        all.forEach(e => {
+            const r = rootOf(e);
+            let deal = deals.get(r.id);
+            if (!deal) { deal = { rootId: r.id, root: r, members: [], payments: [], docs: [] }; deals.set(r.id, deal); }
+            deal.members.push(e);
+            dealOfDoc.set(e.id, deal);
+        });
+
+        // ---- payments (receipt rows) -> by invoice number
+        const receiptsById = new Map();
+        DocStore.entries('receipt').forEach(r => receiptsById.set(r.id, r));
+        const payByReceipt = new Map();
+        DocStore.entries('payment').forEach(p => {
+            const k = p.data.receiptId;
+            if (!payByReceipt.has(k)) payByReceipt.set(k, []);
+            payByReceipt.get(k).push(p);
+        });
+
+        const paidByNumber = new Map();
+        receiptsById.forEach(r => {
+            if (r.revoked) return;
+            const ref = r.data.invoiceReference;
+            if (!ref) return;
+            const target = byNumber.get(ref);
+            if (!target) return;
+            const deal = dealOfDoc.get(target.id);
+            if (!deal) return;
+
+            let pays = payByReceipt.get(r.id);
+            if (!pays || !pays.length) {                       // receipt with no payment rows: use the receipt itself
+                pays = [{
+                    id: 'syn-' + r.id, ts: r.ts,
+                    data: { amountUSD: r.data.amountReceivedUSD || 0, amount: r.data.amountReceived, currency: r.data.currency, paymentDate: r.data.receiptDate }
+                }];
+            }
+            pays.forEach(p => {
+                const usd = ledgerMoney(p.data.amountUSD);
+                paidByNumber.set(ref, ledgerMoney((paidByNumber.get(ref) || 0) + usd));
+                const pd = r.data.paymentDetails || {};
+                deal.payments.push({
+                    kind: 'receipt', id: p.id, ts: p.ts,
+                    date: p.data.paymentDate || new Date(p.ts).toLocaleDateString('en-US'),
+                    receiptNo: r.data.receiptId || '', receiptDocId: r.id,
+                    appliedTo: ref,
+                    method: p.data.paymentMethod || pd.bankUsed || '',
+                    reference: pd.chequeNo || pd.rtgsTtNo || p.data.description || '',
+                    usd,
+                    original: p.data.amount, currency: p.data.currency || 'USD'
+                });
+            });
+        });
+
+        // ---- per deal numbers
+        deals.forEach(deal => {
+            const members = deal.members.slice().sort((a, b) => a.ts - b.ts);
+            deal.members = members;
+
+            // pre-ledger auction deposits (assumed paid when the first top-up was made)
+            const legacyDeposit = new Map();
+            members.forEach(m => {
+                const d = m.data;
+                if (ledgerIsStage(d) && d.paymentModel !== 'ledger' && !d.revoked && d.sourceType === 'auction' && d.sourceInvoiceFirestoreId) {
+                    const dep = ledgerMoney(d.pricing?.depositPaid ?? d.auctionDepositAmount ?? 0);
+                    if (dep > 0) legacyDeposit.set(d.sourceInvoiceFirestoreId, Math.max(legacyDeposit.get(d.sourceInvoiceFirestoreId) || 0, dep));
+                }
+            });
+
+            let paid = 0;
+            deal.docs = members.map(m => {
+                const d = m.data, docType = d.docType || 'Invoice', num = d.invoiceId;
+                const rec = paidByNumber.get(num) || 0;
+                let contrib = rec, extra = 0, due = 0, kind;
+
+                if (ledgerIsStage(d)) {
+                    kind = docType === 'Top-Up Invoice' ? 'topup' : 'balance';
+                    due = ledgerMoney(d.pricing?.currentPaymentDue);
+                    if (d.paymentModel !== 'ledger' && !d.revoked) { contrib = Math.max(rec, due); extra = ledgerMoney(contrib - rec); }
+                } else if (docType === 'Auction Invoice') {
+                    kind = 'auction';
+                    due = ledgerMoney(d.pricing?.totalUSD);
+                    const dep = legacyDeposit.get(m.id) || 0;
+                    if (dep > rec) { contrib = dep; extra = ledgerMoney(dep - rec); }
+                } else {
+                    kind = docType === 'Proforma Invoice' ? 'proforma' : 'invoice';
+                    due = ledgerMoney(d.pricing?.totalUSD);
+                }
+
+                if (extra > 0) {
+                    deal.payments.push({
+                        kind: 'legacy', id: 'legacy-' + m.id, ts: m.ts,
+                        date: d.issueDate || new Date(m.ts).toLocaleDateString('en-US'),
+                        receiptNo: '—', receiptDocId: null, appliedTo: num,
+                        method: 'Recorded on invoice (no receipt)', reference: '', usd: extra, currency: 'USD'
+                    });
+                }
+                paid = ledgerMoney(paid + contrib);
+
+                const demand = (kind === 'auction' || kind === 'topup' || kind === 'balance');
+                const outstanding = demand ? Math.max(0, ledgerMoney(due - contrib)) : null;
+                let status = 'Value';
+                if (d.revoked) status = 'Revoked';
+                else if (demand) status = outstanding === 0 ? 'Paid' : (contrib > 0 ? 'Part paid' : 'Unpaid');
+                return { entry: m, id: m.id, kind, docType, number: num, ts: m.ts, due, paid: demand ? contrib : null, outstanding, revoked: !!d.revoked, status };
+            });
+
+            // agreed price: latest live top-up/balance -> latest live Invoice -> root document
+            const live = members.filter(m => !m.data.revoked);
+            const latest = (list) => list.length ? list[list.length - 1] : null;
+            const stage = latest(live.filter(m => ledgerIsStage(m.data) && (m.data.pricing?.totalUSD || 0) > 0));
+            const inv = latest(live.filter(m => (m.data.docType || 'Invoice') === 'Invoice' && (m.data.pricing?.totalUSD || 0) > 0));
+            const totalSrc = stage || inv || deal.root;
+            deal.total = ledgerMoney(totalSrc.data.pricing?.totalUSD);
+            deal.paid = paid;
+            deal.remaining = Math.max(0, ledgerMoney(deal.total - paid));
+            deal.overpaid = paid - deal.total > 0.009 ? ledgerMoney(paid - deal.total) : 0;
+
+            deal.payments.sort((a, b) => a.ts - b.ts);
+            let running = 0;
+            deal.payments.forEach(p => {
+                running = ledgerMoney(running + p.usd);
+                p.totalPaid = running;
+                p.stillOwed = Math.max(0, ledgerMoney(deal.total - running));
+            });
+
+            const r = deal.root.data;
+            deal.client = r.clientName || r.receivedFrom || '';
+            const veh = (live[live.length - 1] || deal.root).data.carDetails || r.carDetails || {};
+            deal.vehicle = [veh.make, veh.model, veh.year].filter(Boolean).join(' ');
+            deal.vin = veh.vin || '';
+            deal.lastStage = latest(live.filter(m => ledgerIsStage(m.data)));
+        });
+
+        this._built = { deals, dealOfDoc, byId, byNumber };
+        this._ver = DocStore.version;
+        return this._built;
+    },
+
+    forDoc(L, src) {
+        const e = (src && src.firestoreId && L.byId.get(src.firestoreId)) || (src && src.invoiceId && L.byNumber.get(src.invoiceId));
+        return e ? L.dealOfDoc.get(e.id) : null;
+    }
+};
+
+/** Deal numbers for a document ({firestoreId} or {invoiceId}). Null if it is not in the cache. */
+async function getDealForDoc(src) {
+    const L = await DealLedger.load();
+    return DealLedger.forDoc(L, src);
+}
+
+/** Same, but looked up by invoice number (used by the receipt form). */
+async function getDealByInvoiceNumber(number) {
+    const L = await DealLedger.load();
+    const e = L.byNumber.get(number);
+    return e ? L.dealOfDoc.get(e.id) : null;
+}
+
+// ---------- statement page ----------
+const StatementState = { rootId: null };
+window.__dealStatements = {};
+
+function ledgerStatusBadge(s) {
+    const cls = { Paid: 'bg-green-100 text-green-800', 'Part paid': 'bg-yellow-100 text-yellow-800', Unpaid: 'bg-red-100 text-red-700', Revoked: 'bg-gray-200 text-gray-600', Value: 'bg-blue-50 text-blue-700' }[s] || 'bg-gray-100 text-gray-700';
+    return `<span class="px-2 py-0.5 rounded-full text-xs font-medium ${cls}">${s === 'Value' ? 'Invoice value' : s}</span>`;
+}
+
+function ledgerDocJson(row) {
+    const e = row.entry;
+    const t = e.type === 'topup' ? 'topup' : e.type === 'balance' ? 'balance' : (row.kind === 'auction' ? 'auction' : 'regular');
+    return JSON.stringify({ ...e.data, firestoreId: e.id, type: t, createdAt: new Date(e.ts).toISOString() }).replace(/'/g, '&#39;');
+}
+
+function ledgerRowActions(deal, row) {
+    const j = ledgerDocJson(row);
+    const ico = (p) => `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${p}"></path></svg>`;
+    const btn = (fn, title, cls, label) => `<button type="button" onclick='${fn}(${j})' title="${title}" class="${cls} text-xs font-medium hover:underline">${label}</button>`;
+    let h = btn('reDownloadInvoiceForTrail', 'Download PDF', 'text-primary-blue', 'PDF');
+    if (!row.revoked) {
+        h += btn('createReceiptFromInvoiceTrail', 'Record a payment received for this invoice', 'text-green-700', 'Receipt');
+        const isLatestStage = deal.lastStage && deal.lastStage.id === row.id;
+        if (row.kind === 'auction' && deal.remaining > 0 && !row.entry.data.topUpCreated) h += btn('createTopUpFromAuctionInvoice', 'Create the first top-up', 'text-teal-700', 'Top-up');
+        if (isLatestStage && deal.remaining > 0) {
+            h += btn('createTopUpFromInvoice', 'Issue another top-up invoice', 'text-teal-700', 'Top-up again');
+            h += btn('createBalanceInvoice', 'Issue a balance invoice', 'text-purple-700', 'Balance');
+        }
+        if (row.kind === 'topup') h += btn('revokeTopUpInvoice', 'Revoke this invoice', 'text-red-600', 'Revoke');
+        if (row.kind === 'balance') h += btn('revokeBalanceInvoice', 'Revoke this invoice', 'text-red-600', 'Revoke');
+    } else {
+        if (row.kind === 'topup') h += btn('unrevokeTopUpInvoice', 'Restore this invoice', 'text-gray-600', 'Unrevoke');
+        if (row.kind === 'balance') h += btn('unrevokeBalanceInvoice', 'Restore this invoice', 'text-gray-600', 'Unrevoke');
+    }
+    if ((row.kind === 'auction' || row.kind === 'invoice') && !row.entry.data.linkedInvoiceFirestoreId && !row.entry.data.sourceInvoiceFirestoreId) {
+        h += `<button type="button" onclick="openLinkInvoiceDialog('${row.id}')" title="Attach this to an earlier invoice or proforma" class="text-gray-600 text-xs font-medium hover:underline">Link…</button>`;
+    }
+    return `<div class="flex flex-wrap gap-x-3 gap-y-1 justify-center">${h}</div>`;
+}
+
+function dealStatementHtml(deal) {
+    window.__dealStatements[deal.rootId] = deal;
+    const pct = deal.total > 0 ? Math.min(100, Math.round(deal.paid / deal.total * 100)) : 0;
+    const owedCls = deal.remaining > 0 ? 'text-red-600' : 'text-green-600';
+    const th = 'px-3 py-2 text-xs font-semibold text-gray-600 uppercase tracking-wide';
+
+    const docRows = deal.docs.map(r => {
+        const d = r.entry.data;
+        const when = d.issueDate || new Date(r.ts).toLocaleDateString('en-US');
+        const demand = r.paid !== null;
+        const label = { proforma: 'Proforma', invoice: 'Invoice', auction: 'Auction invoice', topup: 'Top-up', balance: 'Balance' }[r.kind];
+        return `<tr class="${r.revoked ? 'bg-red-50 text-gray-500' : ''} border-t border-gray-100">
+            <td class="px-3 py-2 text-sm whitespace-nowrap">${smartEscape(when)}</td>
+            <td class="px-3 py-2 text-sm font-medium text-primary-blue whitespace-nowrap">${smartEscape(r.number || '')}</td>
+            <td class="px-3 py-2 text-sm">${label}</td>
+            <td class="px-3 py-2 text-sm text-right tabular-nums">${ledgerFmt(r.due)}</td>
+            <td class="px-3 py-2 text-sm text-right tabular-nums text-green-700">${demand ? ledgerFmt(r.paid) : '—'}</td>
+            <td class="px-3 py-2 text-sm text-right tabular-nums ${demand && r.outstanding > 0 ? 'text-red-600 font-semibold' : ''}">${demand ? ledgerFmt(r.outstanding) : '—'}</td>
+            <td class="px-3 py-2 text-center">${ledgerStatusBadge(r.status)}</td>
+            <td class="px-3 py-2">${ledgerRowActions(deal, r)}</td>
+        </tr>`;
+    }).join('');
+
+    const payRows = deal.payments.map((p, i) => `
+        <tr class="border-t border-gray-100 hover:bg-gray-50" data-search="${smartEscape((p.date + ' ' + p.receiptNo + ' ' + p.appliedTo + ' ' + p.method + ' ' + p.reference).toLowerCase())}">
+            <td class="px-3 py-2 text-sm text-gray-500" data-sort="${i + 1}">${i + 1}</td>
+            <td class="px-3 py-2 text-sm whitespace-nowrap" data-sort="${p.ts}">${smartEscape(p.date)}</td>
+            <td class="px-3 py-2 text-sm font-medium ${p.kind === 'legacy' ? 'text-gray-400' : 'text-primary-blue'} whitespace-nowrap" data-sort="${smartEscape(p.receiptNo)}">${smartEscape(p.receiptNo)}</td>
+            <td class="px-3 py-2 text-sm whitespace-nowrap" data-sort="${smartEscape(p.appliedTo)}">${smartEscape(p.appliedTo)}</td>
+            <td class="px-3 py-2 text-sm" data-sort="${smartEscape(p.method)}">${smartEscape(p.method)}</td>
+            <td class="px-3 py-2 text-sm text-gray-600" data-sort="${smartEscape(p.reference)}">${smartEscape(p.reference)}</td>
+            <td class="px-3 py-2 text-sm text-right tabular-nums text-green-700 font-medium" data-sort="${p.usd}">${ledgerFmt(p.usd)}</td>
+            <td class="px-3 py-2 text-sm text-right tabular-nums" data-sort="${p.totalPaid}">${ledgerFmt(p.totalPaid)}</td>
+            <td class="px-3 py-2 text-sm text-right tabular-nums ${p.stillOwed > 0 ? 'text-red-600' : 'text-green-600'}" data-sort="${p.stillOwed}">${ledgerFmt(p.stillOwed)}</td>
+        </tr>`).join('');
+
+    const sortable = (label, idx, align = 'left') =>
+        `<th class="${th} text-${align} cursor-pointer select-none hover:text-primary-blue" onclick="ledgerSortTable(this, ${idx})">${label} <span class="opacity-40">↕</span></th>`;
+
+    return `
+    <section class="mb-10" id="deal-${deal.rootId}">
+        <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
+            <div>
+                <h3 class="text-xl font-bold text-primary-blue">${smartEscape(deal.client || 'Client')}${deal.vehicle ? ` — ${smartEscape(deal.vehicle)}` : ''}</h3>
+                <p class="text-sm text-gray-500">${deal.vin ? `VIN ${smartEscape(deal.vin)} · ` : ''}Started with ${smartEscape(deal.root.data.invoiceId || '')}</p>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+            <div class="p-3 rounded-xl bg-gray-50 border border-gray-200"><p class="text-xs text-gray-500 uppercase tracking-wide">Deal value</p><p class="text-xl font-bold tabular-nums">USD ${ledgerFmt(deal.total)}</p></div>
+            <div class="p-3 rounded-xl bg-green-50 border border-green-200"><p class="text-xs text-green-700 uppercase tracking-wide">Paid to date</p><p class="text-xl font-bold tabular-nums text-green-700">USD ${ledgerFmt(deal.paid)}</p></div>
+            <div class="p-3 rounded-xl ${deal.remaining > 0 ? 'bg-red-50 border-red-200' : 'bg-green-50 border-green-200'} border"><p class="text-xs ${owedCls} uppercase tracking-wide">Still owed</p><p class="text-xl font-bold tabular-nums ${owedCls}">USD ${ledgerFmt(deal.remaining)}</p></div>
+            <div class="p-3 rounded-xl bg-gray-50 border border-gray-200"><p class="text-xs text-gray-500 uppercase tracking-wide">Progress</p><p class="text-xl font-bold tabular-nums">${pct}%</p>
+                <div class="h-1.5 bg-gray-200 rounded mt-1"><div class="h-1.5 bg-green-500 rounded" style="width:${pct}%"></div></div></div>
+        </div>
+        ${deal.overpaid ? `<p class="mb-3 text-sm bg-yellow-50 border border-yellow-300 text-yellow-800 rounded-lg px-3 py-2">Payments exceed the deal value by USD ${ledgerFmt(deal.overpaid)} — check the receipts below.</p>` : ''}
+
+        <h4 class="font-semibold text-gray-700 mt-5 mb-2">Invoices issued</h4>
+        <div class="overflow-x-auto border border-gray-200 rounded-xl">
+            <table class="min-w-full">
+                <thead class="bg-gray-50"><tr>
+                    <th class="${th} text-left">Date</th><th class="${th} text-left">Invoice</th><th class="${th} text-left">Type</th>
+                    <th class="${th} text-right">Amount due</th><th class="${th} text-right">Paid</th><th class="${th} text-right">Outstanding</th>
+                    <th class="${th} text-center">Status</th><th class="${th} text-center">Actions</th>
+                </tr></thead>
+                <tbody>${docRows}</tbody>
+            </table>
+        </div>
+
+        <div class="flex flex-wrap items-center justify-between gap-2 mt-6 mb-2">
+            <h4 class="font-semibold text-gray-700">Payment history</h4>
+            <div class="flex gap-2">
+                <input type="search" placeholder="Filter payments…" oninput="ledgerFilterTable('pay-${deal.rootId}', this.value)" class="p-2 border border-gray-300 rounded-lg text-sm">
+                <button type="button" onclick="ledgerExportCsv('${deal.rootId}')" class="bg-white border border-gray-300 hover:bg-gray-100 text-sm px-3 py-2 rounded-lg">Download CSV</button>
+                <button type="button" onclick="ledgerCopyTable('pay-${deal.rootId}')" class="bg-white border border-gray-300 hover:bg-gray-100 text-sm px-3 py-2 rounded-lg">Copy</button>
+            </div>
+        </div>
+        <div class="overflow-auto max-h-[28rem] border border-gray-200 rounded-xl">
+            <table class="min-w-full" id="pay-${deal.rootId}">
+                <thead class="bg-gray-50 sticky top-0 z-10"><tr>
+                    ${sortable('#', 0)}${sortable('Date', 1)}${sortable('Receipt no.', 2)}${sortable('Applied to', 3)}${sortable('Method / bank', 4)}${sortable('Reference', 5)}
+                    ${sortable('Amount (USD)', 6, 'right')}${sortable('Total paid', 7, 'right')}${sortable('Still owed', 8, 'right')}
+                </tr></thead>
+                <tbody>${payRows || `<tr><td colspan="9" class="px-3 py-8 text-center text-sm text-gray-500">No payments recorded yet. Use <b>Receipt</b> on an invoice above when money is received.</td></tr>`}</tbody>
+                <tfoot class="bg-gray-50 sticky bottom-0"><tr class="font-semibold border-t-2 border-gray-300">
+                    <td colspan="6" class="px-3 py-2 text-sm text-right">Total received</td>
+                    <td class="px-3 py-2 text-sm text-right tabular-nums text-green-700">${ledgerFmt(deal.paid)}</td>
+                    <td class="px-3 py-2 text-sm text-right text-gray-500">Owed</td>
+                    <td class="px-3 py-2 text-sm text-right tabular-nums ${owedCls}">${ledgerFmt(deal.remaining)}</td>
+                </tr></tfoot>
+            </table>
+        </div>
+    </section>`;
+}
+
+function ledgerSortTable(th, col) {
+    const table = th.closest('table');
+    const body = table.tBodies[0];
+    const rows = Array.from(body.rows).filter(r => r.cells.length > 1);
+    const dir = th.dataset.dir === 'asc' ? 'desc' : 'asc';
+    table.querySelectorAll('th').forEach(h => { delete h.dataset.dir; });
+    th.dataset.dir = dir;
+    const key = (r) => { const v = r.cells[col].dataset.sort ?? r.cells[col].textContent; const n = parseFloat(v); return (v !== '' && !isNaN(n) && /^-?[\d.]+$/.test(String(v).trim())) ? n : String(v).toLowerCase(); };
+    rows.sort((a, b) => { const x = key(a), y = key(b); return (x < y ? -1 : x > y ? 1 : 0) * (dir === 'asc' ? 1 : -1); });
+    rows.forEach(r => body.appendChild(r));
+}
+
+function ledgerFilterTable(tableId, text) {
+    const t = String(text || '').toLowerCase().trim();
+    document.querySelectorAll(`#${tableId} tbody tr[data-search]`).forEach(r => {
+        r.classList.toggle('hidden', !!t && !r.dataset.search.includes(t));
+    });
+}
+
+function ledgerCsvCell(v) { const s = String(v ?? ''); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }
+
+function ledgerExportCsv(rootId) {
+    const deal = window.__dealStatements[rootId];
+    if (!deal) return;
+    const lines = [['Date', 'Receipt no.', 'Applied to', 'Method / bank', 'Reference', 'Amount USD', 'Total paid USD', 'Still owed USD']];
+    deal.payments.forEach(p => lines.push([p.date, p.receiptNo, p.appliedTo, p.method, p.reference, p.usd.toFixed(2), p.totalPaid.toFixed(2), p.stillOwed.toFixed(2)]));
+    lines.push([], ['', '', '', '', 'Deal value', deal.total.toFixed(2)], ['', '', '', '', 'Paid', deal.paid.toFixed(2)], ['', '', '', '', 'Still owed', deal.remaining.toFixed(2)]);
+    const csv = lines.map(l => l.map(ledgerCsvCell).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `payments-${(deal.client || 'client').replace(/\W+/g, '_')}-${deal.root.data.invoiceId || deal.rootId}.csv`;
+    document.body.appendChild(a); a.click(); a.remove();
+}
+
+function ledgerCopyTable(tableId) {
+    const table = document.getElementById(tableId);
+    if (!table) return;
+    const text = Array.from(table.rows).filter(r => !r.classList.contains('hidden'))
+        .map(r => Array.from(r.cells).map(c => c.textContent.replace(/[↕]/g, '').trim()).join('\t')).join('\n');
+    (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject()).then(
+        () => showSuccessToast('Copied — paste into Excel or Sheets'),
+        () => showErrorToast('Could not copy. Use Download CSV instead.'));
+}
+
+/** Opens the statement for the deal that a document belongs to. */
+async function showDealStatement(docId) {
+    if (!document.getElementById('document-form-area')) handleDocumentGenerator();
+    const area = document.getElementById('document-form-area');
+    area.innerHTML = `<div class="p-6 bg-white border border-gray-300 rounded-xl">${createShimmerLoader(3)}</div>`;
+    const L = await DealLedger.load();
+    const e = L.byId.get(docId) || L.byNumber.get(docId);
+    const deal = e ? L.dealOfDoc.get(e.id) : null;
+    if (!deal) { area.innerHTML = `<div class="p-6 bg-white border rounded-xl text-gray-600">Statement not found.</div>`; return; }
+    StatementState.rootId = deal.rootId;
+    renderStatementPage();
+    DocStore.watch(() => { if (StatementState.rootId && document.getElementById(`deal-${StatementState.rootId}`)) renderStatementPage(true); });
+}
+
+function renderStatementPage(keepScroll) {
+    const area = document.getElementById('document-form-area');
+    if (!area) return;
+    const L = DealLedger.build();
+    const deal = L.deals.get(StatementState.rootId);
+    if (!deal) return;
+    const y = window.scrollY;
+    area.innerHTML = `<div class="p-6 border border-gray-300 rounded-xl bg-white shadow-lg animate-fade-in">
+        <div class="flex justify-between items-center mb-4">
+            <h2 class="text-lg font-semibold text-gray-700">Statement</h2>
+            <button type="button" onclick="renderInvoiceHistory()" class="text-sm text-gray-600 hover:text-primary-blue">← Back to invoices</button>
+        </div>
+        ${dealStatementHtml(deal)}
+    </div>`;
+    if (keepScroll) window.scrollTo(0, y);
+}
+
+
+/** Compact "owed / paid" lines for a history row (needs the ledger caches to be loaded). */
+function ledgerSummaryChip(docId) {
+    try {
+        const L = DealLedger.build();
+        const deal = L.dealOfDoc.get(docId);
+        if (!deal) return '';
+        const row = deal.docs.find(d => d.id === docId);
+        const own = (row && row.paid !== null && !row.revoked)
+            ? `<br><span class="text-xs text-gray-700">This invoice: due <b>USD ${ledgerFmt(row.due)}</b> · paid <b class="text-green-700">${ledgerFmt(row.paid)}</b> · outstanding <b class="${row.outstanding > 0 ? 'text-red-600' : 'text-green-700'}">${ledgerFmt(row.outstanding)}</b></span>`
+            : '';
+        return `${own}<br><span class="text-xs text-gray-500">Whole deal: USD ${ledgerFmt(deal.total)} · paid <span class="text-green-700">${ledgerFmt(deal.paid)}</span> · owed <span class="${deal.remaining > 0 ? 'text-red-600' : 'text-green-700'}">${ledgerFmt(deal.remaining)}</span></span>`;
+    } catch (e) { return ''; }
+}
+
+function ledgerStatementButton(docId) {
+    return `<button type="button" onclick="showDealStatement('${docId}')" class="bg-white border border-primary-blue text-primary-blue hover:bg-blue-50 text-xs py-1 px-3 rounded-full transition duration-150">Statement</button>`;
+}
+
+// ---------- link an invoice/auction to the invoice it belongs to ----------
+async function openLinkInvoiceDialog(childId) {
+    const L = await DealLedger.load();
+    const child = L.byId.get(childId);
+    if (!child) return;
+    const cands = Array.from(L.byId.values()).filter(e => e.id !== childId && e.type === 'invoice' && !e.revoked
+        && ['Invoice', 'Proforma Invoice'].includes(e.data.docType || 'Invoice') && e.ts <= child.ts + 86400000 * 365);
+    cands.sort((a, b) => ((b.client === child.client) - (a.client === child.client)) || (b.ts - a.ts));
+    const old = document.getElementById('link-invoice-dialog'); if (old) old.remove();
+    const wrap = document.createElement('div');
+    wrap.id = 'link-invoice-dialog';
+    wrap.className = 'fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4';
+    wrap.innerHTML = `<div class="bg-white rounded-xl shadow-xl w-full max-w-lg p-5">
+        <h3 class="text-lg font-semibold text-primary-blue mb-1">Link ${smartEscape(child.data.invoiceId)} to an invoice</h3>
+        <p class="text-sm text-gray-500 mb-3">Payments and top-ups will then count toward that invoice's total, and one statement will show the whole deal.</p>
+        <select id="link-invoice-select" class="w-full p-2 border border-gray-300 rounded-lg mb-4">
+            <option value="">Choose an invoice or proforma…</option>
+            ${cands.map(e => `<option value="${e.id}">${smartEscape(e.data.invoiceId)} — ${smartEscape(e.client)} — USD ${ledgerFmt(e.amount)}${e.client === child.client ? '' : ' (different client)'}</option>`).join('')}
+        </select>
+        <div class="flex justify-end gap-2">
+            <button type="button" id="link-cancel" class="px-4 py-2 rounded-lg border border-gray-300">Cancel</button>
+            <button type="button" id="link-save" class="px-4 py-2 rounded-lg bg-primary-blue text-white">Link</button>
+        </div></div>`;
+    document.body.appendChild(wrap);
+    wrap.querySelector('#link-cancel').onclick = () => wrap.remove();
+    wrap.querySelector('#link-save').onclick = async () => {
+        const pick = wrap.querySelector('#link-invoice-select').value;
+        if (!pick) { showErrorToast('Choose an invoice first.'); return; }
+        const parent = L.byId.get(pick);
+        try {
+            await db.collection(DOC_COLLECTIONS[child.type]).doc(childId).update({
+                linkedInvoiceId: parent.data.invoiceId,
+                linkedInvoiceFirestoreId: parent.id
+            });
+            wrap.remove();
+            showSuccessToast(`Linked to ${parent.data.invoiceId}`);
+        } catch (err) {
+            console.error(err);
+            showErrorToast('Could not link: ' + err.message);
+        }
+    };
+}
+
+/** Adds the "linked to" field to the invoice form. */
+async function injectInvoiceLinkField() {
+    const form = document.getElementById('invoice-form');
+    if (!form || document.getElementById('linkedInvoiceNumber')) return;
+    const box = document.createElement('div');
+    box.className = 'mb-4 p-4 bg-gray-50 border border-gray-200 rounded-lg';
+    box.innerHTML = `
+        <label for="linkedInvoiceNumber" class="block text-sm font-medium text-gray-700">Belongs to an earlier invoice (optional)</label>
+        <input id="linkedInvoiceNumber" list="linkInvoiceList" autocomplete="off" placeholder="e.g. the USD 20,000 invoice this auction payment is part of, or the proforma this invoice follows" class="mt-1 block w-full p-2 border rounded-md">
+        <datalist id="linkInvoiceList"></datalist>
+        <p class="text-xs text-gray-500 mt-1">Linking keeps every payment, top-up and receipt for the same car on one statement.</p>`;
+    form.insertBefore(box, form.firstChild);
+    try {
+        const L = await DealLedger.load();
+        const list = document.getElementById('linkInvoiceList');
+        if (!list) return;
+        list.innerHTML = Array.from(L.byId.values())
+            .filter(e => e.type === 'invoice' && !e.revoked && ['Invoice', 'Proforma Invoice'].includes(e.data.docType || 'Invoice'))
+            .sort((a, b) => b.ts - a.ts).slice(0, 300)
+            .map(e => `<option value="${smartEscape(e.data.invoiceId)}">${smartEscape(e.client)} — USD ${ledgerFmt(e.amount)}</option>`).join('');
+    } catch (err) { console.warn('Link list unavailable', err); }
+}
+
+/** Resolves the typed "linked to" number to link fields (or null). Throws if it does not exist. */
+async function resolveInvoiceLink() {
+    const input = document.getElementById('linkedInvoiceNumber');
+    const n = input ? input.value.trim() : '';
+    if (!n) return null;
+    const L = await DealLedger.load();
+    const e = L.byNumber.get(n);
+    if (!e) throw new Error(`Invoice ${n} was not found. Pick one from the list or clear the field.`);
+    return { linkedInvoiceId: e.data.invoiceId, linkedInvoiceFirestoreId: e.id };
 }
 
 // =================================================================
@@ -7836,29 +8444,16 @@ async function revokeReceipt(receiptData) {
             }
         }
 
-        // 3. If parent invoice exists, restore the payment amount to its balance
+        // 3. Restore the stored paid/remaining of the real invoices this payment
+        //    counted toward (top-up/balance invoices are snapshots and are left alone;
+        //    the deal ledger recalculates their position from the remaining receipts).
         if (parentInvoiceDoc) {
-            const parentData = parentInvoiceDoc.data();
-            const totalPaidBefore = parentData.pricing?.totalPaid || 0;
-            const remainingBefore = parentData.pricing?.remainingBalance || 0;
-            const revokedAmountUSD = receiptData.amountReceivedUSD || 0; // store USD equivalent in receipt
-
-            // Revert the paid amount and remaining balance
-            const newTotalPaid = Math.max(0, roundCurrency(totalPaidBefore - revokedAmountUSD));
-            const newRemaining = roundCurrency(remainingBefore + revokedAmountUSD);
-
-            const parentRef = db.collection(parentCollection).doc(parentInvoiceDoc.id);
-            batch.update(parentRef, {
-                'pricing.totalPaid': newTotalPaid,
-                'pricing.remainingBalance': newRemaining,
-                'pricing.revokedAmount': firebase.firestore.FieldValue.increment(revokedAmountUSD)
+            const revokedAmountUSD = receiptData.amountReceivedUSD || 0;
+            const chain = await loadInvoiceChain({ get: (r) => r.get() }, parentInvoiceDoc.ref, parentInvoiceDoc);
+            chain.forEach(item => {
+                const u = buildChainUpdate(item, -revokedAmountUSD);
+                if (u) batch.update(item.ref, u);
             });
-
-            // If the parent is an auction invoice and we had a top-up flag, clear it if needed
-            if (parentCollection === 'invoices' && parentData.docType === 'Auction Invoice') {
-                // Optionally, you might want to unset topUpCreated if all payments are revoked
-                // For simplicity, we keep the flag but the balance is restored.
-            }
         }
 
         // 4. Commit the batch
@@ -8415,7 +9010,6 @@ async function generatePortChargesInvoiceNumber(clientName, carMakeModel) {
     
     // Calculate next sequential number
     const nextNumber = (snapshot.size + 1).toString().padStart(4, '0');
-    
     // Get name and model parts for reference
     const namePart = clientName.split(' ')[0].toUpperCase().substring(0, 3);
     const modelPart = carMakeModel.split(' ')[0].toUpperCase().substring(0, 3);
@@ -9160,6 +9754,25 @@ async function searchPortChargesInvoices(searchTerm) {
 // =================================================================
 
 /**
+ * Document numbers must be unique across the whole system: receipts are
+ * matched to invoices by number, so two invoices sharing a number would
+ * share each other's payments. Bumps the sequence until the number is free.
+ */
+async function ensureUniqueInvoiceNumber(makeNumber, startSeq) {
+    let seq = startSeq;
+    for (let i = 0; i < 200; i++, seq++) {
+        const candidate = makeNumber(seq.toString().padStart(4, '0'));
+        let taken = false;
+        for (const coll of ['invoices', 'top_up_invoices', 'balance_invoices']) {
+            const snap = await db.collection(coll).where('invoiceId', '==', candidate).limit(1).get();
+            if (!snap.empty) { taken = true; break; }
+        }
+        if (!taken) return candidate;
+    }
+    throw new Error('Could not generate a unique invoice number. Please try again.');
+}
+
+/**
  * Generates a sequential invoice number for top-up invoices
  */
 async function generateTopUpInvoiceNumber(clientName, carMakeModel, sourceInvoiceId) {
@@ -9179,7 +9792,6 @@ async function generateTopUpInvoiceNumber(clientName, carMakeModel, sourceInvoic
     
     // Calculate next sequential number
     const nextNumber = (snapshot.size + 1).toString().padStart(4, '0');
-    
     // Get name and model parts for reference
     const namePart = clientName.split(' ')[0].toUpperCase().substring(0, 3);
     const modelPart = carMakeModel.split(' ')[0].toUpperCase().substring(0, 3);
@@ -9187,7 +9799,7 @@ async function generateTopUpInvoiceNumber(clientName, carMakeModel, sourceInvoic
     // Extract source invoice prefix
     const sourcePrefix = sourceInvoiceId.split('-')[0] || 'TOP';
     
-    return `TOPUP-${year}${month}${day}-${nextNumber}-${namePart}-${modelPart}-${sourcePrefix}`;
+    return ensureUniqueInvoiceNumber(n => `TOPUP-${year}${month}${day}-${n}-${namePart}-${modelPart}-${sourcePrefix}`, snapshot.size + 1);
 }
 
 /**
@@ -9303,72 +9915,30 @@ async function loadSourceInvoiceForTopUp() {
             return;
         }
         
-        // Check if there's remaining balance
-        let remainingBalance = 0;
-        let totalPaid = 0;
-        let totalPrice = 0;
-        
-        if (invoiceData.sourceType === 'regular' && invoiceData.docType === 'Auction Invoice') {
-            // For auction invoices, check receipts to see if any payments were made
-            const receiptsSnapshot = await db.collection("receipts")
-                .where("invoiceReference", "==", invoiceNumber)
-                .get();
-            
-            totalPaid = 0;
-            for (const receiptDoc of receiptsSnapshot.docs) {
-                const receipt = receiptDoc.data();
-                if (receipt.currency === 'USD') {
-                    totalPaid += receipt.amountReceived;
-                } else if (receipt.currency === 'KSH') {
-                    totalPaid += receipt.amountReceived / receipt.exchangeRate;
-                }
-            }
-            
-            totalPrice = invoiceData.pricing.totalUSD;
-            remainingBalance = totalPrice - totalPaid;
-            
-            if (remainingBalance <= 0) {
-                hideLoadingOverlay();
-                showErrorToast("This invoice is already fully paid. No top-up needed.");
-                return;
-            }
-        } else if (invoiceData.sourceType === 'topup') {
-            // For top-up invoices, use the remaining balance from pricing
-            totalPrice = invoiceData.pricing.totalUSD;
-            totalPaid = invoiceData.pricing.totalPaid || 0;
-            remainingBalance = invoiceData.pricing.remainingBalance || (totalPrice - totalPaid);
-            
-            if (remainingBalance <= 0) {
-                hideLoadingOverlay();
-                showErrorToast("This invoice is already fully paid. No top-up needed.");
-                return;
-            }
-        } else {
-            // Regular invoice (non-auction) - check if any payments made
-            const receiptsSnapshot = await db.collection("receipts")
-                .where("invoiceReference", "==", invoiceNumber)
-                .get();
-            
-            totalPaid = 0;
-            for (const receiptDoc of receiptsSnapshot.docs) {
-                const receipt = receiptDoc.data();
-                if (receipt.currency === 'USD') {
-                    totalPaid += receipt.amountReceived;
-                } else if (receipt.currency === 'KSH') {
-                    totalPaid += receipt.amountReceived / receipt.exchangeRate;
-                }
-            }
-            
-            totalPrice = invoiceData.pricing.totalUSD;
-            remainingBalance = totalPrice - totalPaid;
-            
-            if (remainingBalance <= 0) {
-                hideLoadingOverlay();
-                showErrorToast("This invoice is already fully paid. No top-up needed.");
-                return;
-            }
+        // An auction invoice's first top-up has its own form (it sets the total price)
+        if (invoiceData.docType === 'Auction Invoice') {
+            hideLoadingOverlay();
+            createTopUpFromAuctionInvoice({ ...invoiceData, createdAt: invoiceData.createdAt?.toDate ? invoiceData.createdAt.toDate().toISOString() : invoiceData.createdAt });
+            return;
         }
-        
+
+        // Paid / owed come from the deal ledger (receipts), not stored invoice fields
+        const deal = await getDealForDoc(invoiceData);
+        if (!deal) {
+            hideLoadingOverlay();
+            showErrorToast("Could not read this deal's payments. Please try again.");
+            return;
+        }
+        const totalPrice = deal.total;
+        const totalPaid = deal.paid;
+        const remainingBalance = deal.remaining;
+        if (remainingBalance <= 0) {
+            hideLoadingOverlay();
+            showErrorToast("This deal is already fully paid. No top-up needed.");
+            return;
+        }
+        if (invoiceData.docType === 'Balance Invoice') invoiceData.sourceType = 'balance';
+
         // Store the invoice data for preview
         window.selectedSourceInvoice = {
             ...invoiceData,
@@ -9668,142 +10238,77 @@ async function saveTopUpInvoice(onlySave = false) {
             return;
         }
         
-        // Determine which collection the source invoice lives in (regular/
-        // auction invoices are always in 'invoices')
-        // FIX: the source may be a top-up invoice ("Top Up Again" / loading a
-        // TOPUP-... number), whose document lives in 'top_up_invoices', not
-        // 'invoices'. Looking in the wrong collection caused
-        // "Source invoice not found in Firestore".
+        // Which document is the source, and which deal does it belong to?
         const sourceCollName = getInvoiceCollectionName(sourceInvoice);
-        // Top-up and balance parents are "staged" documents with their own history
-        const sourceIsTopUp = sourceCollName !== 'invoices';
         const sourceInvoiceRef = db.collection(sourceCollName).doc(sourceInvoice.firestoreId);
 
-        // Use a transaction: read the LATEST parent invoice totals (not the
-        // possibly-stale copy held in memory since the page loaded), then
-        // write the top-up invoice + updated parent totals + bank ledger
-        // credit all atomically.
-        const result = await db.runTransaction(async (transaction) => {
-            const sourceSnap = await transaction.get(sourceInvoiceRef);
-            if (!sourceSnap.exists) {
-                throw new Error('Source invoice not found in Firestore');
-            }
-            const sourceData = sourceSnap.data();
-            // Whole chain up to the original invoice (reads before writes)
-            const chain = await loadInvoiceChain(transaction, sourceInvoiceRef, sourceSnap);
+        // "Paid so far" and "still owed" come from the deal ledger (receipts),
+        // never from numbers stored on the source invoice. A top-up invoice
+        // only states what is now being asked for; it does not move money.
+        const deal = await getDealForDoc(sourceInvoice);
+        if (!deal) throw new Error('Could not work out the payments for this invoice. Please try again.');
+        if (currentPaymentDue <= 0) throw new Error('Enter an amount greater than zero.');
+        if (currentPaymentDue - deal.remaining > 0.009) {
+            throw new Error(`This top-up (USD ${ledgerFmt(currentPaymentDue)}) is more than the USD ${ledgerFmt(deal.remaining)} still owed on this deal.`);
+        }
 
-            // FIX: these previously read sourceInvoice.totalPrice /
-            // sourceInvoice.totalPaid — flat fields that don't exist on this
-            // collection's documents. The real data lives under `pricing`,
-            // so this always silently computed totalPaidSoFar as 0.
-            const totalPrice = sourceData.pricing?.totalUSD || sourceData.totalPrice || 0;
-            // A top-up parent stores its running total in newTotalPaid
-            const totalPaidSoFar = sourceIsTopUp
-                ? (sourceData.pricing?.newTotalPaid ?? sourceData.pricing?.totalPaid ?? 0)
-                : (sourceData.pricing?.totalPaid || 0);
-            const newTotalPaid = roundCurrency(totalPaidSoFar + currentPaymentDue);
-            const remainingAfter = roundCurrency(totalPrice - newTotalPaid);
+        const totalPrice = deal.total;
+        const totalPaidSoFar = deal.paid;
+        const newTotalPaid = roundCurrency(totalPaidSoFar + currentPaymentDue);       // once this invoice is paid
+        const remainingAfter = Math.max(0, roundCurrency(totalPrice - newTotalPaid));
 
-            // Generate invoice number
-            const carMakeModel = sourceInvoice.carDetails?.make && sourceInvoice.carDetails?.model
-                ? `${sourceInvoice.carDetails.make} ${sourceInvoice.carDetails.model}`
-                : sourceInvoice.vehicleDetails?.makeModel || 'Unknown';
+        const carMakeModel = sourceInvoice.carDetails?.make && sourceInvoice.carDetails?.model
+            ? `${sourceInvoice.carDetails.make} ${sourceInvoice.carDetails.model}`
+            : sourceInvoice.vehicleDetails?.makeModel || 'Unknown';
 
-            const invoiceId = await generateTopUpInvoiceNumber(sourceInvoice.clientName, carMakeModel, sourceInvoice.invoiceId);
+        const invoiceId = await generateTopUpInvoiceNumber(sourceInvoice.clientName, carMakeModel, sourceInvoice.invoiceId);
 
-            const topUpData = {
-                docType: 'Top-Up Invoice',
-                invoiceId,
-                sourceInvoiceId: sourceInvoice.invoiceId,
-                sourceInvoiceFirestoreId: sourceInvoice.firestoreId,
-                sourceInvoiceType: sourceCollName === 'top_up_invoices' ? 'topup' : sourceCollName === 'balance_invoices' ? 'balance' : 'regular',
-                sourceInvoiceCollection: sourceCollName,
-                clientName: sourceInvoice.clientName,
-                clientPhone: sourceInvoice.clientPhone || '',
-                issueDate: getCurrentDateForDocument(),
-                dueDate: dueDate || null,
-                paymentDays: paymentDays,
-                exchangeRate,
-                carDetails: sourceInvoice.carDetails || sourceInvoice.vehicleDetails || {
-                    make: sourceInvoice.carDetails?.make || '',
-                    model: sourceInvoice.carDetails?.model || '',
-                    year: sourceInvoice.carDetails?.year || '',
-                    vin: sourceInvoice.carDetails?.vin || sourceInvoice.vehicleDetails?.vin || '',
-                    color: sourceInvoice.carDetails?.color || ''
-                },
-                pricing: {
-                    totalUSD: totalPrice,
-                    totalPaid: totalPaidSoFar,
-                    currentPaymentDue: currentPaymentDue,
-                    newTotalPaid: newTotalPaid,
-                    remainingBalance: remainingAfter,
-                    paymentPercentage: totalPrice ? (currentPaymentDue / totalPrice * 100) : 0,
-                    totalPaidPercentage: totalPrice ? (newTotalPaid / totalPrice * 100) : 0
-                },
-                paymentReference: paymentReference,
-                bankDetails: selectedBank,
-                createdBy: currentUser.email,
-                createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-                revoked: false
-            };
+        const topUpData = {
+            docType: 'Top-Up Invoice',
+            paymentModel: 'ledger',
+            invoiceId,
+            sourceInvoiceId: sourceInvoice.invoiceId,
+            sourceInvoiceFirestoreId: sourceInvoice.firestoreId,
+            sourceInvoiceType: sourceCollName === 'top_up_invoices' ? 'topup' : sourceCollName === 'balance_invoices' ? 'balance' : 'regular',
+            sourceInvoiceCollection: sourceCollName,
+            dealRootId: deal.rootId,
+            clientName: sourceInvoice.clientName,
+            clientPhone: sourceInvoice.clientPhone || '',
+            issueDate: getCurrentDateForDocument(),
+            dueDate: dueDate || null,
+            paymentDays: paymentDays,
+            exchangeRate,
+            carDetails: sourceInvoice.carDetails || sourceInvoice.vehicleDetails || {
+                make: '', model: '', year: '',
+                vin: sourceInvoice.vehicleDetails?.vin || '',
+                color: ''
+            },
+            pricing: {
+                totalUSD: totalPrice,
+                totalPaid: totalPaidSoFar,
+                currentPaymentDue: currentPaymentDue,
+                newTotalPaid: newTotalPaid,
+                remainingBalance: remainingAfter,
+                paymentPercentage: totalPrice ? (currentPaymentDue / totalPrice * 100) : 0,
+                totalPaidPercentage: totalPrice ? (newTotalPaid / totalPrice * 100) : 0
+            },
+            paymentReference: paymentReference,
+            bankDetails: selectedBank,                      // the account the client is asked to pay into
+            createdBy: currentUser.email,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+            revoked: false
+        };
 
-            const docRef = db.collection("top_up_invoices").doc();
-            transaction.set(docRef, topUpData);
-
-            // FIX: this write to the parent invoice never happened before —
-            // the top-up invoice recorded the payment, but the original
-            // invoice never reflected it, so it looked unpaid forever.
-            // Update every ancestor: the immediate parent, any intermediate
-            // top-ups, and the original invoice, so all balances agree.
-            chain.slice(1).forEach(item => {
-                transaction.update(item.ref, buildChainUpdate(item, currentPaymentDue));
-            });
-            const parentUpdate = sourceIsTopUp
-                ? { 'pricing.remainingBalance': Math.max(0, remainingAfter) }
-                : { 'pricing.totalPaid': newTotalPaid, 'pricing.remainingBalance': Math.max(0, remainingAfter) };
-            transaction.update(sourceInvoiceRef, {
-                ...parentUpdate,
-                topUpCreated: true,
-                topUpInvoiceId: invoiceId,
-                topUpCreatedAt: firebase.firestore.FieldValue.serverTimestamp()
-            });
-
-            // Credit the real bank ledger — this money was previously
-            // recorded on the invoice only, never reflected in any bank
-            // balance.
-            if (selectedBank && selectedBank.id) {
-                const bankCurrency = (selectedBank.currency || '').toUpperCase();
-                const bankAmount = bankCurrency === 'USD'
-                    ? currentPaymentDue
-                    : roundCurrency(currentPaymentDue * exchangeRate);
-                const bankRef = db.collection('bankDetails').doc(selectedBank.id);
-                transaction.update(bankRef, {
-                    balance: firebase.firestore.FieldValue.increment(bankAmount),
-                    lastLedgerUpdateAt: firebase.firestore.FieldValue.serverTimestamp()
-                });
-                const ledgerRef = db.collection('bank_ledger').doc();
-                transaction.set(ledgerRef, {
-                    bankId: selectedBank.id,
-                    bankName: selectedBank.name || '',
-                    currency: selectedBank.currency || '',
-                    type: 'credit',
-                    amount: bankAmount,
-                    reason: 'topup_invoice_payment',
-                    sourceCollection: 'top_up_invoices',
-                    sourceId: docRef.id,
-                    referenceNumber: invoiceId,
-                    description: `Top-Up Invoice ${invoiceId} — ${sourceInvoice.clientName}`,
-                    createdBy: currentUser.email,
-                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
-                });
-            }
-
-            return { docRef, invoiceId, topUpData };
+        const docRef = db.collection("top_up_invoices").doc();
+        const batch = db.batch();
+        batch.set(docRef, topUpData);
+        batch.update(sourceInvoiceRef, {
+            topUpCreated: true,
+            topUpInvoiceId: invoiceId,
+            topUpCreatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            lastStageInvoiceId: invoiceId
         });
-
-        const docRef = result.docRef;
-        const invoiceId = result.invoiceId;
-        const topUpData = result.topUpData;
+        await batch.commit();
         
         resetTopUpSaveButton(saveButton, spinner, onlySave);
         showSuccessToast(`Top-Up Invoice ${invoiceId} saved successfully!`);
@@ -9988,9 +10493,11 @@ async function loadTopUpHistoryList() {
                 <strong class="text-primary-blue">${data.docType} ${data.invoiceId}</strong><br>
                 <span class="text-sm text-gray-700">Client: ${data.clientName} | Vehicle: ${data.carDetails.make} ${data.carDetails.model}</span><br>
                 <span class="text-xs text-gray-600">Total: USD ${data.pricing.totalUSD.toFixed(2)}</span>
+                ${ledgerSummaryChip(doc.id)}
                 ${data.pricing.depositPaid ? `<br><span class="text-xs text-green-600 flex items-center gap-1"><svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg> Deposit Paid</span>` : `<br><span class="text-xs text-secondary-red flex items-center gap-1"><svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM7 9a1 1 0 000 2h6a1 1 0 100-2H7z" clip-rule="evenodd"/></svg> Deposit Pending</span>`}
             </div>
             <div class="mt-2 sm:mt-0 space-x-2">
+    ${ledgerStatementButton(doc.id)}
     <button onclick='reDownloadInvoice(${invoiceDataJson})' 
             class="bg-primary-blue hover:bg-blue-600 text-white text-xs py-1 px-3 rounded-full transition duration-150 flex items-center gap-1">
         <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -10085,26 +10592,31 @@ async function loadTopUpHistoryList() {
 /**
  * Creates a new top-up from an existing invoice
  */
-function createTopUpFromInvoice(invoiceData) {
+async function createTopUpFromInvoice(invoiceData) {
     // Check if invoice is revoked
     if (invoiceData.revoked) {
         showErrorToast("Cannot create top-up from a revoked invoice.");
         return;
     }
-    
-    // Check if there's remaining balance
-    if (invoiceData.pricing?.remainingBalance <= 0) {
-        showErrorToast("This invoice is already fully paid. No top-up needed.");
+
+    // Paid / owed come from the deal ledger (receipts)
+    const deal = await getDealForDoc(invoiceData);
+    if (!deal) {
+        showErrorToast("Could not read this deal's payments. Please try again.");
         return;
     }
-    
+    if (deal.remaining <= 0) {
+        showErrorToast("This deal is already fully paid. No top-up needed.");
+        return;
+    }
+
     renderTopUpForm({
         ...invoiceData,
-        totalPrice: invoiceData.pricing?.totalUSD || 0,
-        totalPaid: invoiceData.pricing?.totalPaid || invoiceData.pricing?.newTotalPaid || 0,
-        remainingBalance: invoiceData.pricing?.remainingBalance || 0,
+        totalPrice: deal.total,
+        totalPaid: deal.paid,
+        remainingBalance: deal.remaining,
         sourceInvoiceId: invoiceData.invoiceId,
-        sourceType: 'topup',
+        sourceType: invoiceData.docType === 'Balance Invoice' ? 'balance' : 'topup',
         firestoreId: invoiceData.firestoreId
     });
 }
@@ -10128,6 +10640,13 @@ async function revokeTopUpInvoice(data) {
         return;
     }
     
+    // Invoices issued under the receipt-based model only state what is owed:
+    // revoking one changes no balance and touches no bank account.
+    if (data.paymentModel === 'ledger') {
+        await setLedgerInvoiceRevoked('top_up_invoices', data, true);
+        return;
+    }
+
     const loadingOverlay = showLoadingOverlay("Revoking invoice...");
     
     try {
@@ -10164,7 +10683,7 @@ async function revokeTopUpInvoice(data) {
             // happened, so the parent kept showing the top-up as paid even
             // after it was revoked.
             chain.forEach(item => {
-                transaction.update(item.ref, buildChainUpdate(item, -paidAmountUSD));
+                { const u = buildChainUpdate(item, -paidAmountUSD); if (u) transaction.update(item.ref, u); }
             });
 
             // Debit the real bank ledger — pull the money back out of the
@@ -10226,6 +10745,13 @@ async function unrevokeTopUpInvoice(data) {
         return;
     }
     
+    // Invoices issued under the receipt-based model only state what is owed:
+    // revoking one changes no balance and touches no bank account.
+    if (data.paymentModel === 'ledger') {
+        await setLedgerInvoiceRevoked('top_up_invoices', data, false);
+        return;
+    }
+
     const loadingOverlay = showLoadingOverlay("Unrevoking invoice...");
     
     try {
@@ -10258,7 +10784,7 @@ async function unrevokeTopUpInvoice(data) {
 
             // Re-apply the payment to the parent invoice
             chain.forEach(item => {
-                transaction.update(item.ref, buildChainUpdate(item, paidAmountUSD));
+                { const u = buildChainUpdate(item, paidAmountUSD); if (u) transaction.update(item.ref, u); }
             });
 
             // Re-credit the bank
@@ -11076,12 +11602,10 @@ async function generateBalanceInvoiceNumber(clientName, carMakeModel, sourceInvo
         .where("createdAt", ">=", monthStart)
         .get();
     
-    const nextNumber = (snapshot.size + 1).toString().padStart(4, '0');
     const namePart = clientName.split(' ')[0].toUpperCase().substring(0, 3);
     const modelPart = carMakeModel.split(' ')[0].toUpperCase().substring(0, 3);
-    const sourcePrefix = sourceInvoiceId.split('-')[0] || 'BAL';
     
-    return `BAL-${year}${month}${day}-${nextNumber}-${namePart}-${modelPart}`;
+    return ensureUniqueInvoiceNumber(n => `BAL-${year}${month}${day}-${n}-${namePart}-${modelPart}`, snapshot.size + 1);
 }
 
 /**
@@ -11396,345 +11920,129 @@ async function calculateTotalPaidForInvoice(invoiceId) {
 }
 
 /**
- * Views full invoice trail for a client
+ * Full trail for a client: one statement per vehicle deal — what each invoice
+ * asked for, what has been paid (from receipts), what is still owed, and the
+ * payment history.
  */
 async function viewClientInvoiceTrail(clientName) {
-    const loadingOverlay = showLoadingOverlay("Loading invoice trail...");
-
+    const loadingOverlay = showLoadingOverlay("Loading statement...");
     try {
-        const [regularSnap, topUpSnap, balanceSnap] = await Promise.all([
-            db.collection("invoices").where("clientName", "==", clientName).get(),
-            db.collection("top_up_invoices").where("clientName", "==", clientName).get(),
-            db.collection("balance_invoices").where("clientName", "==", clientName).get()
-        ]);
-
-        const allInvoices = [];
-
-        regularSnap.forEach(doc => allInvoices.push({
-            ...doc.data(), firestoreId: doc.id, type: 'regular',
-            docType: doc.data().docType,
-            parentVehicleId: doc.data().parentVehicleId || doc.data().carDetails?.vin || 'UNKNOWN'
-        }));
-        topUpSnap.forEach(doc => allInvoices.push({
-            ...doc.data(), firestoreId: doc.id, type: 'topup',
-            docType: 'Top-Up Invoice',
-            parentVehicleId: doc.data().parentVehicleId || doc.data().carDetails?.vin || 'UNKNOWN'
-        }));
-        balanceSnap.forEach(doc => allInvoices.push({
-            ...doc.data(), firestoreId: doc.id, type: 'balance',
-            docType: 'Balance Invoice',
-            parentVehicleId: doc.data().parentVehicleId || doc.data().carDetails?.vin || 'UNKNOWN'
-        }));
-
-        // Group by vehicle (parentVehicleId / VIN)
-        const vehicleGroups = {};
-        allInvoices.forEach(inv => {
-            const key = inv.parentVehicleId;
-            if (!vehicleGroups[key]) vehicleGroups[key] = [];
-            vehicleGroups[key].push(inv);
-        });
-
-        // Sort each group chronologically
-        Object.values(vehicleGroups).forEach(group => {
-            group.sort((a, b) => {
-                const dA = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(a.issueDate || 0);
-                const dB = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(b.issueDate || 0);
-                return dA - dB;
-            });
-        });
-
+        const L = await DealLedger.load();
+        const deals = Array.from(L.deals.values())
+            .filter(d => d.members.some(m => m.data.clientName === clientName))
+            .sort((a, b) => b.members[b.members.length - 1].ts - a.members[a.members.length - 1].ts);
         hideLoadingOverlay();
-        renderInvoiceTrailView(clientName, allInvoices, vehicleGroups);
-
+        renderInvoiceTrailView(clientName, deals);
+        DocStore.watch(() => { if (document.getElementById('trail-root')) renderInvoiceTrailView(clientName, null, true); });
     } catch (error) {
         console.error("Error loading invoice trail:", error);
         hideLoadingOverlay();
-        showErrorToast("Failed to load invoice trail: " + error.message);
+        showErrorToast("Failed to load statement: " + error.message);
     }
 }
 
-/**
- * Renders the invoice trail view
- */
-function renderInvoiceTrailView(clientName, invoices, vehicleGroups = {}) {
+function renderInvoiceTrailView(clientName, deals, keepScroll) {
     const formArea = document.getElementById('document-form-area');
-    
-    let html = `
-        <div class="p-6 border border-gray-300 rounded-xl bg-white shadow-lg animate-fade-in">
-            <div class="flex justify-between items-center mb-6">
-                <h3 class="text-xl font-semibold text-primary-blue">Invoice Trail: ${clientName}</h3>
-                <div class="space-x-2">
-                    <button onclick="downloadFullTrailPDF('${clientName}')" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg transition duration-150 flex items-center gap-2">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
-                        </svg>
-                        Download Full Trail PDF
-                    </button>
-                    <button onclick="renderInvoiceHistory()" class="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded-lg transition duration-150">
-                        Back
-                    </button>
+    if (!formArea) return;
+    if (!deals) {                                   // live refresh
+        const L = DealLedger.build();
+        deals = Array.from(L.deals.values()).filter(d => d.members.some(m => m.data.clientName === clientName))
+            .sort((a, b) => b.members[b.members.length - 1].ts - a.members[a.members.length - 1].ts);
+    }
+    const y = window.scrollY;
+    const totals = deals.reduce((t, d) => ({ value: t.value + d.total, paid: t.paid + d.paid, owed: t.owed + d.remaining }), { value: 0, paid: 0, owed: 0 });
+    const safe = (clientName || '').replace(/'/g, "\\'");
+
+    formArea.innerHTML = `
+        <div id="trail-root" class="p-6 border border-gray-300 rounded-xl bg-white shadow-lg animate-fade-in">
+            <div class="flex flex-wrap justify-between items-center gap-3 mb-6">
+                <div>
+                    <h3 class="text-2xl font-bold text-primary-blue">${smartEscape(clientName)}</h3>
+                    <p class="text-sm text-gray-500">${deals.length} deal${deals.length === 1 ? '' : 's'} · all deals: value USD ${ledgerFmt(totals.value)} · paid <span class="text-green-700">${ledgerFmt(totals.paid)}</span> · owed <span class="${totals.owed > 0 ? 'text-red-600' : 'text-green-700'}">${ledgerFmt(totals.owed)}</span></p>
+                </div>
+                <div class="flex gap-2">
+                    <button type="button" onclick="downloadFullTrailPDF('${safe}')" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm">Download statement PDF</button>
+                    <button type="button" onclick="renderInvoiceHistory()" class="bg-white border border-gray-300 hover:bg-gray-100 px-4 py-2 rounded-lg text-sm">Back</button>
                 </div>
             </div>
-            
-            <div class="overflow-x-auto">
-                <table class="min-w-full divide-y divide-gray-200">
-                       <thead class="bg-gray-50">
-        <tr>
-            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
-            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Invoice No</th>
-            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
-            <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Total Price</th>
-            <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Amount Paid</th>
-            <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Remaining</th>
-            <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Actions</th>
-        </tr>
-    </thead>
-    <tbody class="bg-white divide-y divide-gray-200">
-`;
-    
-    let totalPriceSum = 0;
-    let totalPaidSum = 0;
-    
- invoices.forEach((invoice, index) => {
-        const issueDate = invoice.issueDate || (invoice.createdAt?.toDate ? invoice.createdAt.toDate().toLocaleDateString() : 'N/A');
-        const totalPrice = invoice.pricing?.totalUSD || invoice.pricing?.totalPrice || 0;
-        const totalPaid = invoice.pricing?.newTotalPaid || invoice.pricing?.totalPaid || 0;
-        const remaining = Math.max(0, invoice.pricing?.remainingBalance ?? (totalPrice - totalPaid));
-
-        totalPriceSum += totalPrice;
-        totalPaidSum += totalPaid;
-
-        const typeColors = {
-            'Auction Invoice':  'bg-yellow-100 text-yellow-800',
-            'Invoice':          'bg-blue-100 text-blue-800',
-            'Proforma Invoice': 'bg-blue-100 text-blue-800',
-            'Top-Up Invoice':   'bg-teal-100 text-teal-800',
-            'Balance Invoice':  'bg-purple-100 text-purple-800'
-        };
-        const typeColor = typeColors[invoice.docType] || 'bg-gray-100 text-gray-800';
-
-        // Stage badge
-        const stageBadges = {
-            'Auction Invoice': '① Auction',
-            'Top-Up Invoice':  '② Top-Up',
-            'Balance Invoice': `③ Balance`
-        };
-        const stageBadge = stageBadges[invoice.docType] || invoice.docType;
-
-        // Contextual "Next Stage" button
-        let nextStageBtn = '';
-        if (invoice.type === 'auction' && remaining > 0 && !invoice.topUpCreated) {
-            nextStageBtn = `<button onclick='createTopUpFromAuctionInvoice(${JSON.stringify({...invoice, firestoreId: invoice.firestoreId})})' class="text-teal-600 hover:text-teal-800" title="Create Top-Up Invoice">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
-            </button>`;
-        } else if ((invoice.type === 'topup' || invoice.type === 'balance') && remaining > 0) {
-            nextStageBtn = `<button onclick='createBalanceInvoice(${JSON.stringify({...invoice, firestoreId: invoice.firestoreId})})' class="text-purple-600 hover:text-purple-800" title="Create Balance Chunk Invoice">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
-            </button>`;
-        }
-
-        const invoiceDataJson = JSON.stringify({...invoice, firestoreId: invoice.firestoreId});
-
-        let balanceRevokeBtn = '';
-        if (invoice.type === 'balance') {
-            balanceRevokeBtn = invoice.revoked
-                ? `<button onclick='unrevokeBalanceInvoice(${invoiceDataJson})' class="text-gray-600 hover:text-gray-900" title="Unrevoke">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
-                   </button>`
-                : `<button onclick='revokeBalanceInvoice(${invoiceDataJson})' class="text-red-600 hover:text-red-800" title="Revoke">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-                   </button>`;
-        }
-
-        html += `
-            <tr class="hover:bg-gray-50 ${index % 2 === 0 ? '' : 'bg-gray-50/40'} ${invoice.revoked ? 'bg-red-50' : ''}">
-                <td class="px-4 py-3 text-sm text-gray-600">${issueDate}</td>
-                <td class="px-4 py-3 text-sm font-medium text-primary-blue">${invoice.invoiceId}${invoice.revoked ? ' <span class="text-xs text-red-600 font-bold">(REVOKED)</span>' : ''}</td>
-                <td class="px-4 py-3">
-                    <span class="px-2 py-1 text-xs rounded-full font-medium ${typeColor}">${stageBadge}</span>
-                </td>
-                <td class="px-4 py-3 text-sm text-right font-semibold">USD ${totalPrice.toFixed(2)}</td>
-                <td class="px-4 py-3 text-sm text-right text-green-600 font-semibold">USD ${totalPaid.toFixed(2)}</td>
-                <td class="px-4 py-3 text-sm text-right ${remaining > 0 ? 'text-red-600' : 'text-green-600'} font-semibold">
-                    USD ${remaining.toFixed(2)}
-                </td>
-                <td class="px-4 py-3 text-center">
-                    <div class="flex justify-center gap-2 flex-wrap">
-                        <button onclick='reDownloadInvoiceForTrail(${invoiceDataJson})' class="text-primary-blue hover:text-blue-700" title="Download PDF">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
-                        </button>
-                        <button onclick='createReceiptFromInvoiceTrail(${invoiceDataJson})' class="text-green-600 hover:text-green-800" title="Create Receipt">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
-                        </button>
-                        ${nextStageBtn}
-                        ${balanceRevokeBtn}
-                    </div>
-                </td>
-            </tr>
-        `;
-    });
-    
-    html += `
-                    </tbody>
-                    <tfoot class="bg-gray-50">
-                        <tr class="font-bold">
-                            <td colspan="3" class="px-4 py-3 text-right">TOTALS:</td>
-                            <td class="px-4 py-3 text-right">USD ${totalPriceSum.toFixed(2)}</td>
-                            <td class="px-4 py-3 text-right text-green-600">USD ${totalPaidSum.toFixed(2)}</td>
-                            <td class="px-4 py-3 text-right ${(totalPriceSum - totalPaidSum) > 0 ? 'text-red-600' : 'text-green-600'}">USD ${(totalPriceSum - totalPaidSum).toFixed(2)}</td>
-                            <td class="px-4 py-3"></td>
-                        </tr>
-                    </tfoot>
-                </table>
-            </div>
-        </div>
-    `;
-    
-    formArea.innerHTML = html;
-    
-    // Store invoices for PDF generation
-    window.currentTrailInvoices = invoices;
+            ${deals.length ? deals.map(dealStatementHtml).join('<hr class="my-8 border-gray-200">') : '<p class="text-gray-500">No invoices found for this client.</p>'}
+        </div>`;
+    window.currentTrailDeals = deals;
     window.currentTrailClientName = clientName;
+    if (keepScroll) window.scrollTo(0, y);
 }
 
-/**
- * Downloads full trail PDF
- */
+/** Statement PDF for every deal shown in the trail (owed, paid, payment history). */
 async function downloadFullTrailPDF(clientName) {
-    if (!window.currentTrailInvoices || window.currentTrailInvoices.length === 0) {
-        showErrorToast("No invoices to download");
-        return;
-    }
-    
-    const loadingOverlay = showLoadingOverlay("Generating trail PDF...");
-    
+    const deals = window.currentTrailDeals;
+    if (!deals || !deals.length) { showErrorToast("No statement to download"); return; }
+    const loadingOverlay = showLoadingOverlay("Generating statement PDF...");
     try {
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF('p', 'mm', 'a4');
-        
-        const primaryColor = '#183263';
-        const secondaryColor = '#D96359';
-        const pageW = doc.internal.pageSize.getWidth();
-        let y = 20;
-        const margin = 10;
-        
-        // Header
-        doc.setFillColor(primaryColor);
-        doc.rect(0, 0, pageW, 20, 'F');
-        
-        doc.setFontSize(18);
-        doc.setFont("helvetica", "bold");
-        doc.setTextColor(255);
-        doc.text("WanBite Investments Co. Ltd.", pageW / 2, 10, null, null, "center");
-        
-        doc.setFontSize(12);
-        doc.text("Invoice Trail Report", pageW / 2, 16, null, null, "center");
-        
-        doc.setTextColor(0);
-        doc.setFontSize(10);
-        y = 30;
-        
-        // Client Info
-        doc.setFont("helvetica", "bold");
-        doc.text(`Client: ${clientName}`, margin, y);
-        doc.text(`Generated: ${new Date().toLocaleDateString()}`, pageW - margin - 50, y);
-        y += 10;
-        
-        doc.setFont("helvetica", "normal");
-        doc.text("This document provides a complete trail of all invoices issued to the client.", margin, y);
-        y += 15;
-        
-        // Table Header
-        doc.setFillColor(primaryColor);
-        doc.rect(margin, y, pageW - (margin * 2), 10, 'F');
-        doc.setTextColor(255);
-        doc.setFontSize(9);
-        doc.setFont("helvetica", "bold");
-        
-        const colWidths = [30, 35, 25, 30, 30, 30];
-        let x = margin + 2;
-        
-        doc.text("Date", x, y + 6);
-        x += colWidths[0];
-        doc.text("Invoice No", x, y + 6);
-        x += colWidths[1];
-        doc.text("Type", x, y + 6);
-        x += colWidths[2];
-        doc.text("Total (USD)", x, y + 6);
-        x += colWidths[3];
-        doc.text("Paid (USD)", x, y + 6);
-        x += colWidths[4];
-        doc.text("Remaining (USD)", x, y + 6);
-        
-        y += 10;
-        
-        // Table Rows
-        doc.setTextColor(0);
-        doc.setFont("helvetica", "normal");
-        let totalPriceSum = 0;
-        let totalPaidSum = 0;
-        
-        for (const invoice of window.currentTrailInvoices) {
-            if (y > doc.internal.pageSize.getHeight() - 30) {
-                doc.addPage();
-                y = 20;
-            }
-            
-            const issueDate = invoice.issueDate || (invoice.createdAt?.toDate ? invoice.createdAt.toDate().toLocaleDateString() : 'N/A');
-            const totalPrice = invoice.pricing?.totalUSD || invoice.pricing?.totalPrice || 0;
-            const totalPaid = invoice.pricing?.newTotalPaid || invoice.pricing?.totalPaid || 0;
-            const remaining = totalPrice - totalPaid;
-            
-            totalPriceSum += totalPrice;
-            totalPaidSum += totalPaid;
-            
-            x = margin + 2;
-            doc.text(issueDate, x, y + 4);
-            x += colWidths[0];
-            doc.text(invoice.invoiceId, x, y + 4);
-            x += colWidths[1];
-            doc.text(invoice.docType, x, y + 4);
-            x += colWidths[2];
-            doc.text(totalPrice.toFixed(2), x, y + 4, null, null, "right");
-            x += colWidths[3];
-            doc.text(totalPaid.toFixed(2), x, y + 4, null, null, "right");
-            x += colWidths[4];
-            doc.text(remaining.toFixed(2), x, y + 4, null, null, "right");
-            
+        const primary = '#183263', red = '#D96359';
+        const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight(), M = 12;
+        let y = 0;
+        const money = (n) => ledgerFmt(n);
+        const header = () => {
+            doc.setFillColor(primary); doc.rect(0, 0, W, 20, 'F');
+            doc.setTextColor(255); doc.setFont('helvetica', 'bold'); doc.setFontSize(16);
+            doc.text('WanBite Investments Co. Ltd.', W / 2, 9, { align: 'center' });
+            doc.setFontSize(11); doc.text('Account Statement', W / 2, 16, { align: 'center' });
+            doc.setTextColor(0); y = 28;
+        };
+        const need = (h) => { if (y + h > H - 14) { doc.addPage(); header(); } };
+        const row = (cols, widths, bold, fill) => {
+            need(7);
+            if (fill) { doc.setFillColor(240, 243, 248); doc.rect(M, y - 4.5, W - 2 * M, 6.5, 'F'); }
+            doc.setFont('helvetica', bold ? 'bold' : 'normal'); doc.setFontSize(8.5);
+            let x = M + 1;
+            cols.forEach((c, i) => {
+                const t = String(c.t ?? '');
+                const w = widths[i];
+                if (c.r) doc.text(t, x + w - 2, y, { align: 'right' }); else doc.text(t.length > w / 1.9 ? t.slice(0, Math.floor(w / 1.9) - 1) + '…' : t, x, y);
+                x += w;
+            });
+            y += 6;
+        };
+
+        header();
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(11);
+        doc.text(`Client: ${clientName}`, M, y);
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+        doc.text(`Generated: ${new Date().toLocaleDateString('en-GB')}`, W - M, y, { align: 'right' });
+        y += 9;
+
+        deals.forEach(deal => {
+            need(40);
+            doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(primary);
+            doc.text(`${deal.vehicle || 'Vehicle'}${deal.vin ? '  ·  VIN ' + deal.vin : ''}`, M, y); y += 6;
+            doc.setTextColor(0); doc.setFontSize(9.5);
+            doc.text(`Deal value: USD ${money(deal.total)}     Paid: USD ${money(deal.paid)}     Still owed: USD ${money(deal.remaining)}`, M, y); y += 7;
+
+            const dw = [26, 38, 30, 30, 30, 30];
+            row([{ t: 'Date' }, { t: 'Invoice' }, { t: 'Type' }, { t: 'Due', r: 1 }, { t: 'Paid', r: 1 }, { t: 'Outstanding', r: 1 }], dw, true, true);
+            deal.docs.forEach(r => {
+                const demand = r.paid !== null;
+                row([{ t: r.entry.data.issueDate || '' }, { t: r.number }, { t: r.docType + (r.revoked ? ' (revoked)' : '') },
+                    { t: money(r.due), r: 1 }, { t: demand ? money(r.paid) : '-', r: 1 }, { t: demand ? money(r.outstanding) : '-', r: 1 }], dw);
+            });
+            y += 3; need(20);
+            doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.text('Payment history', M, y); y += 6;
+            const pw = [24, 30, 30, 36, 22, 22, 22];
+            row([{ t: 'Date' }, { t: 'Receipt' }, { t: 'Applied to' }, { t: 'Method' }, { t: 'Amount', r: 1 }, { t: 'Paid', r: 1 }, { t: 'Owed', r: 1 }], pw, true, true);
+            if (!deal.payments.length) { doc.setFont('helvetica', 'italic'); doc.text('No payments recorded yet.', M + 1, y); y += 6; }
+            deal.payments.forEach(p => row([{ t: p.date }, { t: p.receiptNo }, { t: p.appliedTo }, { t: p.method },
+                { t: money(p.usd), r: 1 }, { t: money(p.totalPaid), r: 1 }, { t: money(p.stillOwed), r: 1 }], pw));
             y += 8;
-        }
-        
-        // Totals
-        y += 5;
-        doc.setDrawColor(200);
-        doc.line(margin, y, pageW - margin, y);
-        y += 3;
-        
-        doc.setFont("helvetica", "bold");
-        doc.text(`TOTAL:`, margin + 100, y + 4);
-        doc.text(`USD ${totalPriceSum.toFixed(2)}`, margin + 140, y + 4, null, null, "right");
-        doc.text(`USD ${totalPaidSum.toFixed(2)}`, margin + 170, y + 4, null, null, "right");
-        doc.text(`USD ${(totalPriceSum - totalPaidSum).toFixed(2)}`, margin + 200, y + 4, null, null, "right");
-        
-        y += 15;
-        
-        // Footer
-        doc.setFillColor(primaryColor);
-        doc.rect(0, doc.internal.pageSize.getHeight() - 10, pageW, 10, 'F');
-        doc.setTextColor(255);
-        doc.setFontSize(8);
-        const footerText = `Location: Ngong Road, Kilimani, Nairobi. | Email: sales@carskenya.co.ke | Phone: 0713147136`;
-        doc.text(footerText, pageW / 2, doc.internal.pageSize.getHeight() - 4, null, null, "center");
-        
-        doc.save(`Invoice_Trail_${clientName.replace(/\s/g, '_')}.pdf`);
-        
+        });
+
+        doc.save(`Statement_${(clientName || 'client').replace(/\W+/g, '_')}.pdf`);
         hideLoadingOverlay();
-        showSuccessToast("Trail PDF downloaded successfully");
-        
     } catch (error) {
-        console.error("Error generating trail PDF:", error);
+        console.error('Error generating statement PDF:', error);
         hideLoadingOverlay();
-        showErrorToast("Failed to generate trail PDF: " + error.message);
+        showErrorToast('Failed to generate PDF: ' + error.message);
     }
 }
 
@@ -11805,57 +12113,39 @@ async function createTopUpFromAuctionInvoice(auctionInvoiceData) {
         return;
     }
     
-    // Get the deposit amount from auction invoice (this is the amount already paid)
-    const auctionDepositAmount = auctionInvoiceData.pricing?.totalUSD || auctionInvoiceData.auctionPriceUSD || 0;
-    
-    // Check if there's already a top-up invoice created from this auction
-    const existingTopUp = await db.collection("top_up_invoices")
-        .where("sourceInvoiceId", "==", auctionInvoiceData.invoiceId)
-        .limit(1)
-        .get();
-    
-    if (!existingTopUp.empty) {
-        // If top-up already exists, go to balance invoice directly
-        const existingTopUpData = existingTopUp.docs[0].data();
-        const remainingBalance = existingTopUpData.pricing?.remainingBalance || 0;
-        
-        if (remainingBalance > 0) {
-            showSuccessToast("Top-up invoice already exists. Creating balance invoice instead.");
-            createBalanceInvoice({ ...existingTopUpData, firestoreId: existingTopUp.docs[0].id });
+    // What has actually been paid (receipts) and what the deal is worth
+    const deal = await getDealForDoc(auctionInvoiceData);
+    if (!deal) {
+        showErrorToast("Could not read this deal's payments. Please try again.");
+        return;
+    }
+
+    // If a top-up already exists, the next payment is another top-up / balance
+    // on the latest one rather than a second "first" top-up.
+    const latestStage = deal.lastStage;
+    if (latestStage) {
+        if (deal.remaining > 0) {
+            showSuccessToast("A top-up already exists. Creating the next top-up invoice instead.");
+            createTopUpFromInvoice({ ...latestStage.data, firestoreId: latestStage.id, createdAt: new Date(latestStage.ts).toISOString() });
         } else {
-            showErrorToast("This auction invoice has already been fully paid.");
+            showErrorToast("This deal has already been paid in full.");
         }
         return;
     }
-    
-    // Get all receipts for this auction invoice to confirm the deposit paid
-    const receiptsSnapshot = await db.collection("receipts")
-        .where("invoiceReference", "==", auctionInvoiceData.invoiceId)
-        .get();
-    
-    let totalPaidFromReceipts = 0;
-    for (const receiptDoc of receiptsSnapshot.docs) {
-        const receipt = receiptDoc.data();
-        if (receipt.currency === 'USD') {
-            totalPaidFromReceipts += receipt.amountReceived;
-        } else if (receipt.currency === 'KSH') {
-            totalPaidFromReceipts += receipt.amountReceived / receipt.exchangeRate;
-        }
-    }
-    
-    // The deposit amount is what was paid (either from auction price or receipts)
-    const depositPaid = auctionDepositAmount > 0 ? auctionDepositAmount : totalPaidFromReceipts;
-    
+
+    const depositPaid = deal.paid;
     if (depositPaid <= 0) {
-        showErrorToast("No deposit found for this auction invoice. Please add a receipt first.");
+        showErrorToast("No payment is recorded for this auction invoice yet. Create a Receipt for it first, then issue the top-up.");
         return;
     }
-    
+    const auctionDepositAmount = auctionInvoiceData.pricing?.totalUSD || auctionInvoiceData.auctionPriceUSD || 0;
+
     // Render top-up form with auction invoice data
     renderTopUpFormFromAuctionCorrected({
         ...auctionInvoiceData,
         depositPaid: depositPaid,
         auctionDepositAmount: auctionDepositAmount,
+        dealTotal: deal.root.data.invoiceId !== auctionInvoiceData.invoiceId ? deal.total : 0,
         sourceInvoiceId: auctionInvoiceData.invoiceId,
         sourceType: 'auction',
         firestoreId: auctionInvoiceData.firestoreId
@@ -11870,7 +12160,8 @@ function renderTopUpFormFromAuctionCorrected(auctionData) {
     const depositPaid = auctionData.depositPaid || 0;
     
     // Default total price - user can change this
-    const defaultTotalPrice = depositPaid * 4; // Assuming deposit is 25% as a default
+    // If the auction is linked to a main invoice, start from that agreed price
+    const defaultTotalPrice = auctionData.dealTotal || depositPaid * 4; // otherwise assume the deposit is 25%
     
     // FIX: Auto-calculate the gap to reach 50% target
     const defaultTargetAmount = 0.50 * defaultTotalPrice;
@@ -12109,9 +12400,20 @@ async function saveTopUpFromAuctionCorrected(onlySave = false) {
             return;
         }
         
-        const depositPaid = auctionData.depositPaid || 0;
-        const newTotalPaid = depositPaid + amountToPay;
-        const remainingAfter = newTotalPrice - newTotalPaid;
+        // What the client has actually paid so far comes from receipts (the deal ledger)
+        const deal = await getDealForDoc(auctionData);
+        if (!deal) throw new Error('Could not work out the payments for this auction invoice. Please try again.');
+        const depositPaid = deal.paid;
+        if (depositPaid <= 0) {
+            throw new Error('No payment is recorded for this auction invoice yet. Create a Receipt for it first, then issue the top-up.');
+        }
+        if (newTotalPrice <= 0) throw new Error('Enter the total vehicle price.');
+        if (amountToPay <= 0) throw new Error('Enter an amount greater than zero.');
+        const newTotalPaid = roundCurrency(depositPaid + amountToPay);          // once this invoice is paid
+        if (newTotalPaid - newTotalPrice > 0.009) {
+            throw new Error(`Paid so far (USD ${ledgerFmt(depositPaid)}) plus this top-up (USD ${ledgerFmt(amountToPay)}) is more than the total price (USD ${ledgerFmt(newTotalPrice)}).`);
+        }
+        const remainingAfter = roundCurrency(newTotalPrice - newTotalPaid);
         
         // Generate invoice number
         const carMakeModel = `${auctionData.carDetails?.make || ''} ${auctionData.carDetails?.model || ''}`.trim() || 'Unknown';
@@ -12126,6 +12428,8 @@ async function saveTopUpFromAuctionCorrected(onlySave = false) {
 
         const topUpData = {
             docType: 'Top-Up Invoice',
+            paymentModel: 'ledger',
+            dealRootId: deal.rootId,
             invoiceStage: 'TopUp',                       // ← NEW
             parentVehicleId,                             // ← NEW
             linkedTransactionId: auctionData.invoiceId,  // ← NEW (links back to Auction)
@@ -12144,6 +12448,7 @@ async function saveTopUpFromAuctionCorrected(onlySave = false) {
                 depositPaid: depositPaid,
                 currentPaymentDue: amountToPay,
                 totalPaid: newTotalPaid,
+                newTotalPaid: newTotalPaid,
                 remainingBalance: remainingAfter,
                 paymentPercentage: (amountToPay / newTotalPrice * 100),
                 totalPaidPercentage: (newTotalPaid / newTotalPrice * 100),
@@ -12166,38 +12471,17 @@ async function saveTopUpFromAuctionCorrected(onlySave = false) {
         const docRef = db.collection("top_up_invoices").doc();
         batch.set(docRef, topUpData);
 
-        // Mark the auction invoice as having a top-up created
-        // Update running balance on the auction (vehicle anchor) document.
-        // Both the newer runningBalance/totalVehiclePrice fields AND the
-        // canonical pricing.totalPaid/remainingBalance fields are updated
-        // here — other parts of the app (receipts, revoke, reports) read
-        // pricing.*, so leaving it stale would show wrong numbers there
-        // even though runningBalance was correct.
+        // Mark the auction invoice as having a top-up created. The top-up
+        // only states what is being asked for: it does NOT change what has
+        // been paid and it does NOT touch any bank account — receipts do that.
         const auctionRef = db.collection("invoices").doc(auctionData.firestoreId);
         batch.update(auctionRef, {
             topUpCreated: true,
             topUpInvoiceId: invoiceId,
             topUpCreatedAt: firebase.firestore.FieldValue.serverTimestamp(),
             totalVehiclePrice: newTotalPrice,
-            runningBalance: remainingAfter,
-            lastStageInvoiceId: invoiceId,
-            'pricing.totalPaid': newTotalPaid,
-            'pricing.remainingBalance': Math.max(0, remainingAfter)
+            lastStageInvoiceId: invoiceId
         });
-
-        if (selectedBank && selectedBank.id) {
-            const bankCurrencyUpper = (selectedBank.currency || '').toUpperCase();
-            const bankAmount = bankCurrencyUpper === 'USD'
-                ? amountToPay
-                : roundCurrency(amountToPay * exchangeRate);
-            creditBankInBatch(batch, selectedBank, bankAmount, {
-                reason: 'topup_invoice_payment',
-                sourceCollection: 'top_up_invoices',
-                sourceId: docRef.id,
-                referenceNumber: invoiceId,
-                description: `Top-Up Invoice ${invoiceId} — ${auctionData.clientName}`
-            });
-        }
 
         await batch.commit();
         
@@ -12231,52 +12515,29 @@ async function createBalanceInvoice(sourceInvoiceData) {
         return;
     }
     
-    // Get the remaining balance
-    let remainingBalance = 0;
-    let totalPrice = 0;
-    let totalPaid = 0;
-    let sourceType = sourceInvoiceData.docType === 'Top-Up Invoice' ? 'topup' : 'regular';
-    
-    if (sourceInvoiceData.docType === 'Top-Up Invoice') {
-        // For top-up invoices, use the remaining balance directly from the DB record
-        totalPrice = sourceInvoiceData.pricing?.totalUSD || 0;
-        totalPaid = sourceInvoiceData.pricing?.totalPaid || 0;
-        remainingBalance = sourceInvoiceData.pricing?.remainingBalance || (totalPrice - totalPaid);
-        // FIX: Removed the double-counting query here. The Top-Up record is already accurate.
-
-    } else if (sourceInvoiceData.docType === 'Balance Invoice') {
-        // FIX: Support chaining "chunks" of Balance Invoices
-        totalPrice = sourceInvoiceData.pricing?.totalUSD || 0;
-        totalPaid = sourceInvoiceData.pricing?.newTotalPaid || 0;
-        remainingBalance = sourceInvoiceData.pricing?.remainingBalance || 0;
-        sourceType = 'balance';
-
-    } else if (sourceInvoiceData.docType === 'Invoice' || sourceInvoiceData.docType === 'Proforma Invoice') {
-        totalPrice = sourceInvoiceData.pricing?.totalUSD || 0;
-        const receiptsSnapshot = await db.collection("receipts")
-            .where("invoiceReference", "==", sourceInvoiceData.invoiceId)
-            .get();
-        
-        totalPaid = 0;
-        for (const receiptDoc of receiptsSnapshot.docs) {
-            const receipt = receiptDoc.data();
-            if (receipt.currency === 'USD') {
-                totalPaid += receipt.amountReceived;
-            } else if (receipt.currency === 'KSH') {
-                totalPaid += receipt.amountReceived / receipt.exchangeRate;
-            }
-        }
-        remainingBalance = totalPrice - totalPaid;
-    } else {
+    const okTypes = ['Top-Up Invoice', 'Balance Invoice', 'Invoice', 'Proforma Invoice'];
+    if (!okTypes.includes(sourceInvoiceData.docType)) {
         showErrorToast("Cannot create balance invoice from this document type.");
         return;
     }
-    
-    if (remainingBalance <= 0) {
-        showErrorToast("This invoice is already fully paid. No balance invoice needed.");
+
+    // Paid / owed come from the deal ledger (receipts), not stored invoice fields
+    const deal = await getDealForDoc(sourceInvoiceData);
+    if (!deal) {
+        showErrorToast("Could not read this deal's payments. Please try again.");
         return;
     }
-    
+    const sourceType = sourceInvoiceData.docType === 'Top-Up Invoice' ? 'topup'
+        : sourceInvoiceData.docType === 'Balance Invoice' ? 'balance' : 'regular';
+    const totalPrice = deal.total;
+    const totalPaid = deal.paid;
+    const remainingBalance = deal.remaining;
+
+    if (remainingBalance <= 0) {
+        showErrorToast("This deal is already fully paid. No balance invoice needed.");
+        return;
+    }
+
     // Render balance form with corrected logic
     renderBalanceFormCorrected({
         ...sourceInvoiceData,
@@ -12526,126 +12787,70 @@ async function saveBalanceInvoiceCorrected(onlySave = false) {
             return;
         }
 
-        // Use a Firestore transaction to read the source invoice and update balances atomically
-        const result = await db.runTransaction(async (transaction) => {
-            // Determine the source invoice's collection
-            const sourceColl = getInvoiceCollectionName(sourceInvoice);
-            const sourceRef = db.collection(sourceColl).doc(sourceInvoice.firestoreId);
-            const sourceSnap = await transaction.get(sourceRef);
-            if (!sourceSnap.exists) {
-                throw new Error('Source invoice not found in Firestore');
-            }
-            const sourceData = sourceSnap.data();
-            const sourceIsStaged = sourceData.docType === 'Top-Up Invoice' || sourceData.docType === 'Balance Invoice';
-            // All reads must happen before any write
-            const chain = await loadInvoiceChain(transaction, sourceRef, sourceSnap);
-            const totalPrice = sourceData.pricing?.totalUSD || 0;
-            // A top-up / balance parent keeps its running total in newTotalPaid
-            const totalPaidBefore = sourceIsStaged
-                ? (sourceData.pricing?.newTotalPaid ?? sourceData.pricing?.totalPaid ?? 0)
-                : (sourceData.pricing?.totalPaid || 0);
-            const remainingBefore = sourceData.pricing?.remainingBalance ?? roundCurrency(totalPrice - totalPaidBefore);
+        // Which document is the source, and what does the deal ledger say?
+        const sourceColl = getInvoiceCollectionName(sourceInvoice);
+        const sourceRef = db.collection(sourceColl).doc(sourceInvoice.firestoreId);
+        const sourceSnap = await sourceRef.get();
+        if (!sourceSnap.exists) {
+            throw new Error('Source invoice not found in Firestore');
+        }
+        const sourceData = sourceSnap.data();
+        const deal = await getDealForDoc({ firestoreId: sourceRef.id, invoiceId: sourceData.invoiceId });
+        if (!deal) throw new Error('Could not work out the payments for this invoice. Please try again.');
 
-            // Validate that payment does not exceed remaining
-            if (roundedPayment > remainingBefore) {
-                throw new Error(`Payment amount (${roundedPayment}) exceeds remaining balance (${remainingBefore})`);
-            }
+        // A balance invoice only states what is now being asked for; receipts
+        // record what is actually paid and credit the bank.
+        const totalPrice = deal.total;
+        const totalPaidBefore = deal.paid;
+        const remainingBefore = deal.remaining;
+        if (roundedPayment - remainingBefore > 0.009) {
+            throw new Error(`Payment amount (${ledgerFmt(roundedPayment)}) is more than the USD ${ledgerFmt(remainingBefore)} still owed on this deal.`);
+        }
+        const newTotalPaid = roundCurrency(totalPaidBefore + roundedPayment);       // once this invoice is paid
+        const newRemaining = Math.max(0, roundCurrency(remainingBefore - roundedPayment));
 
-            // Calculate new balances
-            const newTotalPaid = roundCurrency(totalPaidBefore + roundedPayment);
-            const newRemaining = roundCurrency(remainingBefore - roundedPayment);
+        const carMakeModel = sourceData.carDetails?.make && sourceData.carDetails?.model
+            ? `${sourceData.carDetails.make} ${sourceData.carDetails.model}`
+            : sourceData.vehicleDetails?.makeModel || 'Unknown';
+        const invoiceId = await generateBalanceInvoiceNumber(sourceData.clientName, carMakeModel, sourceData.invoiceId);
 
-            // Generate invoice number
-            const carMakeModel = sourceData.carDetails?.make && sourceData.carDetails?.model 
-                ? `${sourceData.carDetails.make} ${sourceData.carDetails.model}` 
-                : sourceData.vehicleDetails?.makeModel || 'Unknown';
-            const invoiceId = await generateBalanceInvoiceNumber(sourceData.clientName, carMakeModel, sourceData.invoiceId);
+        const balanceData = {
+            docType: 'Balance Invoice',
+            paymentModel: 'ledger',
+            dealRootId: deal.rootId,
+            invoiceId,
+            sourceInvoiceId: sourceData.invoiceId,
+            sourceInvoiceFirestoreId: sourceRef.id,
+            sourceInvoiceCollection: sourceColl,
+            sourceType: sourceColl === 'top_up_invoices' ? 'topup' : sourceColl === 'balance_invoices' ? 'balance' : 'regular',
+            clientName: sourceData.clientName,
+            clientPhone: sourceData.clientPhone || '',
+            issueDate: getCurrentDateForDocument(),
+            dueDate: dueDate || null,
+            exchangeRate: exchangeRate,
+            carDetails: sourceData.carDetails || sourceData.vehicleDetails || {},
+            pricing: {
+                totalUSD: totalPrice,
+                totalPaidBefore: totalPaidBefore,
+                currentPaymentDue: roundedPayment,
+                newTotalPaid: newTotalPaid,
+                remainingBalance: newRemaining,
+                paymentPercentage: totalPrice ? roundCurrency((roundedPayment / totalPrice) * 100) : 0,
+                totalPaidPercentage: totalPrice ? roundCurrency((newTotalPaid / totalPrice) * 100) : 0,
+                remainingBalanceBefore: remainingBefore
+            },
+            paymentReference: paymentReference,
+            bankDetails: selectedBank,                      // the account the client is asked to pay into
+            createdBy: currentUser.email,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+            revoked: false
+        };
 
-            // Prepare balance invoice data
-            const balanceData = {
-                docType: 'Balance Invoice',
-                invoiceId,
-                sourceInvoiceId: sourceData.invoiceId,
-                sourceInvoiceFirestoreId: sourceRef.id,
-                sourceInvoiceCollection: sourceColl,
-                sourceType: sourceColl === 'top_up_invoices' ? 'topup' : sourceColl === 'balance_invoices' ? 'balance' : 'regular',
-                clientName: sourceData.clientName,
-                clientPhone: sourceData.clientPhone || '',
-                issueDate: getCurrentDateForDocument(),
-                dueDate: dueDate || null,
-                exchangeRate: exchangeRate,
-                carDetails: sourceData.carDetails || sourceData.vehicleDetails || {},
-                pricing: {
-                    totalUSD: totalPrice,
-                    totalPaidBefore: totalPaidBefore,
-                    currentPaymentDue: roundedPayment,
-                    newTotalPaid: newTotalPaid,
-                    remainingBalance: newRemaining,
-                    paymentPercentage: roundCurrency((roundedPayment / totalPrice) * 100),
-                    totalPaidPercentage: roundCurrency((newTotalPaid / totalPrice) * 100),
-                    remainingBalanceBefore: remainingBefore
-                },
-                paymentReference: paymentReference,
-                bankDetails: selectedBank,
-                createdBy: currentUser.email,
-                createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-                revoked: false
-            };
-
-            // Create the new balance invoice document
-            const newBalanceRef = db.collection('balance_invoices').doc();
-            transaction.set(newBalanceRef, balanceData);
-
-            // Credit the real bank ledger for this payment — previously
-            // this money was only recorded on the invoice, never reflected
-            // in any bank balance.
-            if (selectedBank && selectedBank.id) {
-                const bankCurrencyUpper = (selectedBank.currency || '').toUpperCase();
-                const bankAmount = bankCurrencyUpper === 'USD'
-                    ? roundedPayment
-                    : roundCurrency(roundedPayment * exchangeRate);
-                const bankRef = db.collection('bankDetails').doc(selectedBank.id);
-                transaction.update(bankRef, {
-                    balance: firebase.firestore.FieldValue.increment(bankAmount),
-                    lastLedgerUpdateAt: firebase.firestore.FieldValue.serverTimestamp()
-                });
-                const ledgerRef = db.collection('bank_ledger').doc();
-                transaction.set(ledgerRef, {
-                    bankId: selectedBank.id,
-                    bankName: selectedBank.name || '',
-                    currency: selectedBank.currency || '',
-                    type: 'credit',
-                    amount: bankAmount,
-                    reason: 'balance_invoice_payment',
-                    sourceCollection: 'balance_invoices',
-                    sourceId: newBalanceRef.id,
-                    referenceNumber: invoiceId,
-                    description: `Balance Invoice ${invoiceId} — ${sourceData.clientName}`,
-                    createdBy: currentUser.email,
-                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
-                });
-            }
-
-            // Update the source invoice's balances
-            chain.slice(1).forEach(item => {
-                transaction.update(item.ref, buildChainUpdate(item, roundedPayment));
-            });
-            transaction.update(sourceRef, sourceIsStaged
-                ? { 'pricing.remainingBalance': newRemaining }
-                : { 'pricing.totalPaid': newTotalPaid, 'pricing.remainingBalance': newRemaining });
-
-            // Also update runningBalance and lastStageInvoiceId on the source if it has those fields
-            transaction.update(sourceRef, {
-                runningBalance: newRemaining,
-                lastStageInvoiceId: invoiceId
-            });
-
-            // Return the new invoice data for PDF generation
-            return { balanceData, newBalanceRef };
-        });
-
-        // Commit the transaction succeeded
-        const { balanceData, newBalanceRef } = result;
+        const newBalanceRef = db.collection('balance_invoices').doc();
+        const batch = db.batch();
+        batch.set(newBalanceRef, balanceData);
+        batch.update(sourceRef, { lastStageInvoiceId: invoiceId });
+        await batch.commit();
 
         // Reset button state
         resetBalanceCorrectedSaveButton(saveButton, spinner, onlySave);
@@ -12785,122 +12990,16 @@ async function renderAuctionList() {
                 return;
             }
             
-            let html = `<div class="space-y-6">`;
-            
+            // One full statement per deal (value, paid, owed, invoices, payment history)
+            const ledger = await DealLedger.load();
+            const seen = new Set();
+            let html = `<div class="space-y-8">`;
             for (const auctionDoc of auctionSnapshot.docs) {
-                const auctionData = auctionDoc.data();
-                auctionData.firestoreId = auctionDoc.id;
-                
-                // Get related top-up invoices
-                const topUpSnapshot = cachedRelated('topup', 'sourceInvoiceId', auctionData.invoiceId);
-                
-                // Get related balance invoices from top-ups
-                const allRelated = [];
-                
-                // Add auction invoice
-                allRelated.push({ ...auctionData, type: 'auction', docType: 'Auction Invoice', relation: 'Auction' });
-                
-                // Add top-up invoices
-                for (const topUpDoc of topUpSnapshot.docs) {
-                    const topUpData = topUpDoc.data();
-                    topUpData.firestoreId = topUpDoc.id;
-                    allRelated.push({ ...topUpData, type: 'topup', docType: 'Top-Up Invoice', relation: 'Top-Up' });
-                    
-                    // Get balance invoices for this top-up
-                    const balanceSnapshot = cachedRelated('balance', 'sourceInvoiceId', topUpData.invoiceId);
-                    
-                    balanceSnapshot.forEach(balanceDoc => {
-                        const balanceData = balanceDoc.data();
-                        balanceData.firestoreId = balanceDoc.id;
-                        allRelated.push({ ...balanceData, type: 'balance', docType: 'Balance Invoice', relation: 'Balance' });
-                    });
-                }
-                
-                // Sort by date
-                allRelated.sort((a, b) => {
-                    const dateA = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(a.issueDate || 0);
-                    const dateB = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(b.issueDate || 0);
-                    return dateA - dateB;
-                });
-                
-                html += `
-                    <div class="border rounded-lg overflow-hidden shadow-md">
-                        <div class="bg-yellow-100 p-3 font-bold text-primary-blue border-b">
-                            Auction Group: ${auctionData.invoiceId} - ${auctionData.clientName}
-                        </div>
-                        <div class="overflow-x-auto">
-                            <table class="min-w-full divide-y divide-gray-200">
-                                <thead class="bg-gray-50">
-                                    <tr>
-                                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Date</th>
-                                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Invoice No</th>
-                                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Type</th>
-                                        <th class="px-4 py-2 text-right text-xs font-medium text-gray-500">Total</th>
-                                        <th class="px-4 py-2 text-right text-xs font-medium text-gray-500">Paid</th>
-                                        <th class="px-4 py-2 text-right text-xs font-medium text-gray-500">Remaining</th>
-                                        <th class="px-4 py-2 text-center text-xs font-medium text-gray-500">Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody class="bg-white divide-y divide-gray-200">
-                `;
-                
-                for (const invoice of allRelated) {
-                    const issueDate = invoice.issueDate || (invoice.createdAt?.toDate ? invoice.createdAt.toDate().toLocaleDateString() : 'N/A');
-                    const totalPrice = invoice.pricing?.totalUSD || invoice.pricing?.totalPrice || 0;
-                    const totalPaid = invoice.pricing?.newTotalPaid || invoice.pricing?.totalPaid || 0;
-                    const remaining = invoice.pricing?.remainingBalance || (totalPrice - totalPaid);
-                    
-                    const typeColors = {
-                        'Auction Invoice': 'bg-yellow-100 text-yellow-800',
-                        'Top-Up Invoice': 'bg-teal-100 text-teal-800',
-                        'Balance Invoice': 'bg-purple-100 text-purple-800'
-                    };
-                    const typeColor = typeColors[invoice.docType] || 'bg-gray-100 text-gray-800';
-                    
-                    const invoiceDataJson = JSON.stringify({
-                        ...invoice,
-                        firestoreId: invoice.firestoreId
-                    });
-                    
-                    html += `
-                        <tr class="hover:bg-gray-50">
-                            <td class="px-4 py-2 text-sm">${issueDate}</td>
-                            <td class="px-4 py-2 text-sm font-medium text-primary-blue">${invoice.invoiceId}</td>
-                            <td class="px-4 py-2"><span class="px-2 py-1 text-xs rounded-full ${typeColor}">${invoice.docType}</span></td>
-                            <td class="px-4 py-2 text-sm text-right font-semibold">USD ${totalPrice.toFixed(2)}</td>
-                            <td class="px-4 py-2 text-sm text-right text-green-600 font-semibold">USD ${totalPaid.toFixed(2)}</td>
-                            <td class="px-4 py-2 text-sm text-right ${remaining > 0 ? 'text-red-600' : 'text-green-600'} font-semibold">USD ${remaining.toFixed(2)}</td>
-                            <td class="px-4 py-2 text-center">
-                                <div class="flex justify-center gap-2">
-                                    <button onclick='reDownloadInvoiceForTrail(${invoiceDataJson})' class="text-primary-blue hover:text-blue-700" title="Download PDF">
-                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
-                                    </button>
-                                    <button onclick='createReceiptFromInvoiceTrail(${invoiceDataJson})' class="text-green-600 hover:text-green-800" title="Create Receipt">
-                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
-                                    </button>
-                                    ${remaining > 0 && invoice.type === 'auction' && !invoice.topUpCreated ? `
-                                    <button onclick='createTopUpFromAuctionInvoice(${invoiceDataJson})' class="text-teal-600 hover:text-teal-800 text-xs px-2 py-1 bg-teal-50 rounded" title="Create Top-Up Invoice (Stage 2)">
-                                        ② Top-Up
-                                    </button>
-                                    ` : remaining > 0 && (invoice.type === 'topup' || invoice.type === 'balance') ? `
-                                    <button onclick='createBalanceInvoice(${invoiceDataJson})' class="text-purple-600 hover:text-purple-800 text-xs px-2 py-1 bg-purple-50 rounded" title="Create Balance Chunk Invoice (Stage 3)">
-                                        ③ Balance
-                                    </button>
-                                    ` : ''}
-                                </div>
-                            </td>
-                        </tr>
-                    `;
-                }
-                
-                html += `
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                `;
+                const deal = ledger.dealOfDoc.get(auctionDoc.id);
+                if (!deal || seen.has(deal.rootId)) continue;
+                seen.add(deal.rootId);
+                html += `<div class="border border-gray-200 rounded-xl p-4 shadow-sm">${dealStatementHtml(deal)}</div>`;
             }
-            
             html += `</div>`;
             listElement.innerHTML = html;
             historyAfterRender(HV.auction);
