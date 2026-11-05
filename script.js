@@ -3881,6 +3881,7 @@ async function fetchInvoices() {
                         </div>
                         <div class="mt-2 sm:mt-0 space-x-2">
                             ${ledgerStatementButton(doc.id)}
+                            ${ledgerNextButton(doc.id)}
                             <button onclick='reDownloadInvoice(${invoiceDataJson})' 
                                     class="bg-primary-blue hover:bg-blue-600 text-white text-xs py-1 px-3 rounded-full transition duration-150 flex items-center gap-1">
                                 <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -7522,10 +7523,13 @@ function ledgerStatusBadge(s) {
     return `<span class="px-2 py-0.5 rounded-full text-xs font-medium ${cls}">${s === 'Value' ? 'Invoice value' : s}</span>`;
 }
 
-function ledgerDocJson(row) {
+function ledgerDocObj(row) {
     const e = row.entry;
     const t = e.type === 'topup' ? 'topup' : e.type === 'balance' ? 'balance' : (row.kind === 'auction' ? 'auction' : 'regular');
-    return JSON.stringify({ ...e.data, firestoreId: e.id, type: t, createdAt: new Date(e.ts).toISOString() }).replace(/'/g, '&#39;');
+    return { ...e.data, firestoreId: e.id, type: t, createdAt: new Date(e.ts).toISOString() };
+}
+function ledgerDocJson(row) {
+    return JSON.stringify(ledgerDocObj(row)).replace(/'/g, '&#39;');
 }
 
 function ledgerRowActions(deal, row) {
@@ -7600,6 +7604,8 @@ function dealStatementHtml(deal) {
                 <p class="text-sm text-gray-500">${deal.vin ? `VIN ${smartEscape(deal.vin)} · ` : ''}Started with ${smartEscape(deal.root.data.invoiceId || '')}</p>
             </div>
         </div>
+
+        ${dealFlowHtml(deal)}
 
         <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
             <div class="p-3 rounded-xl bg-gray-50 border border-gray-200"><p class="text-xs text-gray-500 uppercase tracking-wide">Deal value</p><p class="text-xl font-bold tabular-nums">USD ${ledgerFmt(deal.total)}</p></div>
@@ -7741,6 +7747,104 @@ function ledgerSummaryChip(docId) {
 
 function ledgerStatementButton(docId) {
     return `<button type="button" onclick="showDealStatement('${docId}')" class="bg-white border border-primary-blue text-primary-blue hover:bg-blue-50 text-xs py-1 px-3 rounded-full transition duration-150">Statement</button>`;
+}
+
+// ---------- DEAL FLOW: Proforma -> Invoice -> Auction -> Top-ups, one click per step ----------
+function dealFlow(deal) {
+    const live = deal.docs.filter(r => !r.revoked);
+    const of = (k) => live.filter(r => r.kind === k);
+    const last = (a) => a.length ? a[a.length - 1] : null;
+    const pro = of('proforma'), inv = of('invoice'), auc = of('auction');
+    const tops = live.filter(r => r.kind === 'topup' || r.kind === 'balance');
+    const actions = [];
+    const add = (key, label, row, primary, cls) => actions.push({ key, label, row, primary: !!primary, cls: cls || '' });
+
+    if (!inv.length && pro.length) {
+        add('invoice', `Create Invoice from ${last(pro).number}`, last(pro), true);
+    }
+    if (inv.length && !auc.length && !tops.length && deal.remaining > 0) {
+        add('auction', `Create Auction Invoice from ${last(inv).number}`, last(inv), true);
+        add('topup-invoice', 'Skip auction: issue a Top-up', last(inv), false);
+    }
+    if (auc.length && !tops.length && deal.remaining > 0) {
+        const a = last(auc);
+        if (a.paid > 0) add('topup-auction', 'Create first Top-up Invoice', a, true);
+        else add('receipt', 'Record the auction payment (Receipt)', a, true);
+    }
+    if (tops.length && deal.remaining > 0) {
+        const t = last(tops);
+        if (t.outstanding > 0) add('receipt', `Record payment for ${t.number}`, t, true);
+        add('topup-again', 'Issue another Top-up', t, t.outstanding === 0);
+        add('balance', 'Issue Balance Invoice', t, false);
+    }
+
+    const primary = actions.find(a => a.primary);
+    const stageState = (has, skipped, key) => has ? 'done' : (skipped ? 'skipped' : (primary && primary.key === key ? 'next' : 'todo'));
+    const anyLater = (inv.length || auc.length || tops.length);
+    const stages = [
+        { label: 'Proforma', note: 'optional', state: pro.length ? 'done' : (anyLater ? 'skipped' : 'todo'), no: pro.length ? last(pro).number : '' },
+        { label: 'Invoice', note: '', state: stageState(inv.length, false, 'invoice'), no: inv.length ? last(inv).number : '' },
+        { label: 'Auction', note: 'optional', state: stageState(auc.length, tops.length && !auc.length, 'auction'), no: auc.length ? last(auc).number : '' },
+        { label: 'Top-ups', note: tops.length ? `${tops.length} issued` : '', state: tops.length ? 'done' : (primary && ['topup-auction', 'topup-invoice'].includes(primary.key) ? 'next' : 'todo'), no: '' }
+    ];
+    return { stages, actions, complete: deal.total > 0 && deal.remaining <= 0 };
+}
+
+function dealFlowHtml(deal) {
+    const f = dealFlow(deal);
+    const chip = (s, i) => {
+        const cls = s.state === 'done' ? 'bg-green-100 text-green-800 border-green-300'
+            : s.state === 'next' ? 'bg-primary-blue text-white border-primary-blue'
+            : s.state === 'skipped' ? 'bg-gray-100 text-gray-400 border-gray-200 line-through' : 'bg-white text-gray-500 border-gray-300';
+        const mark = s.state === 'done' ? '✓ ' : '';
+        return `${i ? '<span class="text-gray-300">›</span>' : ''}<span class="px-3 py-1 rounded-full border text-xs font-medium ${cls}" title="${smartEscape(s.no || s.note || '')}">${mark}${s.label}${s.no ? ` <span class="opacity-70">${smartEscape(s.no.length > 18 ? s.no.slice(0, 18) + '…' : s.no)}</span>` : ''}</span>`;
+    };
+    const btns = f.actions.map(a => `<button type="button" onclick="dealFlowRun('${deal.rootId}','${a.key}','${a.row.id}')" class="${a.primary ? 'bg-primary-blue hover:bg-blue-800 text-white' : 'bg-white border border-gray-300 hover:bg-gray-100 text-gray-700'} text-sm font-medium px-4 py-2 rounded-lg transition">${a.primary ? 'Next step: ' : ''}${smartEscape(a.label)}</button>`).join('');
+    return `<div class="mb-4 p-3 rounded-xl border border-gray-200 bg-white">
+        <div class="flex flex-wrap items-center gap-2 mb-2">${f.stages.map(chip).join('')}</div>
+        <div class="flex flex-wrap gap-2">${btns || (f.complete ? '<span class="text-sm text-green-700 font-medium">Fully paid. Nothing further to issue.</span>' : '')}</div>
+    </div>`;
+}
+
+async function dealFlowRun(rootId, key, rowId) {
+    let deal = window.__dealStatements && window.__dealStatements[rootId];
+    if (!deal) { const L = await DealLedger.load(); deal = L.deals.get(rootId); }
+    const row = deal && deal.docs.find(r => r.id === rowId);
+    if (!row) { showErrorToast('That document is no longer available. Refresh and try again.'); return; }
+    const obj = ledgerDocObj(row);
+    switch (key) {
+        case 'invoice': return startNextStep(obj, 'Invoice');
+        case 'auction': return startNextStep(obj, 'Auction Invoice');
+        case 'topup-invoice':
+        case 'topup-again': return createTopUpFromInvoice(obj);
+        case 'topup-auction': return createTopUpFromAuctionInvoice(obj);
+        case 'balance': return createBalanceInvoice(obj);
+        case 'receipt': return createReceiptFromInvoiceTrail(obj);
+    }
+}
+
+/** Opens the invoice form pre-filled and pre-linked for the next document in the flow. */
+function startNextStep(sourceDoc, docType) {
+    if (!document.getElementById('document-form-area')) handleDocumentGenerator();
+    createAdditionalInvoice(sourceDoc, { docType, linkTo: sourceDoc.invoiceId });
+}
+
+/** Label of the single "next step" for a document's deal (history rows). */
+function ledgerNextStep(docId) {
+    try {
+        const deal = DealLedger.build().dealOfDoc.get(docId);
+        if (!deal) return null;
+        const f = dealFlow(deal);
+        const a = f.actions.find(x => x.primary);
+        return a ? { deal, action: a } : null;
+    } catch (e) { return null; }
+}
+
+function ledgerNextButton(docId) {
+    const n = ledgerNextStep(docId);
+    if (!n) return '';
+    const short = { invoice: 'Create Invoice', auction: 'Create Auction Invoice', 'topup-auction': 'Create Top-up', 'topup-invoice': 'Create Top-up', 'topup-again': 'Top-up again', balance: 'Balance', receipt: 'Record payment' }[n.action.key] || 'Next step';
+    return `<button type="button" onclick="dealFlowRun('${n.deal.rootId}','${n.action.key}','${n.action.row.id}')" title="${smartEscape(n.action.label)}" class="bg-primary-blue hover:bg-blue-800 text-white text-xs py-1 px-3 rounded-full transition duration-150">Next: ${short} ›</button>`;
 }
 
 // ---------- link an invoice/auction to the invoice it belongs to ----------
@@ -8480,7 +8584,7 @@ async function revokeReceipt(receiptData) {
 /**
  * Creates an additional invoice based on an existing invoice
  */
-function createAdditionalInvoice(invoiceData) {
+function createAdditionalInvoice(invoiceData, opts = {}) {
     // Check if invoice is revoked
     if (invoiceData.revoked) {
         showErrorToast("Cannot create additional invoice from a revoked invoice.");
@@ -8516,7 +8620,7 @@ function createAdditionalInvoice(invoiceData) {
         const goodsDescriptionField = document.getElementById('goodsDescription');
         
         // Pre-populate with existing invoice data
-        if (docTypeField) docTypeField.value = invoiceData.docType;
+        if (docTypeField) docTypeField.value = opts.docType || invoiceData.docType;
         if (clientNameField) clientNameField.value = invoiceData.clientName;
         if (clientPhoneField) clientPhoneField.value = invoiceData.clientPhone || '';
         if (exchangeRateField) exchangeRateField.value = invoiceData.exchangeRate || 130;
@@ -8568,7 +8672,13 @@ function createAdditionalInvoice(invoiceData) {
         }
         
         // Trigger any dependent functions
-        if (invoiceData.docType === 'Auction Invoice') {
+        if (opts.docType) {
+            toggleAuctionFields();
+            if (opts.docType === 'Auction Invoice') {
+                const ap = document.getElementById('auctionPrice');
+                if (ap) { ap.value = ''; ap.focus(); }
+            }
+        } else if (invoiceData.docType === 'Auction Invoice') {
             toggleAuctionFields();
             const auctionPriceField = document.getElementById('auctionPrice');
             const auctionPriceCurrencyField = document.getElementById('auctionPriceCurrency');
@@ -8577,13 +8687,26 @@ function createAdditionalInvoice(invoiceData) {
         }
         
         autoFillBuyerConfirmation();
+
+        // Flow step: pre-link the new document to the one it follows
+        if (opts.linkTo) {
+            let tries = 0;
+            const setLink = () => {
+                const f = document.getElementById('linkedInvoiceNumber');
+                if (f) { f.value = opts.linkTo; return; }
+                if (++tries < 40) setTimeout(setLink, 100);
+            };
+            setLink();
+        }
         
         // Hide loading overlay
         hideLoadingOverlay();
         
         // Show notification
         setTimeout(() => {
-            showSuccessToast(`Invoice ${invoiceData.invoiceId} data has been loaded. You can now modify and save as a new invoice.`);
+            showSuccessToast(opts.docType
+                ? `${opts.docType} for ${invoiceData.clientName} is ready, linked to ${invoiceData.invoiceId}. Check the amount and save.`
+                : `Invoice ${invoiceData.invoiceId} data has been loaded. You can now modify and save as a new invoice.`);
         }, 300);
         
     }, 500);
@@ -10498,6 +10621,7 @@ async function loadTopUpHistoryList() {
             </div>
             <div class="mt-2 sm:mt-0 space-x-2">
     ${ledgerStatementButton(doc.id)}
+                            ${ledgerNextButton(doc.id)}
     <button onclick='reDownloadInvoice(${invoiceDataJson})' 
             class="bg-primary-blue hover:bg-blue-600 text-white text-xs py-1 px-3 rounded-full transition duration-150 flex items-center gap-1">
         <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
