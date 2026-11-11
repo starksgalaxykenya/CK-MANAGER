@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CK Shelf — Paperless File System</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  theme: { extend: {
+    colors: {
+      'primary-blue': '#183263',
+      'secondary-red': '#D96359',
+    },
+    animation: {
+      'fade-in': 'fade-in 0.35s ease-out',
+      'slide-up': 'slide-up 0.3s ease-out',
+    },
+    keyframes: {
+      'fade-in': { '0%':{opacity:'0'}, '100%':{opacity:'1'} },
+      'slide-up': { '0%':{opacity:'0',transform:'translateY(20px)'}, '100%':{opacity:'1',transform:'translateY(0)'} },
+    }
+  }}
+}
+</script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-storage-compat.js"></script>
+<style>
+  ::-webkit-scrollbar{width:9px;height:9px}
+  ::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:99px}
+  .pin-input{letter-spacing:.6em;text-align:center;font-size:24px}
+  .drop-zone.dragover{background:#eff6ff;border-color:#183263!important}
+  .file-tile:hover .tile-actions{opacity:1}
+  .tile-actions{opacity:0;transition:opacity .15s}
+  .tree-row.active{background:#183263;color:#fff}
+  .audit-row:nth-child(even){background:#f8fafc}
+  details > summary{list-style:none;cursor:pointer}
+  details > summary::-webkit-details-marker{display:none}
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen text-slate-800">
+
+<!-- ============================================================
+     GATE 1: LOGIN
+============================================================ -->
+<div id="login-screen" class="hidden fixed inset-0 bg-primary-blue flex items-center justify-center p-4">
+  <div class="bg-white rounded-xl shadow-2xl w-full max-w-md p-8 animate-slide-up">
+    <div class="text-center mb-6">
+      <div class="w-16 h-16 bg-primary-blue rounded-xl mx-auto flex items-center justify-center mb-3">
+        <i class="fas fa-folder-open text-white text-2xl"></i>
+      </div>
+      <h1 class="text-2xl font-bold text-primary-blue">CK Shelf</h1>
+      <p class="text-sm text-slate-500 mt-1">Sign in to continue</p>
+    </div>
+    <form id="login-form" class="space-y-3">
+      <input id="login-email" type="email" required placeholder="Email"
+        class="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-primary-blue focus:border-primary-blue outline-none">
+      <input id="login-password" type="password" required placeholder="Password"
+        class="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-primary-blue focus:border-primary-blue outline-none">
+      <button type="submit" class="w-full bg-primary-blue hover:bg-blue-900 text-white font-bold py-3 rounded-lg">
+        Sign In
+      </button>
+    </form>
+    <p id="login-error" class="text-sm text-secondary-red mt-3 hidden"></p>
+    <a href="index.html" class="text-sm text-slate-500 hover:text-primary-blue mt-4 inline-block">← Back to CDMS</a>
+  </div>
+</div>
+
+<!-- ============================================================
+     GATE 2: PIN
+============================================================ -->
+<div id="pin-screen" class="hidden fixed inset-0 bg-primary-blue flex items-center justify-center p-4">
+  <div class="bg-white rounded-xl shadow-2xl w-full max-w-sm p-8 animate-slide-up text-center">
+    <div class="w-16 h-16 bg-secondary-red rounded-xl mx-auto flex items-center justify-center mb-4">
+      <i class="fas fa-lock text-white text-2xl"></i>
+    </div>
+    <h2 class="text-xl font-bold text-primary-blue mb-1">Enter PIN</h2>
+    <p id="pin-subtitle" class="text-sm text-slate-500 mb-6">Secure access code</p>
+    <input id="pin-input" type="password" inputmode="numeric" maxlength="8" autocomplete="off"
+      class="pin-input w-full p-4 border-2 border-slate-300 rounded-lg focus:border-primary-blue outline-none">
+    <p id="pin-error" class="text-sm text-secondary-red mt-3 hidden"></p>
+    <button id="pin-submit" class="w-full bg-primary-blue hover:bg-blue-900 text-white font-bold py-3 rounded-lg mt-4">
+      Unlock
+    </button>
+    <button id="pin-logout" class="text-xs text-slate-400 hover:text-slate-600 mt-4">Sign out</button>
+  </div>
+</div>
+
+<!-- ============================================================
+     GATE 3: SETUP (first run only)
+============================================================ -->
+<div id="setup-screen" class="hidden fixed inset-0 bg-primary-blue flex items-center justify-center p-4">
+  <div class="bg-white rounded-xl shadow-2xl w-full max-w-md p-8 animate-slide-up">
+    <div class="text-center mb-6">
+      <div class="w-16 h-16 bg-emerald-600 rounded-xl mx-auto flex items-center justify-center mb-3">
+        <i class="fas fa-cog text-white text-2xl"></i>
+      </div>
+      <h2 class="text-xl font-bold text-primary-blue">First-Time Setup</h2>
+      <p class="text-sm text-slate-500 mt-1">Create the admin PIN for CK Shelf</p>
+    </div>
+    <div class="space-y-3">
+      <input id="setup-pin" type="password" inputmode="numeric" maxlength="8" placeholder="New PIN (4–8 digits)"
+        class="pin-input w-full p-3 border border-slate-300 rounded-lg focus:border-primary-blue outline-none">
+      <input id="setup-pin2" type="password" inputmode="numeric" maxlength="8" placeholder="Confirm PIN"
+        class="pin-input w-full p-3 border border-slate-300 rounded-lg focus:border-primary-blue outline-none">
+      <p id="setup-error" class="text-sm text-secondary-red hidden"></p>
+      <button id="setup-submit" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-lg">
+        Create & Continue
+      </button>
+    </div>
+    <p class="text-xs text-slate-400 mt-4 text-center">You will be set as the first administrator.</p>
+  </div>
+</div>
+
+<!-- ============================================================
+     GATE 4: ACCESS DENIED
+============================================================ -->
+<div id="denied-screen" class="hidden fixed inset-0 bg-primary-blue flex items-center justify-center p-4">
+  <div class="bg-white rounded-xl shadow-2xl w-full max-w-md p-8 text-center animate-slide-up">
+    <div class="w-16 h-16 bg-secondary-red rounded-xl mx-auto flex items-center justify-center mb-4">
+      <i class="fas fa-ban text-white text-2xl"></i>
+    </div>
+    <h2 class="text-xl font-bold text-secondary-red mb-2">Access Denied</h2>
+    <p class="text-sm text-slate-600 mb-1">Your account <strong id="denied-email"></strong> is not authorised to use CK Shelf.</p>
+    <p class="text-xs text-slate-500 mb-4">Ask an administrator to add you. This attempt has been logged.</p>
+    <button id="denied-logout" class="w-full bg-primary-blue hover:bg-blue-900 text-white font-bold py-2 rounded-lg">
+      Sign out
+    </button>
+  </div>
+</div>
+
+<!-- ============================================================
+     MAIN APP SHELL
+============================================================ -->
+<div id="app-shell" class="hidden h-screen flex flex-col">
+
+  <!-- Header -->
+  <header class="bg-primary-blue text-white px-4 py-3 shadow-md flex items-center justify-between gap-3 flex-wrap">
+    <div class="flex items-center gap-4">
+      <a href="index.html" class="bg-secondary-red hover:bg-red-700 text-white font-bold py-2 px-3 rounded-md text-sm flex items-center gap-1">
+        <i class="fas fa-arrow-left"></i> CDMS
+      </a>
+      <h1 class="text-xl font-bold flex items-center gap-2">
+        <i class="fas fa-folder-open"></i> CK Shelf
+      </h1>
+    </div>
+    <div class="flex items-center gap-3">
+      <button id="btn-approvals" class="relative bg-white/10 hover:bg-white/20 px-3 py-2 rounded-md text-sm">
+        <i class="fas fa-check-double"></i> Approvals
+        <span id="approvals-badge" class="hidden absolute -top-1 -right-1 bg-secondary-red text-white text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">0</span>
+      </button>
+      <button id="btn-audit" class="bg-white/10 hover:bg-white/20 px-3 py-2 rounded-md text-sm">
+        <i class="fas fa-shield-halved"></i> Audit
+      </button>
+      <button id="btn-settings" class="bg-white/10 hover:bg-white/20 px-3 py-2 rounded-md text-sm">
+        <i class="fas fa-cog"></i> Settings
+      </button>
+      <div class="flex items-center gap-2 border-l border-white/20 pl-3">
+        <span id="user-email" class="text-sm"></span>
+        <span id="user-role" class="text-[10px] bg-secondary-red px-2 py-0.5 rounded-full uppercase font-bold"></span>
+        <button id="btn-logout" class="bg-white/10 hover:bg-white/20 px-3 py-2 rounded-md text-sm">
+          <i class="fas fa-sign-out-alt"></i>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <div class="flex-1 flex overflow-hidden">
+    <!-- Sidebar -->
+    <aside class="w-64 bg-white border-r border-slate-200 flex flex-col flex-shrink-0 overflow-hidden">
+      <div class="p-3 border-b border-slate-200">
+        <button id="btn-new-folder" class="w-full bg-primary-blue hover:bg-blue-900 text-white font-bold py-2 rounded-md text-sm">
+          <i class="fas fa-folder-plus"></i> New Folder
+        </button>
+      </div>
+      <div class="p-3 overflow-y-auto flex-1">
+        <div class="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Folders</div>
+        <div id="folder-tree"></div>
+      </div>
+    </aside>
+
+    <!-- Main area -->
+    <main class="flex-1 flex flex-col overflow-hidden">
+      <div class="bg-white border-b border-slate-200 px-4 py-2 flex items-center justify-between gap-3 flex-wrap">
+        <div id="breadcrumb" class="text-sm text-slate-600 flex items-center gap-1"></div>
+        <div class="flex items-center gap-2">
+          <input id="search-input" type="search" placeholder="Search files & folders…"
+            class="px-3 py-1.5 border border-slate-300 rounded-lg text-sm w-56 focus:ring-2 focus:ring-primary-blue focus:border-primary-blue outline-none">
+          <label class="bg-primary-blue hover:bg-blue-900 text-white text-sm font-bold px-3 py-1.5 rounded-lg cursor-pointer flex items-center gap-1">
+            <i class="fas fa-upload"></i> Upload
+            <input id="file-input" type="file" multiple class="hidden">
+          </label>
+        </div>
+      </div>
+
+      <div id="file-area" class="flex-1 overflow-y-auto p-4 drop-zone" style="border:2px dashed transparent;transition:.2s">
+        <div id="empty-state" class="hidden text-center py-16 text-slate-400">
+          <i class="fas fa-folder-open text-6xl mb-4 opacity-40"></i>
+          <p class="text-lg font-medium text-slate-600">This folder is empty</p>
+          <p class="text-sm mt-1">Upload a file or create a folder to get started.</p>
+        </div>
+        <div id="grid-view" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3"></div>
+      </div>
+    </main>
+
+    <!-- Details panel -->
+    <aside id="details-panel" class="w-80 bg-white border-l border-slate-200 overflow-y-auto hidden flex-shrink-0"></aside>
+  </div>
+</div>
+
+<!-- ============================================================
+     MODALS
+============================================================ -->
+<div id="modal-root"></div>
+<div id="toast-root" class="fixed bottom-4 right-4 space-y-2 z-[100]"></div>
+
+<script src="ck-shelf.js"></script>
+</body>
+</html>
